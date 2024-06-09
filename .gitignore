@@ -30,3 +30,14 @@
 *.exe
 *.out
 *.app
+
+data/
+obj/
+
+pendulum
+
+*.mp4
+*.webm
+*.mp3
+*.aac
+*.png
