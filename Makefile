@@ -23,6 +23,6 @@ $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
 clean:
-	rm -rf $(OBJDIR) $(EXECUTABLE)
+	rm -rf $(OBJDIR)/* $(EXECUTABLE)
 
 .PHONY: all clean
