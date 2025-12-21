@@ -53,6 +53,7 @@ public:
     }
 
     // Xiaolin Wu's anti-aliased line drawing algorithm
+    // With intensity normalization to fix diagonal dimming (rasterization bias)
     void draw_line(int x0, int y0, int x1, int y1, Color const& color) {
         auto ipart = [](float x) { return std::floor(x); };
         auto fpart = [](float x) { return x - std::floor(x); };
@@ -72,6 +73,10 @@ public:
         float dy = static_cast<float>(y1 - y0);
         float gradient = (dx == 0.0f) ? 1.0f : dy / dx;
 
+        // Intensity correction: diagonal lines cover more visual distance per pixel step
+        // Scale by sqrt(1 + gradient²) to normalize brightness per unit length
+        float intensity_scale = std::sqrt(1.0f + gradient * gradient);
+
         // Handle first endpoint
         int xend = static_cast<int>(ipart(x0 + 0.5f));
         float yend = y0 + gradient * (xend - x0);
@@ -80,11 +85,11 @@ public:
         int ypxl1 = static_cast<int>(ipart(yend));
 
         if (steep) {
-            add_pixel(ypxl1, xpxl1, color, rfpart(yend) * xgap);
-            add_pixel(ypxl1 + 1, xpxl1, color, fpart(yend) * xgap);
+            add_pixel(ypxl1, xpxl1, color, rfpart(yend) * xgap * intensity_scale);
+            add_pixel(ypxl1 + 1, xpxl1, color, fpart(yend) * xgap * intensity_scale);
         } else {
-            add_pixel(xpxl1, ypxl1, color, rfpart(yend) * xgap);
-            add_pixel(xpxl1, ypxl1 + 1, color, fpart(yend) * xgap);
+            add_pixel(xpxl1, ypxl1, color, rfpart(yend) * xgap * intensity_scale);
+            add_pixel(xpxl1, ypxl1 + 1, color, fpart(yend) * xgap * intensity_scale);
         }
 
         float intery = yend + gradient;
@@ -97,24 +102,24 @@ public:
         int ypxl2 = static_cast<int>(ipart(yend));
 
         if (steep) {
-            add_pixel(ypxl2, xpxl2, color, rfpart(yend) * xgap);
-            add_pixel(ypxl2 + 1, xpxl2, color, fpart(yend) * xgap);
+            add_pixel(ypxl2, xpxl2, color, rfpart(yend) * xgap * intensity_scale);
+            add_pixel(ypxl2 + 1, xpxl2, color, fpart(yend) * xgap * intensity_scale);
         } else {
-            add_pixel(xpxl2, ypxl2, color, rfpart(yend) * xgap);
-            add_pixel(xpxl2, ypxl2 + 1, color, fpart(yend) * xgap);
+            add_pixel(xpxl2, ypxl2, color, rfpart(yend) * xgap * intensity_scale);
+            add_pixel(xpxl2, ypxl2 + 1, color, fpart(yend) * xgap * intensity_scale);
         }
 
         // Main loop
         if (steep) {
             for (int x = xpxl1 + 1; x < xpxl2; ++x) {
-                add_pixel(static_cast<int>(ipart(intery)), x, color, rfpart(intery));
-                add_pixel(static_cast<int>(ipart(intery)) + 1, x, color, fpart(intery));
+                add_pixel(static_cast<int>(ipart(intery)), x, color, rfpart(intery) * intensity_scale);
+                add_pixel(static_cast<int>(ipart(intery)) + 1, x, color, fpart(intery) * intensity_scale);
                 intery += gradient;
             }
         } else {
             for (int x = xpxl1 + 1; x < xpxl2; ++x) {
-                add_pixel(x, static_cast<int>(ipart(intery)), color, rfpart(intery));
-                add_pixel(x, static_cast<int>(ipart(intery)) + 1, color, fpart(intery));
+                add_pixel(x, static_cast<int>(ipart(intery)), color, rfpart(intery) * intensity_scale);
+                add_pixel(x, static_cast<int>(ipart(intery)) + 1, color, fpart(intery) * intensity_scale);
                 intery += gradient;
             }
         }

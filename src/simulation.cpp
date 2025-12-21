@@ -170,31 +170,27 @@ void Simulation::run(ProgressCallback progress) {
     SimulationResults results;
 
     // Main simulation loop (streaming mode)
+    bool early_stopped = false;
     for (int frame = 0; frame < total_frames; ++frame) {
         // Physics timing
         auto physics_start = Clock::now();
         stepPendulums(pendulums, states, substeps, dt, thread_count);
         physics_time += Clock::now() - physics_start;
 
-        // Boom detection
-        if (boom_detector_.isEnabled()) {
-            std::vector<double> angles;
-            angles.reserve(pendulum_count);
-            for (auto const& state : states) {
-                angles.push_back(state.th2);  // Track second pendulum angle
-            }
+        // Detection (always enabled - cheap operation)
+        std::vector<double> angles;
+        angles.reserve(pendulum_count);
+        for (auto const& state : states) {
+            angles.push_back(state.th2);  // Track second pendulum angle
+        }
 
-            auto boom = boom_detector_.update(angles, frame);
-            if (boom) {
-                std::cout << "\nBoom detected at frame " << boom->frame
-                          << " (variance: " << std::fixed << std::setprecision(4)
-                          << boom->variance << ")\n";
-                if (boom_detector_.shouldEarlyStop()) {
-                    std::cout << "Early stopping...\n";
-                    results.frames_completed = frame + 1;
-                    break;
-                }
-            }
+        boom_detector_.update(angles, frame);
+
+        // Check for early stop after white detection
+        if (boom_detector_.hasWhiteOccurred() && boom_detector_.shouldEarlyStopAfterWhite()) {
+            results.frames_completed = frame + 1;
+            early_stopped = true;
+            break;
         }
 
         // Render timing
@@ -243,7 +239,7 @@ void Simulation::run(ProgressCallback progress) {
 
     if (boom_detector_.hasBoomOccurred()) {
         results.boom_frame = boom_detector_.getBoomFrame();
-        results.boom_variance = boom_detector_.getCurrentVariance();
+        results.boom_variance = boom_detector_.getBoomVariance();
     }
 
     // Detect white frame (variance plateau)
@@ -261,32 +257,46 @@ void Simulation::run(ProgressCallback progress) {
         saveVarianceCSV(results.variance_history);
     }
 
-    // Print timing stats
-    std::cout << "\n\n=== Simulation Complete ===\n";
+    // Determine output path for display
+    std::string output_path;
+    if (config_.output.format == OutputFormat::Video) {
+        output_path = run_directory_ + "/video.mp4";
+    } else {
+        output_path = run_directory_ + "/frames/";
+    }
+
+    // Print results
+    std::cout << "\n\n";
+    if (early_stopped) {
+        std::cout << "=== Simulation Stopped Early (white detected) ===\n";
+    } else {
+        std::cout << "=== Simulation Complete ===\n";
+    }
+
     std::cout << std::fixed << std::setprecision(2);
-    std::cout << "Total time:      " << std::setw(6) << results.timing.total_seconds << "s\n";
-    std::cout << "  Physics:       " << std::setw(6) << results.timing.physics_seconds << "s ("
-              << std::setw(5) << (results.timing.physics_seconds / results.timing.total_seconds * 100) << "%)\n";
-    std::cout << "  Rendering:     " << std::setw(6) << results.timing.render_seconds << "s ("
-              << std::setw(5) << (results.timing.render_seconds / results.timing.total_seconds * 100) << "%)\n";
-    std::cout << "  I/O:           " << std::setw(6) << results.timing.io_seconds << "s ("
-              << std::setw(5) << (results.timing.io_seconds / results.timing.total_seconds * 100) << "%)\n";
-    std::cout << "Frames:          " << results.frames_completed << "\n";
-    std::cout << "Pendulums:       " << pendulum_count << "\n";
+    std::cout << "Frames:      " << results.frames_completed << "/" << total_frames;
+    if (early_stopped) std::cout << " (early stop)";
+    std::cout << "\n";
+    std::cout << "Pendulums:   " << pendulum_count << "\n";
+    std::cout << "Total time:  " << results.timing.total_seconds << "s\n";
+    std::cout << "  Physics:   " << std::setw(5) << results.timing.physics_seconds << "s ("
+              << std::setw(4) << (results.timing.physics_seconds / results.timing.total_seconds * 100) << "%)\n";
+    std::cout << "  Render:    " << std::setw(5) << results.timing.render_seconds << "s ("
+              << std::setw(4) << (results.timing.render_seconds / results.timing.total_seconds * 100) << "%)\n";
+    std::cout << "  I/O:       " << std::setw(5) << results.timing.io_seconds << "s ("
+              << std::setw(4) << (results.timing.io_seconds / results.timing.total_seconds * 100) << "%)\n";
 
+    std::cout << std::setprecision(4);
     if (results.boom_frame) {
-        std::cout << "Boom detected:   frame " << *results.boom_frame
-                  << " (variance: " << std::setprecision(4)
-                  << results.boom_variance << ")\n";
+        std::cout << "Boom:        frame " << *results.boom_frame
+                  << " (var=" << results.boom_variance << ")\n";
     }
-
     if (results.white_frame) {
-        std::cout << "White detected:  frame " << *results.white_frame
-                  << " (variance: " << std::setprecision(4)
-                  << results.white_variance << ")\n";
+        std::cout << "White:       frame " << *results.white_frame
+                  << " (var=" << results.white_variance << ")\n";
     }
 
-    std::cout << "Output:          " << run_directory_ << "\n";
+    std::cout << "\nOutput: " << output_path << "\n";
 }
 
 void Simulation::initializePendulums(std::vector<Pendulum>& pendulums) {

@@ -35,11 +35,17 @@ scheme = "spectrum"            # spectrum, rainbow, heat, cool, monochrome
 wavelength_start = 380         # nm (visible light starts)
 wavelength_end = 780           # nm (visible light ends)
 
-[boom_detection]
-enabled = false
+[detection]
+# Boom: when pendulums start diverging (chaos onset)
 variance_threshold = 0.1       # radians^2
-confirmation_frames = 10
-early_stop = false             # Stop simulation after boom detected
+confirmation_frames = 10       # Frames above threshold to confirm
+
+# White: when variance plateaus (full chaos)
+white_tolerance = 0.05         # Relative change tolerance for plateau
+white_plateau_frames = 30      # Consecutive stable frames needed
+
+# Optional early stopping
+early_stop_after_white = false
 
 [output]
 format = "png"                 # "png" or "video"

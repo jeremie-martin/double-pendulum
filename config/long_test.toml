@@ -6,21 +6,21 @@ length2 = 1.0
 mass1 = 1.0
 mass2 = 1.0
 initial_angle1_deg = 200
-initial_angle2_deg = 32.0
+initial_angle2_deg = 200.0
 
 [simulation]
-pendulum_count = 100000       # Reduced for quick test
+pendulum_count = 50000       # Reduced for quick test
 angle_variation_deg = 0.1
-duration_seconds = 10.0      # Just 1 second of physics
-total_frames = 600           # 30 frames output
+duration_seconds = 20.0      # Just 1 second of physics
+total_frames = 120           # 30 frames output
 substeps_per_frame = 20
 
 [render]
-width = 1540
-height = 1540
+width = 2080
+height = 2080
 
 [post_process]
-gamma = 1.05
+gamma = 1.6
 target_brightness = 0.5
 contrast = 1.0
 
@@ -29,8 +29,7 @@ scheme = "spectrum"
 wavelength_start = 380
 wavelength_end = 780
 
-[boom_detection]
-enabled = true
+[detection]
 variance_threshold = 0.1
 
 [output]

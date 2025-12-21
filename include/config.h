@@ -58,10 +58,16 @@ struct ColorParams {
 };
 
 struct BoomDetectionParams {
-    bool enabled = false;
-    double variance_threshold = 0.1;
-    int confirmation_frames = 10;
-    bool early_stop = false;
+    // Boom detection: when pendulums start diverging (chaos onset)
+    double variance_threshold = 0.1;  // radians^2
+    int confirmation_frames = 10;     // Frames above threshold to confirm
+
+    // White detection: when variance plateaus (full chaos)
+    double white_tolerance = 0.05;    // Relative change tolerance for plateau
+    int white_plateau_frames = 30;    // Consecutive stable frames needed
+
+    // Optional early stopping after white detected
+    bool early_stop_after_white = false;
 };
 
 enum class OutputFormat {

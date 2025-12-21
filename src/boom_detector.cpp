@@ -4,13 +4,14 @@
 #include <numeric>
 
 BoomDetector::BoomDetector(BoomDetectionParams const& params)
-    : enabled_(params.enabled),
-      variance_threshold_(params.variance_threshold),
+    : variance_threshold_(params.variance_threshold),
       confirmation_frames_(params.confirmation_frames),
-      early_stop_(params.early_stop) {}
+      white_tolerance_(params.white_tolerance),
+      white_plateau_frames_(params.white_plateau_frames),
+      early_stop_after_white_(params.early_stop_after_white) {}
 
 std::optional<BoomResult> BoomDetector::update(std::vector<double> const& angles, int frame) {
-    if (!enabled_ || angles.empty()) return std::nullopt;
+    if (angles.empty()) return std::nullopt;
 
     // Calculate mean angle
     double sum = std::accumulate(angles.begin(), angles.end(), 0.0);
@@ -34,71 +35,68 @@ std::optional<BoomResult> BoomDetector::update(std::vector<double> const& angles
     // Track variance history
     variance_history_.push_back(current_variance_);
 
+    std::optional<BoomResult> boom_result;
+
     // Check for boom (variance exceeds threshold for N consecutive frames)
     if (!boom_frame_.has_value()) {
         if (current_variance_ > variance_threshold_) {
+            if (frames_above_threshold_ == 0) {
+                // First frame above threshold - store this variance
+                boom_variance_ = current_variance_;
+            }
             frames_above_threshold_++;
             if (frames_above_threshold_ >= confirmation_frames_) {
                 // Boom confirmed - report frame where it started
                 boom_frame_ = frame - confirmation_frames_ + 1;
-                return BoomResult{*boom_frame_, current_variance_, spread};
+                boom_result = BoomResult{*boom_frame_, boom_variance_, spread};
             }
         } else {
             frames_above_threshold_ = 0;
+            boom_variance_ = 0.0;  // Reset if we drop below threshold
         }
     }
 
-    return std::nullopt;
+    // Check for white (variance plateau) - only after boom occurred
+    if (boom_frame_.has_value() && !white_frame_.has_value()) {
+        size_t history_size = variance_history_.size();
+        if (history_size >= static_cast<size_t>(white_plateau_frames_ + 1)) {
+            // Check if last N frames are stable
+            int consecutive_stable = 0;
+            for (size_t i = history_size - white_plateau_frames_; i < history_size; ++i) {
+                double prev = variance_history_[i - 1];
+                double curr = variance_history_[i];
+                double relative_change = std::abs(curr - prev) / std::max(prev, 0.001);
+
+                if (relative_change < white_tolerance_) {
+                    consecutive_stable++;
+                } else {
+                    consecutive_stable = 0;
+                }
+            }
+
+            if (consecutive_stable >= white_plateau_frames_) {
+                white_frame_ = frame - white_plateau_frames_ + 1;
+                white_variance_ = current_variance_;
+            }
+        }
+    }
+
+    return boom_result;
 }
 
-std::optional<WhiteResult> BoomDetector::detectWhiteFrame(
-    double plateau_tolerance,
-    int plateau_frames
-) const {
-    if (variance_history_.size() < static_cast<size_t>(plateau_frames + 1)) {
-        return std::nullopt;
+std::optional<WhiteResult> BoomDetector::detectWhiteFrame() const {
+    if (white_frame_.has_value()) {
+        return WhiteResult{*white_frame_, white_variance_};
     }
-
-    // Find the maximum variance to use as reference for plateau detection
-    double max_variance = *std::max_element(variance_history_.begin(), variance_history_.end());
-    if (max_variance < 0.001) {
-        return std::nullopt;  // No significant variance recorded
-    }
-
-    // Look for plateau: consecutive frames where variance changes by less than tolerance
-    int consecutive_stable = 0;
-    int plateau_start = -1;
-
-    for (size_t i = 1; i < variance_history_.size(); ++i) {
-        double prev = variance_history_[i - 1];
-        double curr = variance_history_[i];
-
-        // Check if variance is relatively stable (not increasing significantly)
-        // Use relative change based on current variance level
-        double relative_change = std::abs(curr - prev) / std::max(prev, 0.001);
-
-        if (relative_change < plateau_tolerance) {
-            if (consecutive_stable == 0) {
-                plateau_start = static_cast<int>(i - 1);
-            }
-            consecutive_stable++;
-
-            if (consecutive_stable >= plateau_frames) {
-                // Plateau detected
-                return WhiteResult{plateau_start, variance_history_[plateau_start]};
-            }
-        } else {
-            consecutive_stable = 0;
-            plateau_start = -1;
-        }
-    }
-
     return std::nullopt;
 }
 
 void BoomDetector::reset() {
     variance_history_.clear();
     boom_frame_.reset();
+    boom_variance_ = 0.0;
+    white_frame_.reset();
+    white_variance_ = 0.0;
     frames_above_threshold_ = 0;
     current_variance_ = 0.0;
 }

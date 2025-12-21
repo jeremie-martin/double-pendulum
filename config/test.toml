@@ -29,8 +29,7 @@ scheme = "spectrum"
 wavelength_start = 380
 wavelength_end = 780
 
-[boom_detection]
-enabled = true
+[detection]
 variance_threshold = 0.1
 
 [output]

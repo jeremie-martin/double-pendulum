@@ -24,31 +24,38 @@ public:
     std::optional<BoomResult> update(std::vector<double> const& angles, int frame);
 
     // Detect white frame (variance plateau) from history
-    // Call after simulation completes
-    std::optional<WhiteResult> detectWhiteFrame(
-        double plateau_tolerance = 0.05,
-        int plateau_frames = 30
-    ) const;
+    std::optional<WhiteResult> detectWhiteFrame() const;
 
     // Reset detector state for new simulation
     void reset();
 
     // Getters
-    bool isEnabled() const { return enabled_; }
-    bool shouldEarlyStop() const { return early_stop_; }
+    bool shouldEarlyStopAfterWhite() const { return early_stop_after_white_; }
     double getCurrentVariance() const { return current_variance_; }
     bool hasBoomOccurred() const { return boom_frame_.has_value(); }
     std::optional<int> getBoomFrame() const { return boom_frame_; }
+    double getBoomVariance() const { return boom_variance_; }
+    bool hasWhiteOccurred() const { return white_frame_.has_value(); }
+    std::optional<int> getWhiteFrame() const { return white_frame_; }
+    double getWhiteVariance() const { return white_variance_; }
     std::vector<double> const& getVarianceHistory() const { return variance_history_; }
 
 private:
-    bool enabled_;
+    // Boom detection params
     double variance_threshold_;
     int confirmation_frames_;
-    bool early_stop_;
 
+    // White detection params
+    double white_tolerance_;
+    int white_plateau_frames_;
+    bool early_stop_after_white_;
+
+    // State
     std::vector<double> variance_history_;
     std::optional<int> boom_frame_;
+    double boom_variance_ = 0.0;
+    std::optional<int> white_frame_;
+    double white_variance_ = 0.0;
     int frames_above_threshold_ = 0;
     double current_variance_ = 0.0;
 };
