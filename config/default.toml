@@ -37,11 +37,11 @@ wavelength_end = 780           # nm (visible light ends)
 
 [detection]
 # Boom: when pendulums start diverging (chaos onset)
-variance_threshold = 0.1       # radians^2
-confirmation_frames = 10       # Frames above threshold to confirm
+boom_threshold = 0.1           # radians^2
+boom_confirmation = 10         # Consecutive frames above threshold
 
-# White: when variance plateaus (full chaos)
-white_tolerance = 0.05         # Relative change tolerance for plateau
+# White: when variance plateaus (full chaos/noise)
+white_tolerance = 0.05         # Relative change tolerance
 white_plateau_frames = 30      # Consecutive stable frames needed
 
 # Optional early stopping

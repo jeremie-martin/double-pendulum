@@ -21,8 +21,7 @@ Simulation::Simulation(Config const& config)
     : config_(config),
       renderer_(config.render.width, config.render.height),
       color_gen_(config.color),
-      post_processor_(config.post_process),
-      boom_detector_(config.boom_detection) {}
+      post_processor_(config.post_process) {}
 
 std::string Simulation::createRunDirectory() {
     // Generate timestamp-based directory name
@@ -169,6 +168,9 @@ void Simulation::run(ProgressCallback progress) {
 
     SimulationResults results;
 
+    // Detection thresholds from config
+    auto const& detect = config_.detection;
+
     // Main simulation loop (streaming mode)
     bool early_stopped = false;
     for (int frame = 0; frame < total_frames; ++frame) {
@@ -177,20 +179,45 @@ void Simulation::run(ProgressCallback progress) {
         stepPendulums(pendulums, states, substeps, dt, thread_count);
         physics_time += Clock::now() - physics_start;
 
-        // Detection (always enabled - cheap operation)
+        // Track variance (always enabled - cheap operation)
         std::vector<double> angles;
         angles.reserve(pendulum_count);
         for (auto const& state : states) {
             angles.push_back(state.th2);  // Track second pendulum angle
         }
+        variance_tracker_.update(angles);
 
-        boom_detector_.update(angles, frame);
+        // Check for boom detection (external logic)
+        if (!results.boom_frame.has_value()) {
+            int boom = VarianceUtils::checkThresholdCrossing(
+                variance_tracker_.getHistory(),
+                detect.boom_threshold,
+                detect.boom_confirmation
+            );
+            if (boom >= 0) {
+                results.boom_frame = boom;
+                results.boom_variance = variance_tracker_.getVarianceAt(boom);
+            }
+        }
 
-        // Check for early stop after white detection
-        if (boom_detector_.hasWhiteOccurred() && boom_detector_.shouldEarlyStopAfterWhite()) {
-            results.frames_completed = frame + 1;
-            early_stopped = true;
-            break;
+        // Check for white detection (only after boom)
+        if (results.boom_frame.has_value() && !results.white_frame.has_value()) {
+            int white = VarianceUtils::checkPlateau(
+                variance_tracker_.getHistory(),
+                detect.white_tolerance,
+                detect.white_plateau_frames
+            );
+            if (white >= 0) {
+                results.white_frame = white;
+                results.white_variance = variance_tracker_.getVarianceAt(white);
+
+                // Early stop if configured
+                if (detect.early_stop_after_white) {
+                    results.frames_completed = frame + 1;
+                    early_stopped = true;
+                    break;
+                }
+            }
         }
 
         // Render timing
@@ -231,25 +258,13 @@ void Simulation::run(ProgressCallback progress) {
 
     auto total_time = Clock::now() - total_start;
 
-    // Populate results
+    // Populate timing results
     results.timing.total_seconds = Duration(total_time).count();
     results.timing.physics_seconds = physics_time.count();
     results.timing.render_seconds = render_time.count();
     results.timing.io_seconds = io_time.count();
 
-    if (boom_detector_.hasBoomOccurred()) {
-        results.boom_frame = boom_detector_.getBoomFrame();
-        results.boom_variance = boom_detector_.getBoomVariance();
-    }
-
-    // Detect white frame (variance plateau)
-    auto white = boom_detector_.detectWhiteFrame();
-    if (white) {
-        results.white_frame = white->frame;
-        results.white_variance = white->variance;
-    }
-
-    results.variance_history = boom_detector_.getVarianceHistory();
+    results.variance_history = variance_tracker_.getHistory();
 
     // Save metadata and variance
     saveMetadata(results);

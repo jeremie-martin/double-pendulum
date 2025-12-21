@@ -104,13 +104,13 @@ Config Config::load(std::string const& path) {
             config.color.wavelength_end = get_or(*color, "wavelength_end", 780.0);
         }
 
-        // Detection (boom & white)
+        // Detection thresholds
         if (auto detect = tbl["detection"].as_table()) {
-            config.boom_detection.variance_threshold = get_or(*detect, "variance_threshold", 0.1);
-            config.boom_detection.confirmation_frames = get_or(*detect, "confirmation_frames", 10);
-            config.boom_detection.white_tolerance = get_or(*detect, "white_tolerance", 0.05);
-            config.boom_detection.white_plateau_frames = get_or(*detect, "white_plateau_frames", 30);
-            config.boom_detection.early_stop_after_white = get_or(*detect, "early_stop_after_white", false);
+            config.detection.boom_threshold = get_or(*detect, "boom_threshold", 0.1);
+            config.detection.boom_confirmation = get_or(*detect, "boom_confirmation", 10);
+            config.detection.white_tolerance = get_or(*detect, "white_tolerance", 0.05);
+            config.detection.white_plateau_frames = get_or(*detect, "white_plateau_frames", 30);
+            config.detection.early_stop_after_white = get_or(*detect, "early_stop_after_white", false);
         }
 
         // Output

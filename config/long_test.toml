@@ -11,7 +11,7 @@ initial_angle2_deg = 200.0
 [simulation]
 pendulum_count = 50000       # Reduced for quick test
 angle_variation_deg = 0.1
-duration_seconds = 20.0      # Just 1 second of physics
+duration_seconds = 10.0      # Just 10 second of physics
 total_frames = 120           # 30 frames output
 substeps_per_frame = 20
 
@@ -30,7 +30,7 @@ wavelength_start = 380
 wavelength_end = 780
 
 [detection]
-variance_threshold = 0.1
+boom_threshold = 0.3
 
 [output]
 format = "video"

@@ -5,11 +5,12 @@
 #include "renderer.h"
 #include "color_scheme.h"
 #include "post_process.h"
-#include "boom_detector.h"
+#include "variance_tracker.h"
 #include "video_writer.h"
 
 #include <vector>
 #include <functional>
+#include <optional>
 
 // Progress callback: (current_frame, total_frames)
 using ProgressCallback = std::function<void(int, int)>;
@@ -45,7 +46,7 @@ private:
     Renderer renderer_;
     ColorSchemeGenerator color_gen_;
     PostProcessor post_processor_;
-    BoomDetector boom_detector_;
+    VarianceTracker variance_tracker_;
     std::string run_directory_;
 
     void initializePendulums(std::vector<Pendulum>& pendulums);

@@ -57,16 +57,17 @@ struct ColorParams {
     double wavelength_end = 780.0;
 };
 
-struct BoomDetectionParams {
-    // Boom detection: when pendulums start diverging (chaos onset)
-    double variance_threshold = 0.1;  // radians^2
-    int confirmation_frames = 10;     // Frames above threshold to confirm
+// Thresholds for detecting events from variance data
+struct DetectionParams {
+    // "Boom" threshold: when variance exceeds this, chaos has begun
+    double boom_threshold = 0.1;      // radians^2
+    int boom_confirmation = 10;       // Consecutive frames above threshold
 
-    // White detection: when variance plateaus (full chaos)
-    double white_tolerance = 0.05;    // Relative change tolerance for plateau
-    int white_plateau_frames = 30;    // Consecutive stable frames needed
+    // "White" threshold: detecting variance plateau (full chaos/noise)
+    double white_tolerance = 0.05;    // Relative change tolerance
+    int white_plateau_frames = 30;    // Consecutive stable frames
 
-    // Optional early stopping after white detected
+    // Early stopping
     bool early_stop_after_white = false;
 };
 
@@ -90,7 +91,7 @@ struct Config {
     RenderParams render;
     PostProcessParams post_process;
     ColorParams color;
-    BoomDetectionParams boom_detection;
+    DetectionParams detection;
     OutputParams output;
 
     // Load from TOML file

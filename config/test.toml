@@ -30,7 +30,7 @@ wavelength_start = 380
 wavelength_end = 780
 
 [detection]
-variance_threshold = 0.1
+boom_threshold = 0.1
 
 [output]
 format = "png"

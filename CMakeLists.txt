@@ -23,7 +23,6 @@ add_executable(pendulum
     src/config.cpp
     src/simulation.cpp
     src/video_writer.cpp
-    src/boom_detector.cpp
 )
 
 target_include_directories(pendulum PRIVATE
