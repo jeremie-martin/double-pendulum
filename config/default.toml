@@ -40,9 +40,9 @@ wavelength_end = 780           # nm (visible light ends)
 boom_threshold = 0.1           # radians^2
 boom_confirmation = 10         # Consecutive frames above threshold
 
-# White: when variance plateaus (full chaos/noise)
-white_tolerance = 0.05         # Relative change tolerance
-white_plateau_frames = 30      # Consecutive stable frames needed
+# White: when variance exceeds this (full chaos/noise)
+white_threshold = 700.0        # radians^2
+white_confirmation = 10        # Consecutive frames above threshold
 
 # Optional early stopping
 early_stop_after_white = false

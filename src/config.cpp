@@ -108,8 +108,8 @@ Config Config::load(std::string const& path) {
         if (auto detect = tbl["detection"].as_table()) {
             config.detection.boom_threshold = get_or(*detect, "boom_threshold", 0.1);
             config.detection.boom_confirmation = get_or(*detect, "boom_confirmation", 10);
-            config.detection.white_tolerance = get_or(*detect, "white_tolerance", 0.05);
-            config.detection.white_plateau_frames = get_or(*detect, "white_plateau_frames", 30);
+            config.detection.white_threshold = get_or(*detect, "white_threshold", 700.0);
+            config.detection.white_confirmation = get_or(*detect, "white_confirmation", 10);
             config.detection.early_stop_after_white = get_or(*detect, "early_stop_after_white", false);
         }
 

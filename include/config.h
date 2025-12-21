@@ -63,9 +63,9 @@ struct DetectionParams {
     double boom_threshold = 0.1;      // radians^2
     int boom_confirmation = 10;       // Consecutive frames above threshold
 
-    // "White" threshold: detecting variance plateau (full chaos/noise)
-    double white_tolerance = 0.05;    // Relative change tolerance
-    int white_plateau_frames = 30;    // Consecutive stable frames
+    // "White" threshold: when variance exceeds this, full chaos/noise
+    double white_threshold = 700.0;   // radians^2
+    int white_confirmation = 10;      // Consecutive frames above threshold
 
     // Early stopping
     bool early_stop_after_white = false;

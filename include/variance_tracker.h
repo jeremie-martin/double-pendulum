@@ -94,40 +94,4 @@ inline int checkThresholdCrossing(
     return -1;
 }
 
-// Check if variance has plateaued (stable for N frames)
-// Returns the frame where plateau started, or -1 if not detected
-inline int checkPlateau(
-    std::vector<double> const& history,
-    double relative_tolerance,
-    int plateau_frames
-) {
-    if (history.size() < static_cast<size_t>(plateau_frames + 1)) {
-        return -1;
-    }
-
-    int consecutive_stable = 0;
-    int plateau_start = -1;
-
-    for (size_t i = 1; i < history.size(); ++i) {
-        double prev = history[i - 1];
-        double curr = history[i];
-        double relative_change = std::abs(curr - prev) / std::max(prev, 0.001);
-
-        if (relative_change < relative_tolerance) {
-            if (consecutive_stable == 0) {
-                plateau_start = static_cast<int>(i - 1);
-            }
-            consecutive_stable++;
-            if (consecutive_stable >= plateau_frames) {
-                return plateau_start;
-            }
-        } else {
-            consecutive_stable = 0;
-            plateau_start = -1;
-        }
-    }
-
-    return -1;
-}
-
 } // namespace VarianceUtils

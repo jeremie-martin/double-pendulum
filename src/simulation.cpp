@@ -202,10 +202,10 @@ void Simulation::run(ProgressCallback progress) {
 
         // Check for white detection (only after boom)
         if (results.boom_frame.has_value() && !results.white_frame.has_value()) {
-            int white = VarianceUtils::checkPlateau(
+            int white = VarianceUtils::checkThresholdCrossing(
                 variance_tracker_.getHistory(),
-                detect.white_tolerance,
-                detect.white_plateau_frames
+                detect.white_threshold,
+                detect.white_confirmation
             );
             if (white >= 0) {
                 results.white_frame = white;
