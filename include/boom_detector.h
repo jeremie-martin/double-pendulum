@@ -3,9 +3,6 @@
 #include "config.h"
 #include <optional>
 #include <vector>
-#include <cmath>
-#include <algorithm>
-#include <numeric>
 
 struct BoomResult {
     int frame;              // Frame where boom was detected
@@ -13,65 +10,28 @@ struct BoomResult {
     double max_spread;      // Max angle difference between pendulums
 };
 
+struct WhiteResult {
+    int frame;              // Frame where white (plateau) was detected
+    double variance;        // Variance at plateau
+};
+
 class BoomDetector {
 public:
-    explicit BoomDetector(BoomDetectionParams const& params)
-        : enabled_(params.enabled),
-          variance_threshold_(params.variance_threshold),
-          confirmation_frames_(params.confirmation_frames),
-          early_stop_(params.early_stop) {}
+    explicit BoomDetector(BoomDetectionParams const& params);
 
     // Update with angles from all pendulums for current frame
     // Returns boom info if detected this frame
-    std::optional<BoomResult> update(std::vector<double> const& angles, int frame) {
-        if (!enabled_ || angles.empty()) return std::nullopt;
+    std::optional<BoomResult> update(std::vector<double> const& angles, int frame);
 
-        // Calculate mean angle
-        double sum = std::accumulate(angles.begin(), angles.end(), 0.0);
-        double mean = sum / angles.size();
-
-        // Calculate variance
-        double var_sum = 0.0;
-        double min_angle = angles[0];
-        double max_angle = angles[0];
-
-        for (double a : angles) {
-            double diff = a - mean;
-            var_sum += diff * diff;
-            min_angle = std::min(min_angle, a);
-            max_angle = std::max(max_angle, a);
-        }
-
-        current_variance_ = var_sum / angles.size();
-        double spread = max_angle - min_angle;
-
-        // Track variance history
-        variance_history_.push_back(current_variance_);
-
-        // Check for boom (variance exceeds threshold for N consecutive frames)
-        if (!boom_frame_.has_value()) {
-            if (current_variance_ > variance_threshold_) {
-                frames_above_threshold_++;
-                if (frames_above_threshold_ >= confirmation_frames_) {
-                    // Boom confirmed - report frame where it started
-                    boom_frame_ = frame - confirmation_frames_ + 1;
-                    return BoomResult{*boom_frame_, current_variance_, spread};
-                }
-            } else {
-                frames_above_threshold_ = 0;
-            }
-        }
-
-        return std::nullopt;
-    }
+    // Detect white frame (variance plateau) from history
+    // Call after simulation completes
+    std::optional<WhiteResult> detectWhiteFrame(
+        double plateau_tolerance = 0.05,
+        int plateau_frames = 30
+    ) const;
 
     // Reset detector state for new simulation
-    void reset() {
-        variance_history_.clear();
-        boom_frame_.reset();
-        frames_above_threshold_ = 0;
-        current_variance_ = 0.0;
-    }
+    void reset();
 
     // Getters
     bool isEnabled() const { return enabled_; }

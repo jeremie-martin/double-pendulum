@@ -22,12 +22,12 @@ struct PhysicsParams {
 struct SimulationParams {
     int pendulum_count = 100000;
     double angle_variation = deg2rad(0.1);  // radians
-    double duration = 11.0;                  // seconds
-    int fps = 60;
+    double duration_seconds = 11.0;          // physical simulation time
+    int total_frames = 660;                  // number of frames to output
     int substeps_per_frame = 20;
 
-    double dt() const { return duration / (fps * substeps_per_frame); }
-    int total_frames() const { return static_cast<int>(duration * fps); }
+    // Physics timestep: duration / (frames * substeps)
+    double dt() const { return duration_seconds / (total_frames * substeps_per_frame); }
 };
 
 struct RenderParams {
@@ -75,6 +75,7 @@ struct OutputParams {
     std::string filename_prefix = "frame";
     std::string video_codec = "libx264";
     int video_crf = 23;
+    int video_fps = 60;  // Only affects video encoding, not simulation
 };
 
 struct Config {

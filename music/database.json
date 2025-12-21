@@ -1,0 +1,16 @@
+{
+  "tracks": [
+    {
+      "id": "petrunko",
+      "title": "Bre, Petrunko (Ho! Dear Petroona) (Remix)",
+      "filepath": "tracks/petrunko.aac",
+      "drop_time_ms": 21915
+    },
+    {
+      "id": "bones",
+      "title": "Bones - Imagine Dragons",
+      "filepath": "tracks/bones.aac",
+      "drop_time_ms": 29625
+    }
+  ]
+}

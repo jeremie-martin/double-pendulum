@@ -76,8 +76,8 @@ Config Config::load(std::string const& path) {
         if (auto sim = tbl["simulation"].as_table()) {
             config.simulation.pendulum_count = get_or(*sim, "pendulum_count", 100000);
             config.simulation.angle_variation = deg2rad(get_or(*sim, "angle_variation_deg", 0.1));
-            config.simulation.duration = get_or(*sim, "duration_seconds", 11.0);
-            config.simulation.fps = get_or(*sim, "fps", 60);
+            config.simulation.duration_seconds = get_or(*sim, "duration_seconds", 11.0);
+            config.simulation.total_frames = get_or(*sim, "total_frames", 660);
             config.simulation.substeps_per_frame = get_or(*sim, "substeps_per_frame", 20);
         }
 
@@ -120,6 +120,7 @@ Config Config::load(std::string const& path) {
             config.output.filename_prefix = get_string_or(*out, "filename_prefix", "frame");
             config.output.video_codec = get_string_or(*out, "video_codec", "libx264");
             config.output.video_crf = get_or(*out, "video_crf", 23);
+            config.output.video_fps = get_or(*out, "video_fps", 60);
         }
 
     } catch (toml::parse_error const& err) {

@@ -1,5 +1,4 @@
 #include "simulation.h"
-#include <chrono>
 #include <iostream>
 #include <string>
 
@@ -30,21 +29,15 @@ int main(int argc, char* argv[]) {
     // Print config summary
     std::cout << "\nSimulation parameters:\n"
               << "  Pendulums: " << config.simulation.pendulum_count << "\n"
-              << "  Duration: " << config.simulation.duration << "s\n"
-              << "  FPS: " << config.simulation.fps << "\n"
+              << "  Duration: " << config.simulation.duration_seconds << "s\n"
+              << "  Frames: " << config.simulation.total_frames << "\n"
+              << "  Video FPS: " << config.output.video_fps << "\n"
               << "  Resolution: " << config.render.width << "x" << config.render.height << "\n"
               << "  Output: " << config.output.directory << "/\n\n";
 
     // Run simulation
-    auto start_time = std::chrono::high_resolution_clock::now();
-
     Simulation sim(config);
     sim.run();
-
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-
-    std::cout << "Total time: " << duration << "ms\n";
 
     return 0;
 }

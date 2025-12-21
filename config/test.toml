@@ -11,8 +11,8 @@ initial_angle2_deg = 32.0
 [simulation]
 pendulum_count = 1000       # Reduced for quick test
 angle_variation_deg = 0.1
-duration_seconds = 1.0      # Just 1 second
-fps = 30
+duration_seconds = 1.0      # Just 1 second of physics
+total_frames = 30           # 30 frames output
 substeps_per_frame = 20
 
 [render]
@@ -37,3 +37,4 @@ variance_threshold = 0.1
 format = "png"
 directory = "output/test"
 filename_prefix = "frame"
+video_fps = 30              # Lower FPS for test videos

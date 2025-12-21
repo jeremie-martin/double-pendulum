@@ -15,9 +15,9 @@ initial_velocity2 = 0.0
 [simulation]
 pendulum_count = 100000
 angle_variation_deg = 0.1      # Spread around initial_angle1
-duration_seconds = 11.0
-fps = 60
-substeps_per_frame = 20        # dt = duration / (fps * substeps)
+duration_seconds = 11.0        # Physical simulation time
+total_frames = 660             # Number of frames to output
+substeps_per_frame = 20        # dt = duration / (frames * substeps)
 
 [render]
 width = 2160
@@ -47,3 +47,4 @@ directory = "output"
 filename_prefix = "frame"
 video_codec = "libx264"
 video_crf = 23                 # Quality (0-51, lower = better)
+video_fps = 60                 # Video FPS (only affects video encoding, not simulation)

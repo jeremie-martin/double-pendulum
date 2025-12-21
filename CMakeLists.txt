@@ -17,10 +17,13 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -DDEBUG")
 # Find packages
 find_package(Threads REQUIRED)
 
-# Main executable (mostly header-only, just main.cpp and config.cpp)
+# Main executable
 add_executable(pendulum
     src/main.cpp
     src/config.cpp
+    src/simulation.cpp
+    src/video_writer.cpp
+    src/boom_detector.cpp
 )
 
 target_include_directories(pendulum PRIVATE
