@@ -140,8 +140,8 @@ public:
     size_t pixel_count() const { return width * height; }
 };
 
-// Forward declarations for rendering functions
-struct PendulumState;
+// Include pendulum.h for PendulumState definition (used inline below)
+#include "pendulum.h"
 
 class Renderer {
 public:
