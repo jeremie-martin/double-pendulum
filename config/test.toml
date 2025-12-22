@@ -26,8 +26,8 @@ contrast = 1.0
 
 [color]
 scheme = "spectrum"
-wavelength_start = 380
-wavelength_end = 780
+start = 0.0
+end = 1.0
 
 [detection]
 boom_threshold = 0.1

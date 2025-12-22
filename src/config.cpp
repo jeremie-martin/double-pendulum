@@ -100,8 +100,8 @@ Config Config::load(std::string const& path) {
         if (auto color = tbl["color"].as_table()) {
             auto scheme_str = get_string_or(*color, "scheme", "spectrum");
             config.color.scheme = parseColorScheme(scheme_str);
-            config.color.wavelength_start = get_or(*color, "wavelength_start", 380.0);
-            config.color.wavelength_end = get_or(*color, "wavelength_end", 780.0);
+            config.color.start = get_or(*color, "start", 0.0);
+            config.color.end = get_or(*color, "end", 1.0);
         }
 
         // Detection thresholds

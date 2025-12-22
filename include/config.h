@@ -53,8 +53,8 @@ enum class ColorScheme {
 
 struct ColorParams {
     ColorScheme scheme = ColorScheme::Spectrum;
-    double wavelength_start = 380.0;
-    double wavelength_end = 780.0;
+    double start = 0.0;  // Range start [0, 1]
+    double end = 1.0;    // Range end [0, 1]
 };
 
 // Thresholds for detecting events from variance data

@@ -7,13 +7,13 @@ length1 = 1.0
 length2 = 1.0
 mass1 = 1.0
 mass2 = 1.0
-initial_angle1_deg = -32.2
-initial_angle2_deg = -32.0
+initial_angle1_deg = 152.2
+initial_angle2_deg = 152.0
 initial_velocity1 = 0.0
 initial_velocity2 = 0.0
 
 [simulation]
-pendulum_count = 100000
+pendulum_count = 10000
 angle_variation_deg = 0.1      # Spread around initial_angle1
 duration_seconds = 11.0        # Physical simulation time
 total_frames = 660             # Number of frames to output
@@ -32,8 +32,8 @@ auto_normalize = true
 
 [color]
 scheme = "spectrum"            # spectrum, rainbow, heat, cool, monochrome
-wavelength_start = 380         # nm (visible light starts)
-wavelength_end = 780           # nm (visible light ends)
+start = 0.0                    # Range start [0, 1]
+end = 1.0                      # Range end [0, 1]
 
 [detection]
 # Boom: when pendulums start diverging (chaos onset)

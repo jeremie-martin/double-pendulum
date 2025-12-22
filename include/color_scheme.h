@@ -83,25 +83,35 @@ class ColorSchemeGenerator {
 public:
     ColorSchemeGenerator(ColorParams const& params)
         : scheme_(params.scheme),
-          wavelength_start_(params.wavelength_start),
-          wavelength_end_(params.wavelength_end) {}
+          start_(params.start),
+          end_(params.end) {}
+
+    // Update parameters (for live preview)
+    void setParams(ColorParams const& params) {
+        scheme_ = params.scheme;
+        start_ = params.start;
+        end_ = params.end;
+    }
 
     // Get color for pendulum at index i out of total n pendulums
-    // t is in range [0, 1]
+    // t is in range [0, 1], mapped to [start_, end_]
     Color getColor(float t) const {
+        // Map t from [0,1] to [start_, end_]
+        float mapped_t = start_ + t * (end_ - start_);
+
         switch (scheme_) {
             case ColorScheme::Spectrum:
-                return getSpectrumColor(t);
+                return getSpectrumColor(mapped_t);
             case ColorScheme::Rainbow:
-                return getRainbowColor(t);
+                return getRainbowColor(mapped_t);
             case ColorScheme::Heat:
-                return getHeatColor(t);
+                return getHeatColor(mapped_t);
             case ColorScheme::Cool:
-                return getCoolColor(t);
+                return getCoolColor(mapped_t);
             case ColorScheme::Monochrome:
-                return getMonochromeColor(t);
+                return getMonochromeColor(mapped_t);
             default:
-                return getSpectrumColor(t);
+                return getSpectrumColor(mapped_t);
         }
     }
 
@@ -112,16 +122,17 @@ public:
 
 private:
     ColorScheme scheme_;
-    double wavelength_start_;
-    double wavelength_end_;
+    double start_;
+    double end_;
 
     Color getSpectrumColor(float t) const {
-        float wavelength = wavelength_start_ + t * (wavelength_end_ - wavelength_start_);
+        // Map t [0,1] to visible wavelength range [380, 780] nm
+        float wavelength = 380.0f + t * 400.0f;
         return wavelengthToRGB(wavelength);
     }
 
     Color getRainbowColor(float t) const {
-        // Full hue cycle (0-360)
+        // Map t [0,1] to full hue cycle (0-360)
         float h = t * 360.0f;
         return hsvToRGB(h, 1.0f, 1.0f);
     }

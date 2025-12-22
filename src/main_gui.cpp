@@ -10,10 +10,9 @@
 #include <imgui_impl_opengl3.h>
 #include <imgui_impl_sdl2.h>
 
-#include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
-#include <thread>
 #include <vector>
 
 // Preview parameters (lower resolution for real-time)
@@ -270,12 +269,49 @@ int main(int argc, char* argv[]) {
     SDL_GL_MakeCurrent(window, gl_context);
     SDL_GL_SetSwapInterval(1); // VSync
 
-    // Detect DPI scale (compare window size to drawable size)
+    // Detect DPI scale
+    float dpi_scale = 1.0f;
+
+    // Method 1: Compare window size to drawable size (works on macOS, some Linux)
     int window_w, window_h, drawable_w, drawable_h;
     SDL_GetWindowSize(window, &window_w, &window_h);
     SDL_GL_GetDrawableSize(window, &drawable_w, &drawable_h);
-    float dpi_scale = static_cast<float>(drawable_w) / static_cast<float>(window_w);
-    if (dpi_scale < 1.0f) dpi_scale = 1.0f;  // Ensure minimum scale of 1
+    float drawable_scale = static_cast<float>(drawable_w) / static_cast<float>(window_w);
+    if (drawable_scale > 1.0f) {
+        dpi_scale = drawable_scale;
+    }
+
+    // Method 2: Check environment variables (Linux desktop environments)
+    if (dpi_scale <= 1.0f) {
+        const char* gdk_scale = std::getenv("GDK_SCALE");
+        const char* qt_scale = std::getenv("QT_SCALE_FACTOR");
+        if (gdk_scale) {
+            dpi_scale = std::stof(gdk_scale);
+        } else if (qt_scale) {
+            dpi_scale = std::stof(qt_scale);
+        }
+    }
+
+    // Method 3: Check display DPI via SDL (if available)
+    if (dpi_scale <= 1.0f) {
+        float ddpi, hdpi, vdpi;
+        if (SDL_GetDisplayDPI(0, &ddpi, &hdpi, &vdpi) == 0) {
+            // Standard DPI is 96 on Linux, 72 on macOS
+            dpi_scale = ddpi / 96.0f;
+            if (dpi_scale < 1.0f) dpi_scale = 1.0f;
+        }
+    }
+
+    // Method 4: Heuristic - if display is 4K or higher, assume scale 2
+    if (dpi_scale <= 1.0f) {
+        SDL_DisplayMode mode;
+        if (SDL_GetCurrentDisplayMode(0, &mode) == 0) {
+            if (mode.w >= 3840 || mode.h >= 2160) {
+                dpi_scale = 2.0f;
+            }
+        }
+    }
+
     std::cout << "DPI scale: " << dpi_scale << "\n";
 
     // Initialize ImGui
@@ -456,22 +492,36 @@ int main(int argc, char* argv[]) {
             ImGui::Text("dt = %.6f s", state.config.simulation.dt());
         }
 
-        // Color parameters
+        // Color parameters (live update)
         if (ImGui::CollapsingHeader("Color")) {
-            char const* schemes[] = { "Spectrum", "Rainbow", "Heat", "Cool", "Monochrome" };
+            bool color_changed = false;
+
+            const char* schemes[] = {"Spectrum", "Rainbow", "Heat", "Cool", "Monochrome"};
             int scheme_idx = static_cast<int>(state.config.color.scheme);
             if (ImGui::Combo("Color Scheme", &scheme_idx, schemes, 5)) {
                 state.config.color.scheme = static_cast<ColorScheme>(scheme_idx);
+                color_changed = true;
             }
 
-            float wl_start = static_cast<float>(state.config.color.wavelength_start);
-            if (ImGui::SliderFloat("Wavelength Start", &wl_start, 380.0f, 700.0f, "%.0f nm")) {
-                state.config.color.wavelength_start = wl_start;
+            float color_start = static_cast<float>(state.config.color.start);
+            if (ImGui::SliderFloat("Start", &color_start, 0.0f, 1.0f, "%.2f")) {
+                state.config.color.start = color_start;
+                color_changed = true;
             }
 
-            float wl_end = static_cast<float>(state.config.color.wavelength_end);
-            if (ImGui::SliderFloat("Wavelength End", &wl_end, 450.0f, 780.0f, "%.0f nm")) {
-                state.config.color.wavelength_end = wl_end;
+            float color_end = static_cast<float>(state.config.color.end);
+            if (ImGui::SliderFloat("End", &color_end, 0.0f, 1.0f, "%.2f")) {
+                state.config.color.end = color_end;
+                color_changed = true;
+            }
+
+            // Regenerate colors if parameters changed
+            if (color_changed && state.running) {
+                ColorSchemeGenerator color_gen(state.config.color);
+                int n = state.colors.size();
+                for (int i = 0; i < n; ++i) {
+                    state.colors[i] = color_gen.getColorForIndex(i, n);
+                }
             }
         }
 
