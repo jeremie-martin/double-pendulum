@@ -3,17 +3,51 @@
 
 [batch]
 output_directory = "batch_output"
-count = 100                          # Number of videos to generate
+count = 100                         # Number of videos to generate
 base_config = "config/batch_template.toml" # Base parameters for non-randomized values
+
+[probe]
+enabled = true           # Enable probe-based filtering
+pendulum_count = 1000    # Fast probing with fewer pendulums (no rendering)
+max_retries = 10         # Retry with new params if probe fails
 
 [physics_ranges]
 # Random initial angles (in degrees)
-initial_angle1_deg = [140.0, 200.0]
-initial_angle2_deg = [140.0, 200.0]
+initial_angle1_deg = [-100.0, 200.0]
+initial_angle2_deg = [-100.0, 200.0]
 # Random angle variation (in degrees)
 angle_variation_deg = [0.05, 0.1]
+
+[filter]
+min_boom_seconds = 8.0    # Boom must happen after this time
+max_boom_seconds = 15.0   # Boom must happen before this time
+min_spread_ratio = 0.3    # At least 30% of pendulums above horizontal
+require_boom = true       # Reject simulations with no detectable boom
+require_valid_music = true # Fail if no music track has drop > boom time
 
 [music]
 database = "music"
 random_selection = true
 # track_id = "petrunko"  # Use this instead of random_selection for fixed track
+
+# Color presets - randomly selected during batch generation
+# These are curated combinations that produce good visuals
+[[color_presets]]
+scheme = "spectrum"
+start = 0.0
+end = 1.0
+
+[[color_presets]]
+scheme = "spectrum"
+start = 0.2
+end = 0.8
+
+[[color_presets]]
+scheme = "heat"
+start = 0.0
+end = 0.8
+
+[[color_presets]]
+scheme = "cool"
+start = 0.1
+end = 0.9

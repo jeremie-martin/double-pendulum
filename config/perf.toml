@@ -21,9 +21,11 @@ width = 1080
 height = 1080
 
 [post_process]
-exposure = 4.0
+exposure = 7.0
 contrast = 1.0
-gamma = 2.2
+gamma = 1.6
+normalization = "by_count"
+# normalization = "per_frame"
 
 [color]
 scheme = "spectrum"

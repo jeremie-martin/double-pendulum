@@ -32,8 +32,10 @@ struct SimulationResults {
     double boom_variance = 0.0;
     std::optional<int> white_frame;
     double white_variance = 0.0;
+    double final_spread_ratio = 0.0; // Fraction of pendulums above horizontal at end
     TimingStats timing;
     std::vector<double> variance_history;
+    std::vector<SpreadMetrics> spread_history;
     std::string output_directory; // Where video/frames were saved
     std::string video_path;       // Full path to video (if format is video)
 };
@@ -75,6 +77,7 @@ private:
     void saveConfigCopy(std::string const& config_path);
     void saveMetadata(SimulationResults const& results);
     void saveVarianceCSV(std::vector<double> const& variance,
-                         std::vector<float> const& max_values);
+                         std::vector<float> const& max_values,
+                         std::vector<SpreadMetrics> const& spread);
     void saveAnalysisCSV(std::vector<FrameAnalysis> const& analysis);
 };

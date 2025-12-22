@@ -57,6 +57,11 @@ white_confirmation = 10        # Consecutive frames above threshold
 # Optional early stopping
 early_stop_after_white = false
 
+[filter]
+min_boom_seconds = 8.0   # Boom between 8-15 seconds
+max_boom_seconds = 15.0
+min_spread_ratio = 0.3   # At least 30% above horizontal
+
 [output]
 format = "png"                 # "png" or "video"
 directory = "output"

@@ -594,13 +594,14 @@ bool BatchGenerator::generateOne(int index) {
         double simulation_speed = config.simulation.duration_seconds / video_duration;
 
         // Track result and create symlink
+        // Use actual simulation spread (more accurate than probe spread)
         RunResult result{video_name,
                          final_video_path,
                          true,
                          results.boom_frame,
                          boom_seconds,
                          duration,
-                         probe_result.final_spread_ratio,
+                         results.final_spread_ratio,
                          probe_retries,
                          simulation_speed};
         progress_.results.push_back(result);
@@ -767,8 +768,8 @@ bool BatchGenerator::generateOneGrid(int index, std::map<std::string, std::strin
                          results.boom_frame,
                          boom_seconds,
                          duration,
-                         0.0, // No spread tracking in grid mode
-                         0,   // No probe retries in grid mode
+                         results.final_spread_ratio,
+                         0, // No probe retries in grid mode
                          simulation_speed};
         progress_.results.push_back(result);
         progress_.completed_ids.push_back(folder_name);

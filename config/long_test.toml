@@ -9,7 +9,7 @@ initial_angle1_deg = 152
 initial_angle2_deg = 152.0
 
 [simulation]
-pendulum_count = 1000000       # Reduced for quick test
+pendulum_count = 1000       # Reduced for quick test
 angle_variation_deg = 0.1
 duration_seconds = 20.0      # Just 20 second of physics
 total_frames = 300           # 300 frames output (5s at 60 FPS)
@@ -23,6 +23,7 @@ height = 1080
 exposure = 4.0
 contrast = 1.0
 gamma = 2.2
+normalization = "by_count"
 
 [color]
 scheme = "spectrum"

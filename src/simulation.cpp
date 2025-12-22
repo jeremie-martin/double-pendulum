@@ -141,11 +141,12 @@ void Simulation::saveMetadata(SimulationResults const& results) {
     }
     if (results.white_frame) {
         out << "    \"white_frame\": " << *results.white_frame << ",\n";
-        out << "    \"white_variance\": " << results.white_variance << "\n";
+        out << "    \"white_variance\": " << results.white_variance << ",\n";
     } else {
         out << "    \"white_frame\": null,\n";
-        out << "    \"white_variance\": null\n";
+        out << "    \"white_variance\": null,\n";
     }
+    out << "    \"final_spread_ratio\": " << results.final_spread_ratio << "\n";
     out << "  },\n";
     out << "  \"timing\": {\n";
     out << "    \"total_seconds\": " << results.timing.total_seconds << ",\n";
@@ -157,17 +158,23 @@ void Simulation::saveMetadata(SimulationResults const& results) {
 }
 
 void Simulation::saveVarianceCSV(std::vector<double> const& variance,
-                                  std::vector<float> const& max_values) {
+                                  std::vector<float> const& max_values,
+                                  std::vector<SpreadMetrics> const& spread) {
     std::ofstream out(run_directory_ + "/variance.csv");
     if (!out)
         return;
 
-    out << "frame,variance,max_value\n";
+    out << "frame,variance,max_value,spread_ratio\n";
     out << std::fixed << std::setprecision(6);
     for (size_t i = 0; i < variance.size(); ++i) {
         out << i << "," << variance[i];
         if (i < max_values.size()) {
             out << "," << max_values[i];
+        } else {
+            out << ",";
+        }
+        if (i < spread.size()) {
+            out << "," << spread[i].spread_ratio;
         }
         out << "\n";
     }
@@ -271,13 +278,15 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         stepPendulums(pendulums, states, substeps, dt, thread_count);
         physics_time += Clock::now() - physics_start;
 
-        // Track variance (always enabled - cheap operation)
-        std::vector<double> angles;
-        angles.reserve(pendulum_count);
+        // Track variance and spread (always enabled - cheap operation)
+        std::vector<double> angle1s, angle2s;
+        angle1s.reserve(pendulum_count);
+        angle2s.reserve(pendulum_count);
         for (auto const& state : states) {
-            angles.push_back(state.th2); // Track second pendulum angle
+            angle1s.push_back(state.th1); // First pendulum angle (for spread)
+            angle2s.push_back(state.th2); // Second pendulum angle (for variance)
         }
-        variance_tracker_.update(angles);
+        variance_tracker_.updateWithSpread(angle2s, angle1s);
 
         // Extended analysis (when enabled - includes energy computation)
         if (config_.analysis.enabled) {
@@ -374,6 +383,8 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     results.timing.io_seconds = io_time.count();
 
     results.variance_history = variance_tracker_.getHistory();
+    results.spread_history = variance_tracker_.getSpreadHistory();
+    results.final_spread_ratio = variance_tracker_.getFinalSpread().spread_ratio;
 
     // Save metadata, config copy, and statistics
     saveMetadata(results);
@@ -384,7 +395,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     if (config_.analysis.enabled && !analysis_tracker_.getHistory().empty()) {
         saveAnalysisCSV(analysis_tracker_.getHistory());
     } else if (!results.variance_history.empty()) {
-        saveVarianceCSV(results.variance_history, max_values);
+        saveVarianceCSV(results.variance_history, max_values, results.spread_history);
     }
 
     // Store output paths in results
@@ -441,6 +452,8 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         std::cout << "White:       frame " << *results.white_frame
                   << " (var=" << results.white_variance << ")\n";
     }
+    std::cout << "Spread:      " << std::setprecision(2) << (results.final_spread_ratio * 100)
+              << "% above horizontal\n";
 
     std::cout << "\nOutput: " << output_path << "\n";
 

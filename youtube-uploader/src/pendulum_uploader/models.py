@@ -43,6 +43,7 @@ class SimulationResults(BaseModel):
     boom_variance: Optional[float] = None
     white_frame: Optional[int] = None
     white_variance: Optional[float] = None
+    final_spread_ratio: float = 0.0  # Fraction of pendulums above horizontal
 
     def boom_seconds(self, config: SimulationConfig) -> Optional[float]:
         """Calculate boom time in seconds."""

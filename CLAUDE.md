@@ -112,9 +112,16 @@ The batch system supports a two-phase workflow for generating videos with qualit
 
 #### Spread Metrics
 
-The `VarianceTracker` now also computes spread metrics:
+The `VarianceTracker` computes spread metrics every frame:
 - `spread_ratio`: Fraction of pendulums with angle1 in [-π/2, π/2] (above horizontal)
 - `angle1_mean`, `angle1_variance`: For debugging/analysis
+
+Spread is tracked and output in multiple places:
+- **variance.csv**: `frame,variance,max_value,spread_ratio` columns
+- **metadata.json**: `final_spread_ratio` in results section
+- **stdout**: Printed at end of simulation ("Spread: X% above horizontal")
+- **GUI**: Real-time display in Analysis panel, graphable in metric selector
+- **Batch summary**: Spread column in completion table
 
 #### Color Presets
 

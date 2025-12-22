@@ -28,7 +28,7 @@ struct PreviewParams {
 };
 
 // Graph metric selection
-enum class GraphMetric { Variance, Brightness, Energy };
+enum class GraphMetric { Variance, Brightness, Energy, Spread };
 
 // Export state (thread-safe)
 struct ExportState {
@@ -205,13 +205,15 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
         }
     }
 
-    // Track variance
-    std::vector<double> angles;
-    angles.reserve(n);
+    // Track variance and spread
+    std::vector<double> angle1s, angle2s;
+    angle1s.reserve(n);
+    angle2s.reserve(n);
     for (auto const& s : state.states) {
-        angles.push_back(s.th2);
+        angle1s.push_back(s.th1);
+        angle2s.push_back(s.th2);
     }
-    state.variance_tracker.update(angles);
+    state.variance_tracker.updateWithSpread(angle2s, angle1s);
 
     // Extended analysis tracking (includes energy and brightness)
     state.analysis_tracker.update(state.pendulums, 0.0f, 0.0f);
@@ -287,6 +289,14 @@ void drawMetricGraph(AppState const& state, ImVec2 size) {
         }
         line_color = IM_COL32(100, 150, 255, 255);
         metric_label = "Energy";
+        break;
+    case GraphMetric::Spread:
+        for (auto const& s : state.variance_tracker.getSpreadHistory()) {
+            data.push_back(s.spread_ratio);
+        }
+        line_color = IM_COL32(255, 150, 100, 255);
+        metric_label = "Spread";
+        max_val = 1.0; // Spread ratio is always 0-1
         break;
     }
 
@@ -723,6 +733,7 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
     // Analysis metrics
     ImGui::Separator();
     ImGui::Text("Variance: %.4f", state.variance_tracker.getCurrentVariance());
+    ImGui::Text("Spread:   %.1f%% above", state.variance_tracker.getCurrentSpread().spread_ratio * 100);
     auto const& current = state.analysis_tracker.getCurrent();
     ImGui::Text("Energy:   %.2f", current.total_energy);
 
@@ -996,9 +1007,9 @@ int main(int argc, char* argv[]) {
         ImGui::Begin("Analysis");
 
         // Metric selector
-        char const* metric_names[] = {"Variance", "Brightness", "Energy"};
+        char const* metric_names[] = {"Variance", "Brightness", "Energy", "Spread"};
         int current_metric = static_cast<int>(state.selected_metric);
-        if (ImGui::Combo("Metric", &current_metric, metric_names, 3)) {
+        if (ImGui::Combo("Metric", &current_metric, metric_names, 4)) {
             state.selected_metric = static_cast<GraphMetric>(current_metric);
         }
 
