@@ -28,7 +28,18 @@ struct PreviewParams {
 };
 
 // Graph metric selection
-enum class GraphMetric { Variance, Brightness, Energy, Spread, ContrastStddev, ContrastRange };
+enum class GraphMetric {
+    Variance,
+    Brightness,
+    Energy,
+    Spread,
+    ContrastStddev,
+    ContrastRange,
+    EdgeEnergy,
+    ColorVariance,
+    Coverage,
+    Causticness
+};
 
 // Export state (thread-safe)
 struct ExportState {
@@ -245,9 +256,16 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     renderFrame(state, renderer);
 
     // Update analysis tracker with GPU stats after rendering
-    state.analysis_tracker.updateGPUStats(renderer.lastMax(), renderer.lastBrightness(),
-                                          renderer.lastContrastStddev(),
-                                          renderer.lastContrastRange());
+    AnalysisTracker::GPUMetrics metrics;
+    metrics.max_value = renderer.lastMax();
+    metrics.brightness = renderer.lastBrightness();
+    metrics.contrast_stddev = renderer.lastContrastStddev();
+    metrics.contrast_range = renderer.lastContrastRange();
+    metrics.edge_energy = renderer.lastEdgeEnergy();
+    metrics.color_variance = renderer.lastColorVariance();
+    metrics.coverage = renderer.lastCoverage();
+    metrics.peak_median_ratio = renderer.lastPeakMedianRatio();
+    state.analysis_tracker.updateGPUStats(metrics);
 
     state.current_frame++;
     state.display_frame = state.current_frame;
@@ -320,6 +338,37 @@ void drawMetricGraph(AppState const& state, ImVec2 size) {
         line_color = IM_COL32(100, 200, 200, 255);
         metric_label = "Contrast (Range)";
         max_val = 1.0; // p95-p5 range is 0-1
+        break;
+    case GraphMetric::EdgeEnergy:
+        for (auto const& a : analysis) {
+            data.push_back(a.edge_energy);
+        }
+        line_color = IM_COL32(255, 100, 100, 255);
+        metric_label = "Edge Energy";
+        max_val = 0.5; // Gradient magnitude, typically 0-0.5
+        break;
+    case GraphMetric::ColorVariance:
+        for (auto const& a : analysis) {
+            data.push_back(a.color_variance);
+        }
+        line_color = IM_COL32(100, 255, 100, 255);
+        metric_label = "Color Variance";
+        max_val = 0.1; // Average channel variance
+        break;
+    case GraphMetric::Coverage:
+        for (auto const& a : analysis) {
+            data.push_back(a.coverage);
+        }
+        line_color = IM_COL32(255, 200, 100, 255);
+        metric_label = "Coverage";
+        max_val = 1.0; // Fraction of non-black pixels
+        break;
+    case GraphMetric::Causticness:
+        for (auto const& a : analysis) {
+            data.push_back(a.causticness());
+        }
+        line_color = IM_COL32(255, 50, 255, 255);
+        metric_label = "Causticness";
         break;
     }
 
@@ -1041,10 +1090,11 @@ int main(int argc, char* argv[]) {
         ImGui::Begin("Analysis");
 
         // Metric selector
-        char const* metric_names[] = {"Variance", "Brightness",        "Energy",
-                                      "Spread",   "Contrast (StdDev)", "Contrast (Range)"};
+        char const* metric_names[] = {
+            "Variance",         "Brightness",  "Energy",         "Spread",   "Contrast (StdDev)",
+            "Contrast (Range)", "Edge Energy", "Color Variance", "Coverage", "Causticness"};
         int current_metric = static_cast<int>(state.selected_metric);
-        if (ImGui::Combo("Metric", &current_metric, metric_names, 6)) {
+        if (ImGui::Combo("Metric", &current_metric, metric_names, 10)) {
             state.selected_metric = static_cast<GraphMetric>(current_metric);
         }
 

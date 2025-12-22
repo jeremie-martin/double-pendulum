@@ -241,15 +241,19 @@ void Simulation::saveVarianceCSV(std::vector<double> const& variance,
 
 void Simulation::saveAnalysisCSV(std::vector<FrameAnalysis> const& analysis) {
     std::ofstream out(run_directory_ + "/analysis.csv");
-    if (!out)
+    if (!out) {
         return;
+    }
 
-    out << "frame,variance,max_value,brightness,contrast_stddev,contrast_range,total_energy\n";
+    out << "frame,variance,max_value,brightness,contrast_stddev,contrast_range,"
+        << "edge_energy,color_variance,coverage,peak_median_ratio,causticness,total_energy\n";
     out << std::fixed << std::setprecision(6);
     for (size_t i = 0; i < analysis.size(); ++i) {
         auto const& a = analysis[i];
         out << i << "," << a.variance << "," << a.max_value << "," << a.brightness << ","
-            << a.contrast_stddev << "," << a.contrast_range << "," << a.total_energy << "\n";
+            << a.contrast_stddev << "," << a.contrast_range << "," << a.edge_energy << ","
+            << a.color_variance << "," << a.coverage << "," << a.peak_median_ratio << ","
+            << a.causticness() << "," << a.total_energy << "\n";
     }
 }
 
@@ -399,11 +403,18 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
                              config_.post_process.normalization, pendulum_count);
         max_values.push_back(renderer_.lastMax());
 
-        // Update analysis with GPU stats (brightness, contrast)
+        // Update analysis with GPU stats (brightness, contrast, causticness metrics)
         if (config_.analysis.enabled) {
-            analysis_tracker_.updateGPUStats(renderer_.lastMax(), renderer_.lastBrightness(),
-                                             renderer_.lastContrastStddev(),
-                                             renderer_.lastContrastRange());
+            AnalysisTracker::GPUMetrics metrics;
+            metrics.max_value = renderer_.lastMax();
+            metrics.brightness = renderer_.lastBrightness();
+            metrics.contrast_stddev = renderer_.lastContrastStddev();
+            metrics.contrast_range = renderer_.lastContrastRange();
+            metrics.edge_energy = renderer_.lastEdgeEnergy();
+            metrics.color_variance = renderer_.lastColorVariance();
+            metrics.coverage = renderer_.lastCoverage();
+            metrics.peak_median_ratio = renderer_.lastPeakMedianRatio();
+            analysis_tracker_.updateGPUStats(metrics);
         }
 
         render_time += Clock::now() - render_start;

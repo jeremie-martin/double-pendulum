@@ -17,11 +17,34 @@ struct FrameAnalysis {
     float contrast_stddev = 0.0f; // Luminance standard deviation
     float contrast_range = 0.0f;  // p95 - p5 luminance spread
 
-    // Causticness score: high contrast + moderate brightness (peaks around 0.4)
+    // New metrics for causticness detection
+    float edge_energy = 0.0f;       // Gradient magnitude (sharp filaments = high)
+    float color_variance = 0.0f;    // Color diversity across RGB channels
+    float coverage = 0.0f;          // Fraction of non-black pixels
+    float peak_median_ratio = 0.0f; // p99/p50 brightness ratio (bright focal points)
+
+    // Causticness score: rewards sharp edges, color diversity, moderate coverage
+    // Penalizes uniform blobs (low edge energy) and compact shapes (low coverage)
     double causticness() const {
-        double bf = 1.0 - std::abs(brightness - 0.4) * 2.0;
-        bf = std::max(0.0, std::min(1.0, bf));
-        return contrast_stddev * bf;
+        // Edge energy is key: sharp filaments have high gradients
+        // Color variance rewards colorful patterns
+        // Coverage should be moderate (not too compact, not washed out)
+        // Peak-median ratio rewards bright focal points against darker areas
+
+        // Coverage factor: peaks around 0.3-0.5, penalize <0.1 or >0.7
+        double coverage_factor = 1.0 - std::abs(coverage - 0.35) * 2.0;
+        coverage_factor = std::max(0.0, std::min(1.0, coverage_factor));
+
+        // Combine: edge_energy * color_variance * coverage_factor * sqrt(peak_median_ratio)
+        // The edge_energy is the most important differentiator
+        double score = edge_energy * (1.0 + color_variance) * coverage_factor;
+
+        // Boost if there are bright focal points (high peak/median)
+        if (peak_median_ratio > 1.5) {
+            score *= std::sqrt(std::min(peak_median_ratio, 10.0f) / 1.5);
+        }
+
+        return score;
     }
 };
 
@@ -68,18 +91,30 @@ public:
         return update(pendulums, 0.0f, 0.0f);
     }
 
+    // GPU metrics bundle for cleaner parameter passing
+    struct GPUMetrics {
+        float max_value = 0.0f;
+        float brightness = 0.0f;
+        float contrast_stddev = 0.0f;
+        float contrast_range = 0.0f;
+        float edge_energy = 0.0f;
+        float color_variance = 0.0f;
+        float coverage = 0.0f;
+        float peak_median_ratio = 0.0f;
+    };
+
     // Update GPU stats for the last frame
-    void updateGPUStats(float max_val, float brightness, float contrast_stddev = 0.0f,
-                        float contrast_range = 0.0f) {
+    void updateGPUStats(GPUMetrics const& m) {
         if (!history_.empty()) {
-            history_.back().max_value = max_val;
-            history_.back().brightness = brightness;
-            history_.back().contrast_stddev = contrast_stddev;
-            history_.back().contrast_range = contrast_range;
-            current_.max_value = max_val;
-            current_.brightness = brightness;
-            current_.contrast_stddev = contrast_stddev;
-            current_.contrast_range = contrast_range;
+            history_.back().max_value = m.max_value;
+            history_.back().brightness = m.brightness;
+            history_.back().contrast_stddev = m.contrast_stddev;
+            history_.back().contrast_range = m.contrast_range;
+            history_.back().edge_energy = m.edge_energy;
+            history_.back().color_variance = m.color_variance;
+            history_.back().coverage = m.coverage;
+            history_.back().peak_median_ratio = m.peak_median_ratio;
+            current_ = history_.back();
         }
     }
 
