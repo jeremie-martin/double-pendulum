@@ -161,7 +161,9 @@ def apply_zoom_effects(
     crop_x = f"trunc((in_w-{width})/2)"
     crop_y = f"trunc((in_h-{height})/2)"
 
-    # Add filters
+    # Add filters - quote expressions with colons to protect them from FFmpeg parser
+    # FFmpeg interprets colons as option separators, so expressions like min(t,13.330)
+    # need single quotes to avoid being misinterpreted
     cmd.add_filter(f"scale=w='{scale_w}':h='{scale_h}':eval=frame")
     cmd.add_filter(f"crop={width}:{height}:{crop_x}:{crop_y}")
 
@@ -225,8 +227,10 @@ def apply_shake_effect(
     padded_h = f"ih+{pad_size * 2}"
 
     # Crop back to original size with shake offset
-    crop_x = f"{pad_size}+{shake_x}"
-    crop_y = f"{pad_size}+{shake_y}"
+    # Quote the offset expressions to protect commas inside if() from being interpreted
+    # as filter parameter separators
+    crop_x = f"'{pad_size}+{shake_x}'"
+    crop_y = f"'{pad_size}+{shake_y}'"
 
     cmd.add_filter(f"pad={padded_w}:{padded_h}:{pad_size}:{pad_size}:black")
     cmd.add_filter(f"crop=iw-{pad_size * 2}:ih-{pad_size * 2}:{crop_x}:{crop_y}:exact=1")

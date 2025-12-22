@@ -111,13 +111,14 @@ class FFmpegCommand:
             ass_path: Path to .ass subtitle file
             force_style: Optional style overrides (e.g., "FontSize=80,OutlineColour=&H40000000")
         """
-        # Escape path for FFmpeg filter
-        escaped_path = str(ass_path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+        # Escape special characters for FFmpeg filter syntax
+        # Colons and backslashes need escaping, quotes not needed for subprocess list
+        escaped_path = str(ass_path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "'\\''")
 
         if force_style:
-            self.video_filters.append(f"subtitles='{escaped_path}':force_style='{force_style}'")
+            self.video_filters.append(f"subtitles={escaped_path}:force_style='{force_style}'")
         else:
-            self.video_filters.append(f"subtitles='{escaped_path}'")
+            self.video_filters.append(f"subtitles={escaped_path}")
         return self
 
     def set_blurred_background(
