@@ -50,19 +50,29 @@ bool HeadlessGL::init() {
         return false;
     }
 
-    // Create context with OpenGL 3.3 core profile
-    EGLint context_attribs[] = {
-        EGL_CONTEXT_MAJOR_VERSION, 3,
+    // Try OpenGL 4.3 first (for compute shaders), fallback to 3.3
+    EGLint context_attribs_43[] = {
+        EGL_CONTEXT_MAJOR_VERSION, 4,
         EGL_CONTEXT_MINOR_VERSION, 3,
         EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
         EGL_NONE
     };
 
-    context_ = eglCreateContext(display_, config, EGL_NO_CONTEXT, context_attribs);
+    context_ = eglCreateContext(display_, config, EGL_NO_CONTEXT, context_attribs_43);
     if (context_ == EGL_NO_CONTEXT) {
-        std::cerr << "EGL: Failed to create context\n";
-        eglTerminate(display_);
-        return false;
+        // Fallback to OpenGL 3.3
+        EGLint context_attribs_33[] = {
+            EGL_CONTEXT_MAJOR_VERSION, 3,
+            EGL_CONTEXT_MINOR_VERSION, 3,
+            EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
+            EGL_NONE
+        };
+        context_ = eglCreateContext(display_, config, EGL_NO_CONTEXT, context_attribs_33);
+        if (context_ == EGL_NO_CONTEXT) {
+            std::cerr << "EGL: Failed to create context\n";
+            eglTerminate(display_);
+            return false;
+        }
     }
 
     // Create a small pbuffer surface (we render to FBO anyway)

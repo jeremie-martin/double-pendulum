@@ -83,7 +83,14 @@ private:
     // CPU buffer for readback
     std::vector<float> float_buffer_;
 
+    // Compute shader for GPU max reduction (GL 4.3+)
+    GLuint max_compute_shader_ = 0;
+    GLuint max_ssbo_ = 0;  // Shader storage buffer for reduction result
+    bool has_compute_shaders_ = false;
+
     bool createFramebuffer();
+    bool createComputeShader();
+    float computeMaxGPU();  // Returns max using compute shader
     bool createShaders();
     bool createPostProcessShader();
     void deleteFramebuffer();

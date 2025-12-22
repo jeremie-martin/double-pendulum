@@ -4,6 +4,7 @@
 #include <GL/glew.h>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 
 // Vertex shader - expands line quad and passes line parameters to fragment
@@ -142,6 +143,62 @@ void main() {
 }
 )";
 
+// Compute shader for parallel max reduction (GL 4.3+)
+// Uses shared memory for efficient workgroup-level reduction
+static const char* max_compute_shader_src = R"(
+#version 430 core
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(rgba32f, binding = 0) readonly uniform image2D uInputImage;
+
+// Use uint for atomic operations (reinterpret float bits)
+layout(std430, binding = 1) buffer MaxBuffer {
+    uint maxValueBits;
+};
+
+shared float sharedMax[256];  // 16x16 = 256 threads per workgroup
+
+void main() {
+    ivec2 texSize = imageSize(uInputImage);
+    ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
+    uint lid = gl_LocalInvocationIndex;
+
+    // Each thread finds max in its assigned pixel
+    float localMax = 0.0;
+
+    if (gid.x < texSize.x && gid.y < texSize.y) {
+        vec4 pixel = imageLoad(uInputImage, gid);
+        localMax = max(pixel.r, max(pixel.g, pixel.b));
+    }
+
+    // Store in shared memory
+    sharedMax[lid] = localMax;
+    barrier();
+
+    // Parallel reduction in shared memory
+    for (uint stride = 128u; stride > 0u; stride >>= 1u) {
+        if (lid < stride) {
+            sharedMax[lid] = max(sharedMax[lid], sharedMax[lid + stride]);
+        }
+        barrier();
+    }
+
+    // First thread in workgroup does atomic max to global result
+    if (lid == 0u) {
+        float newVal = sharedMax[0];
+        uint newBits = floatBitsToUint(newVal);
+
+        // Atomic max using compare-and-swap loop
+        uint oldBits = maxValueBits;
+        while (newVal > uintBitsToFloat(oldBits)) {
+            uint result = atomicCompSwap(maxValueBits, oldBits, newBits);
+            if (result == oldBits) break;
+            oldBits = result;
+        }
+    }
+}
+)";
+
 GLRenderer::GLRenderer() {}
 
 GLRenderer::~GLRenderer() {
@@ -202,6 +259,9 @@ bool GLRenderer::init(int width, int height) {
         return false;
     }
 
+    // Try to create compute shader for GPU max reduction (GL 4.3+)
+    createComputeShader();
+
     float_buffer_.resize(width * height * 4);
 
     return true;
@@ -218,6 +278,14 @@ void GLRenderer::shutdown() {
         glDeleteProgram(pp_shader_program_);
         pp_shader_program_ = 0;
     }
+    if (max_compute_shader_) {
+        glDeleteProgram(max_compute_shader_);
+        max_compute_shader_ = 0;
+    }
+    if (max_ssbo_) {
+        glDeleteBuffers(1, &max_ssbo_);
+        max_ssbo_ = 0;
+    }
     if (vao_) {
         glDeleteVertexArrays(1, &vao_);
         vao_ = 0;
@@ -230,6 +298,7 @@ void GLRenderer::shutdown() {
         glDeleteBuffers(1, &vbo_);
         vbo_ = 0;
     }
+    has_compute_shaders_ = false;
 }
 
 bool GLRenderer::createFramebuffer() {
@@ -535,21 +604,138 @@ void GLRenderer::readPixels(std::vector<uint8_t>& out, float exposure, float con
     }
 }
 
+bool GLRenderer::createComputeShader() {
+    // Check for compute shader support (GL 4.3+)
+    GLint major, minor;
+    glGetIntegerv(GL_MAJOR_VERSION, &major);
+    glGetIntegerv(GL_MINOR_VERSION, &minor);
+
+    if (major < 4 || (major == 4 && minor < 3)) {
+        std::cout << "OpenGL " << major << "." << minor << " - compute shaders not available, using CPU fallback\n";
+        has_compute_shaders_ = false;
+        return false;
+    }
+
+    // Compile compute shader
+    GLuint compute_shader = glCreateShader(GL_COMPUTE_SHADER);
+    glShaderSource(compute_shader, 1, &max_compute_shader_src, nullptr);
+    glCompileShader(compute_shader);
+
+    GLint success;
+    glGetShaderiv(compute_shader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        char log[512];
+        glGetShaderInfoLog(compute_shader, 512, nullptr, log);
+        std::cerr << "Compute shader error: " << log << "\n";
+        glDeleteShader(compute_shader);
+        has_compute_shaders_ = false;
+        return false;
+    }
+
+    // Link compute program
+    max_compute_shader_ = glCreateProgram();
+    glAttachShader(max_compute_shader_, compute_shader);
+    glLinkProgram(max_compute_shader_);
+
+    glGetProgramiv(max_compute_shader_, GL_LINK_STATUS, &success);
+    if (!success) {
+        char log[512];
+        glGetProgramInfoLog(max_compute_shader_, 512, nullptr, log);
+        std::cerr << "Compute shader link error: " << log << "\n";
+        glDeleteShader(compute_shader);
+        glDeleteProgram(max_compute_shader_);
+        max_compute_shader_ = 0;
+        has_compute_shaders_ = false;
+        return false;
+    }
+
+    glDeleteShader(compute_shader);
+
+    // Create SSBO for max result
+    glGenBuffers(1, &max_ssbo_);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, max_ssbo_);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(uint32_t), nullptr, GL_DYNAMIC_READ);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+    has_compute_shaders_ = true;
+    std::cout << "OpenGL " << major << "." << minor << " - compute shaders enabled for GPU max reduction\n";
+    return true;
+}
+
+float GLRenderer::computeMaxGPU() {
+    if (!has_compute_shaders_) {
+        return 0.0f;  // Will fall back to CPU
+    }
+
+    // Reset max value to 0
+    uint32_t zero = 0;
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, max_ssbo_);
+    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(uint32_t), &zero);
+
+    // Bind resources
+    glUseProgram(max_compute_shader_);
+    glBindImageTexture(0, float_texture_, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, max_ssbo_);
+
+    // Dispatch compute shader - work groups of 16x16
+    GLuint num_groups_x = (width_ + 15) / 16;
+    GLuint num_groups_y = (height_ + 15) / 16;
+    glDispatchCompute(num_groups_x, num_groups_y, 1);
+
+    // Wait for completion
+    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+
+    // Read back result
+    uint32_t max_bits;
+    glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(uint32_t), &max_bits);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+    // Convert bits back to float
+    float max_val;
+    std::memcpy(&max_val, &max_bits, sizeof(float));
+
+    return max_val;
+}
+
 void GLRenderer::updateDisplayTexture(float exposure, float contrast, float gamma,
                                       ToneMapOperator tone_map, float white_point) {
     // Flush any pending lines first
     flush();
 
-    // Read float texture to find max value (CPU - required for proper normalization)
-    glBindTexture(GL_TEXTURE_2D, float_texture_);
-    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, float_buffer_.data());
-
+    // Find max value - use GPU compute shader if available, else CPU
     float max_val = 0.0f;
-    for (size_t i = 0; i < float_buffer_.size(); i += 4) {
-        max_val = std::max(max_val, float_buffer_[i]);
-        max_val = std::max(max_val, float_buffer_[i + 1]);
-        max_val = std::max(max_val, float_buffer_[i + 2]);
+
+    if (has_compute_shaders_) {
+        max_val = computeMaxGPU();
+
+#ifdef DEBUG_GPU_MAX
+        // Verify GPU result matches CPU
+        glBindTexture(GL_TEXTURE_2D, float_texture_);
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, float_buffer_.data());
+        float cpu_max = 0.0f;
+        for (size_t i = 0; i < float_buffer_.size(); i += 4) {
+            cpu_max = std::max(cpu_max, float_buffer_[i]);
+            cpu_max = std::max(cpu_max, float_buffer_[i + 1]);
+            cpu_max = std::max(cpu_max, float_buffer_[i + 2]);
+        }
+        float diff = std::abs(max_val - cpu_max);
+        if (diff > 1e-4f) {
+            std::cerr << "GPU/CPU max mismatch: GPU=" << max_val << " CPU=" << cpu_max
+                      << " diff=" << diff << "\n";
+        }
+#endif
+    } else {
+        // CPU fallback: read float texture
+        glBindTexture(GL_TEXTURE_2D, float_texture_);
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, float_buffer_.data());
+
+        for (size_t i = 0; i < float_buffer_.size(); i += 4) {
+            max_val = std::max(max_val, float_buffer_[i]);
+            max_val = std::max(max_val, float_buffer_[i + 1]);
+            max_val = std::max(max_val, float_buffer_[i + 2]);
+        }
     }
+
     if (max_val < 1e-6f) {
         max_val = 1.0f;
     }

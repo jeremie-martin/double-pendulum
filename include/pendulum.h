@@ -78,30 +78,51 @@ private:
     // Compute angular accelerations using Lagrangian mechanics
     std::pair<double, double> accelerations(double theta1, double theta2, double omega1,
                                             double omega2) const {
+        // Precompute common angle differences
+        double delta = theta1 - theta2;
+        double delta2 = 2.0 * delta;  // = 2*theta1 - 2*theta2
+
+        // Use sincos for efficiency (computes both in ~same time as one)
+        double sin_theta1, cos_theta1;
+        double sin_delta, cos_delta;
+        double sin_delta2, cos_delta2;
+        double sin_t1_minus_2t2;
+
+        sincos(theta1, &sin_theta1, &cos_theta1);
+        sincos(delta, &sin_delta, &cos_delta);
+        sincos(delta2, &sin_delta2, &cos_delta2);
+        sin_t1_minus_2t2 = std::sin(theta1 - 2.0 * theta2);
+
+        // Common denominator factor
+        double denom_factor = 2.0 * M1 + M2 - M2 * cos_delta2;
+
         // Angular acceleration of first pendulum
-        double num1 = -G * (2 * M1 + M2) * std::sin(theta1);
-        double num2 = -M2 * G * std::sin(theta1 - 2 * theta2);
-        double num3 = -2 * std::sin(theta1 - theta2) * M2;
-        double num4 = omega2 * omega2 * L2 + omega1 * omega1 * L1 * std::cos(theta1 - theta2);
-        double den = L1 * (2 * M1 + M2 - M2 * std::cos(2 * theta1 - 2 * theta2));
-        double a1 = (num1 + num2 + num3 * num4) / den;
+        double num1 = -G * (2.0 * M1 + M2) * sin_theta1;
+        double num2 = -M2 * G * sin_t1_minus_2t2;
+        double num3 = -2.0 * sin_delta * M2;
+        double num4 = omega2 * omega2 * L2 + omega1 * omega1 * L1 * cos_delta;
+        double a1 = (num1 + num2 + num3 * num4) / (L1 * denom_factor);
 
         // Angular acceleration of second pendulum
-        num1 = 2 * std::sin(theta1 - theta2);
-        num2 = omega1 * omega1 * L1 * (M1 + M2);
-        num3 = G * (M1 + M2) * std::cos(theta1);
-        num4 = omega2 * omega2 * L2 * M2 * std::cos(theta1 - theta2);
-        den = L2 * (2 * M1 + M2 - M2 * std::cos(2 * theta1 - 2 * theta2));
-        double a2 = (num1 * (num2 + num3 + num4)) / den;
+        double n1 = 2.0 * sin_delta;
+        double n2 = omega1 * omega1 * L1 * (M1 + M2);
+        double n3 = G * (M1 + M2) * cos_theta1;
+        double n4 = omega2 * omega2 * L2 * M2 * cos_delta;
+        double a2 = (n1 * (n2 + n3 + n4)) / (L2 * denom_factor);
 
         return {a1, a2};
     }
 
     PendulumState computeState() const {
-        double x1 = L1 * std::sin(th1);
-        double y1 = L1 * std::cos(th1);
-        double x2 = x1 + L2 * std::sin(th2);
-        double y2 = y1 + L2 * std::cos(th2);
+        // Use sincos for efficiency
+        double sin_th1, cos_th1, sin_th2, cos_th2;
+        sincos(th1, &sin_th1, &cos_th1);
+        sincos(th2, &sin_th2, &cos_th2);
+
+        double x1 = L1 * sin_th1;
+        double y1 = L1 * cos_th1;
+        double x2 = x1 + L2 * sin_th2;
+        double y2 = y1 + L2 * cos_th2;
         return {x1, y1, x2, y2, th1, th2};
     }
 };
