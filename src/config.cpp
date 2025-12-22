@@ -1,6 +1,8 @@
 #include "config.h"
 
 #include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <toml.hpp>
 
@@ -414,4 +416,129 @@ bool Config::applyOverride(std::string const& key, std::string const& value) {
     }
 
     return true;
+}
+
+namespace {
+std::string colorSchemeToString(ColorScheme scheme) {
+    switch (scheme) {
+    case ColorScheme::Spectrum: return "spectrum";
+    case ColorScheme::Rainbow: return "rainbow";
+    case ColorScheme::Heat: return "heat";
+    case ColorScheme::Cool: return "cool";
+    case ColorScheme::Monochrome: return "monochrome";
+    }
+    return "spectrum";
+}
+
+std::string outputFormatToString(OutputFormat format) {
+    switch (format) {
+    case OutputFormat::PNG: return "png";
+    case OutputFormat::Video: return "video";
+    }
+    return "png";
+}
+
+std::string toneMapToString(ToneMapOperator op) {
+    switch (op) {
+    case ToneMapOperator::None: return "none";
+    case ToneMapOperator::Reinhard: return "reinhard";
+    case ToneMapOperator::ReinhardExtended: return "reinhard_extended";
+    case ToneMapOperator::ACES: return "aces";
+    case ToneMapOperator::Logarithmic: return "logarithmic";
+    }
+    return "none";
+}
+
+std::string normalizationToString(NormalizationMode mode) {
+    switch (mode) {
+    case NormalizationMode::PerFrame: return "per_frame";
+    case NormalizationMode::ByCount: return "by_count";
+    }
+    return "per_frame";
+}
+
+std::string physicsQualityToString(PhysicsQuality quality) {
+    switch (quality) {
+    case PhysicsQuality::Low: return "low";
+    case PhysicsQuality::Medium: return "medium";
+    case PhysicsQuality::High: return "high";
+    case PhysicsQuality::Ultra: return "ultra";
+    case PhysicsQuality::Custom: return "custom";
+    }
+    return "high";
+}
+} // namespace
+
+void Config::save(std::string const& path) const {
+    std::ofstream file(path);
+    if (!file) {
+        std::cerr << "Error: Could not open " << path << " for writing\n";
+        return;
+    }
+
+    file << std::fixed << std::setprecision(6);
+
+    // Physics section
+    file << "[physics]\n";
+    file << "gravity = " << physics.gravity << "\n";
+    file << "length1 = " << physics.length1 << "\n";
+    file << "length2 = " << physics.length2 << "\n";
+    file << "mass1 = " << physics.mass1 << "\n";
+    file << "mass2 = " << physics.mass2 << "\n";
+    file << "initial_angle1_deg = " << rad2deg(physics.initial_angle1) << "\n";
+    file << "initial_angle2_deg = " << rad2deg(physics.initial_angle2) << "\n";
+    file << "initial_velocity1 = " << physics.initial_velocity1 << "\n";
+    file << "initial_velocity2 = " << physics.initial_velocity2 << "\n";
+    file << "\n";
+
+    // Simulation section
+    file << "[simulation]\n";
+    file << "pendulum_count = " << simulation.pendulum_count << "\n";
+    file << "angle_variation_deg = " << rad2deg(simulation.angle_variation) << "\n";
+    file << "duration_seconds = " << simulation.duration_seconds << "\n";
+    file << "total_frames = " << simulation.total_frames << "\n";
+    file << "physics_quality = \"" << physicsQualityToString(simulation.physics_quality) << "\"\n";
+    file << "max_dt = " << simulation.max_dt << "\n";
+    file << "\n";
+
+    // Render section
+    file << "[render]\n";
+    file << "width = " << render.width << "\n";
+    file << "height = " << render.height << "\n";
+    file << "\n";
+
+    // Post-process section
+    file << "[post_process]\n";
+    file << "tone_map = \"" << toneMapToString(post_process.tone_map) << "\"\n";
+    file << "exposure = " << post_process.exposure << "\n";
+    file << "contrast = " << post_process.contrast << "\n";
+    file << "gamma = " << post_process.gamma << "\n";
+    file << "normalization = \"" << normalizationToString(post_process.normalization) << "\"\n";
+    file << "\n";
+
+    // Color section
+    file << "[color]\n";
+    file << "scheme = \"" << colorSchemeToString(color.scheme) << "\"\n";
+    file << "start = " << color.start << "\n";
+    file << "end = " << color.end << "\n";
+    file << "\n";
+
+    // Detection section
+    file << "[detection]\n";
+    file << "boom_threshold = " << detection.boom_threshold << "\n";
+    file << "boom_confirmation = " << detection.boom_confirmation << "\n";
+    file << "white_threshold = " << detection.white_threshold << "\n";
+    file << "white_confirmation = " << detection.white_confirmation << "\n";
+    file << "early_stop_after_white = " << (detection.early_stop_after_white ? "true" : "false")
+         << "\n";
+    file << "\n";
+
+    // Output section
+    file << "[output]\n";
+    file << "format = \"" << outputFormatToString(output.format) << "\"\n";
+    file << "directory = \"" << output.directory << "\"\n";
+    file << "filename_prefix = \"" << output.filename_prefix << "\"\n";
+    file << "video_codec = \"" << output.video_codec << "\"\n";
+    file << "video_crf = " << output.video_crf << "\n";
+    file << "video_fps = " << output.video_fps << "\n";
 }

@@ -131,6 +131,8 @@ struct BatchConfig {
     Range angle1_range{-180.0, 180.0};
     Range angle2_range{-180.0, 180.0};
     Range variation_range{0.05, 0.2};
+    Range velocity1_range{0.0, 0.0};  // Initial angular velocity ranges (rad/s)
+    Range velocity2_range{0.0, 0.0};  // Zero range = no randomization
 
     // Base config (for parameters not being varied)
     Config base_config;
@@ -142,6 +144,8 @@ struct BatchConfig {
 
     // Probe settings for pre-filtering (Random mode only)
     int probe_pendulum_count = 1000;  // Pendulum count for fast probing
+    int probe_total_frames = 0;       // Frame count for probing (0 = use base_config)
+    double probe_max_dt = 0.0;        // Max timestep for probing (0 = use base_config)
     int max_probe_retries = 10;       // Max retries before giving up on a slot
     bool probe_enabled = false;       // Enable probe-based filtering
 

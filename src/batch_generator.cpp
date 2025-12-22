@@ -182,6 +182,18 @@ BatchConfig BatchConfig::load(std::string const& path) {
                     config.variation_range.max = arr->at(1).value<double>().value_or(0.2);
                 }
             }
+            if (auto node = ranges->get("initial_velocity1")) {
+                if (auto arr = node->as_array(); arr && arr->size() >= 2) {
+                    config.velocity1_range.min = arr->at(0).value<double>().value_or(0.0);
+                    config.velocity1_range.max = arr->at(1).value<double>().value_or(0.0);
+                }
+            }
+            if (auto node = ranges->get("initial_velocity2")) {
+                if (auto arr = node->as_array(); arr && arr->size() >= 2) {
+                    config.velocity2_range.min = arr->at(0).value<double>().value_or(0.0);
+                    config.velocity2_range.max = arr->at(1).value<double>().value_or(0.0);
+                }
+            }
         }
 
         // Base config path
@@ -211,6 +223,12 @@ BatchConfig BatchConfig::load(std::string const& path) {
             config.probe_enabled = true; // Enable probing if section exists
             if (auto pc = probe->get("pendulum_count")) {
                 config.probe_pendulum_count = pc->value<int>().value_or(1000);
+            }
+            if (auto tf = probe->get("total_frames")) {
+                config.probe_total_frames = tf->value<int>().value_or(0);
+            }
+            if (auto md = probe->get("max_dt")) {
+                config.probe_max_dt = md->value<double>().value_or(0.0);
             }
             if (auto mr = probe->get("max_retries")) {
                 config.max_probe_retries = mr->value<int>().value_or(10);
@@ -541,6 +559,10 @@ bool BatchGenerator::generateOne(int index) {
         config.output.format = OutputFormat::Video;
         config.output.mode = OutputMode::Direct;
 
+        // Create output directory and save resolved config
+        std::filesystem::create_directories(config.output.directory);
+        config.save(config.output.directory + "/config.toml");
+
         std::cout << "Rendering: angles=" << std::fixed << std::setprecision(1)
                   << rad2deg(config.physics.initial_angle1) << ", "
                   << rad2deg(config.physics.initial_angle2) << " deg\n";
@@ -640,6 +662,20 @@ Config BatchGenerator::generateRandomConfig() {
     config.physics.initial_angle2 = deg2rad(angle2_dist(rng_));
     config.simulation.angle_variation = deg2rad(variation_dist(rng_));
 
+    // Randomize velocities if range is specified (min != max or either non-zero)
+    if (config_.velocity1_range.min != config_.velocity1_range.max ||
+        config_.velocity1_range.min != 0.0) {
+        std::uniform_real_distribution<double> vel1_dist(config_.velocity1_range.min,
+                                                         config_.velocity1_range.max);
+        config.physics.initial_velocity1 = vel1_dist(rng_);
+    }
+    if (config_.velocity2_range.min != config_.velocity2_range.max ||
+        config_.velocity2_range.min != 0.0) {
+        std::uniform_real_distribution<double> vel2_dist(config_.velocity2_range.min,
+                                                         config_.velocity2_range.max);
+        config.physics.initial_velocity2 = vel2_dist(rng_);
+    }
+
     // Select random color preset if available
     if (!config_.color_presets.empty()) {
         std::uniform_int_distribution<size_t> preset_dist(0, config_.color_presets.size() - 1);
@@ -678,9 +714,20 @@ std::string BatchGenerator::generateGridFolderName(std::map<std::string, std::st
 }
 
 std::pair<bool, ProbeResults> BatchGenerator::runProbe(Config const& config) {
-    // Create a modified config for probing (fewer pendulums)
+    // Create a modified config for probing (fewer pendulums, faster settings)
     Config probe_config = config;
     probe_config.simulation.pendulum_count = config_.probe_pendulum_count;
+
+    // Apply probe-specific frame count if specified
+    if (config_.probe_total_frames > 0) {
+        probe_config.simulation.total_frames = config_.probe_total_frames;
+    }
+
+    // Apply probe-specific max_dt if specified (for faster probing)
+    if (config_.probe_max_dt > 0.0) {
+        probe_config.simulation.max_dt = config_.probe_max_dt;
+        probe_config.simulation.physics_quality = PhysicsQuality::Custom;
+    }
 
     // Run probe simulation (physics only, no rendering)
     Simulation sim(probe_config);
@@ -704,6 +751,10 @@ bool BatchGenerator::generateOneGrid(int index, std::map<std::string, std::strin
         config.output.directory = batch_dir_.string() + "/" + folder_name;
         config.output.format = OutputFormat::Video;
         config.output.mode = OutputMode::Direct;
+
+        // Create output directory and save resolved config
+        std::filesystem::create_directories(config.output.directory);
+        config.save(config.output.directory + "/config.toml");
 
         std::cout << "Parameters:";
         for (auto const& [key, value] : params) {

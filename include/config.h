@@ -161,6 +161,9 @@ struct Config {
     // Load with defaults
     static Config defaults();
 
+    // Save to TOML file (for batch mode - saves actual resolved parameters)
+    void save(std::string const& path) const;
+
     // Apply a parameter override from CLI (e.g., "simulation.pendulum_count", "100000")
     // Returns true if the key was recognized and applied
     bool applyOverride(std::string const& key, std::string const& value);

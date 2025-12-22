@@ -9,7 +9,9 @@ base_config = "config/batch_template.toml" # Base parameters for non-randomized 
 [probe]
 enabled = true           # Enable probe-based filtering
 pendulum_count = 1000    # Fast probing with fewer pendulums (no rendering)
-max_retries = 10         # Retry with new params if probe fails
+total_frames = 100       # Fewer frames for faster probing (0 = use base_config)
+max_dt = 0.02            # Larger timestep for faster probing (0 = use base_config)
+max_retries = 1000       # Retry with new params if probe fails
 
 [physics_ranges]
 # Random initial angles (in degrees)
@@ -17,11 +19,14 @@ initial_angle1_deg = [-100.0, 200.0]
 initial_angle2_deg = [-100.0, 200.0]
 # Random angle variation (in degrees)
 angle_variation_deg = [0.05, 0.1]
+# Random initial velocities (rad/s) - small values for variety
+initial_velocity1 = [-0.5, 0.5]
+initial_velocity2 = [-0.5, 0.5]
 
 [filter]
 min_boom_seconds = 8.0    # Boom must happen after this time
 max_boom_seconds = 15.0   # Boom must happen before this time
-min_spread_ratio = 0.3    # At least 30% of pendulums above horizontal
+min_spread_ratio = 0.4    # At least 40% of pendulums above horizontal
 require_boom = true       # Reject simulations with no detectable boom
 require_valid_music = true # Fail if no music track has drop > boom time
 
