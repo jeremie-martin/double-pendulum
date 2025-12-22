@@ -222,6 +222,38 @@ Config Config::load(std::string const& path) {
         config.render.height = defaults.render.height;
     }
 
+    // Physics validation
+    if (config.physics.mass1 <= 0 || config.physics.mass2 <= 0) {
+        std::cerr << "Warning: masses must be positive, using defaults\n";
+        config.physics.mass1 = defaults.physics.mass1;
+        config.physics.mass2 = defaults.physics.mass2;
+    }
+    if (config.physics.length1 <= 0 || config.physics.length2 <= 0) {
+        std::cerr << "Warning: lengths must be positive, using defaults\n";
+        config.physics.length1 = defaults.physics.length1;
+        config.physics.length2 = defaults.physics.length2;
+    }
+
+    // Post-processing validation
+    if (config.post_process.gamma <= 0) {
+        std::cerr << "Warning: gamma must be positive, using default ("
+                  << defaults.post_process.gamma << ")\n";
+        config.post_process.gamma = defaults.post_process.gamma;
+    }
+    if (config.post_process.contrast < 0) {
+        std::cerr << "Warning: contrast cannot be negative, using default ("
+                  << defaults.post_process.contrast << ")\n";
+        config.post_process.contrast = defaults.post_process.contrast;
+    }
+
+    // Color range validation
+    if (config.color.start < 0 || config.color.start > 1 ||
+        config.color.end < 0 || config.color.end > 1) {
+        std::cerr << "Warning: color range values must be in [0,1], using defaults\n";
+        config.color.start = defaults.color.start;
+        config.color.end = defaults.color.end;
+    }
+
     return config;
 }
 

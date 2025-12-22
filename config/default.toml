@@ -17,8 +17,15 @@ pendulum_count = 10000
 angle_variation_deg = 0.1      # Spread around initial_angle1
 duration_seconds = 11.0        # Physical simulation time
 total_frames = 660             # Number of frames to output
-physics_quality = "high"       # "low", "medium", "high", "ultra" - or use max_dt directly
-# max_dt = 0.007              # Alternative: specify max timestep in seconds
+
+# Physics quality controls simulation accuracy via max timestep:
+#   low    = max_dt 20ms (~100 steps/period, visible artifacts)
+#   medium = max_dt 12ms (~167 steps/period, acceptable quality)
+#   high   = max_dt 7ms  (~286 steps/period, gold standard)
+#   ultra  = max_dt 3ms  (~667 steps/period, perfect accuracy)
+# You can also set max_dt directly (in seconds) to override the preset.
+physics_quality = "high"
+# max_dt = 0.007              # Uncomment to override quality preset
 
 [render]
 width = 2160

@@ -124,6 +124,12 @@ struct DetectionParams {
 
 enum class OutputFormat { PNG, Video };
 
+// Output directory mode
+enum class OutputMode {
+    Timestamped,  // Create run_YYYYMMDD_HHMMSS subdirectory (default for single runs)
+    Direct        // Write directly to output.directory (used by batch mode)
+};
+
 struct OutputParams {
     OutputFormat format = OutputFormat::PNG;
     std::string directory = "output";
@@ -131,7 +137,7 @@ struct OutputParams {
     std::string video_codec = "libx264";
     int video_crf = 23;
     int video_fps = 60; // Only affects video encoding, not simulation
-    bool skip_run_subdirectory = false; // If true, output directly to directory (for batch mode)
+    OutputMode mode = OutputMode::Timestamped;
 };
 
 // Analysis mode parameters for extended statistics

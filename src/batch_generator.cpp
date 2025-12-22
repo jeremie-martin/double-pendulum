@@ -418,10 +418,10 @@ bool BatchGenerator::generateOne(int index) {
         // Generate random config
         Config config = generateRandomConfig();
 
-        // Set output directory for this video (skip run_ subdirectory)
+        // Set output directory for this video (direct mode, no timestamp subdirectory)
         config.output.directory = batch_dir_.string() + "/" + video_name;
         config.output.format = OutputFormat::Video;
-        config.output.skip_run_subdirectory = true;
+        config.output.mode = OutputMode::Direct;
 
         std::cout << "Initial angles: " << rad2deg(config.physics.initial_angle1) << ", "
                   << rad2deg(config.physics.initial_angle2) << " deg\n";
@@ -528,10 +528,10 @@ bool BatchGenerator::generateOneGrid(int index, std::map<std::string, std::strin
         // Generate config from grid params
         Config config = generateGridConfig(params);
 
-        // Set output directory (skip run_ subdirectory)
+        // Set output directory (direct mode, no timestamp subdirectory)
         config.output.directory = batch_dir_.string() + "/" + folder_name;
         config.output.format = OutputFormat::Video;
-        config.output.skip_run_subdirectory = true;
+        config.output.mode = OutputMode::Direct;
 
         std::cout << "Parameters:";
         for (auto const& [key, value] : params) {

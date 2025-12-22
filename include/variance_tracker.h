@@ -3,7 +3,23 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <optional>
 #include <vector>
+
+// Standalone variance computation - shared by VarianceTracker and AnalysisTracker
+inline double computeVariance(std::vector<double> const& values) {
+    if (values.empty()) {
+        return 0.0;
+    }
+    double sum = std::accumulate(values.begin(), values.end(), 0.0);
+    double mean = sum / values.size();
+    double var_sum = 0.0;
+    for (double v : values) {
+        double diff = v - mean;
+        var_sum += diff * diff;
+    }
+    return var_sum / values.size();
+}
 
 // Simple variance tracker - computes and stores variance history
 // All detection logic (boom, white, thresholds) is external
@@ -12,26 +28,8 @@ public:
     // Update with angles from all pendulums for current frame
     // Returns the computed variance for this frame
     double update(std::vector<double> const& angles) {
-        if (angles.empty()) {
-            variance_history_.push_back(0.0);
-            current_variance_ = 0.0;
-            return 0.0;
-        }
-
-        // Calculate mean
-        double sum = std::accumulate(angles.begin(), angles.end(), 0.0);
-        double mean = sum / angles.size();
-
-        // Calculate variance
-        double var_sum = 0.0;
-        for (double a : angles) {
-            double diff = a - mean;
-            var_sum += diff * diff;
-        }
-
-        current_variance_ = var_sum / angles.size();
+        current_variance_ = computeVariance(angles);
         variance_history_.push_back(current_variance_);
-
         return current_variance_;
     }
 
@@ -89,6 +87,40 @@ inline int checkThresholdCrossing(std::vector<double> const& history, double thr
     }
 
     return -1;
+}
+
+// Results structure for boom/white detection
+struct ThresholdResults {
+    std::optional<int> boom_frame;
+    double boom_variance = 0.0;
+    std::optional<int> white_frame;
+    double white_variance = 0.0;
+};
+
+// Update threshold detection results given current state
+// This eliminates duplicate detection logic in simulation.cpp and main_gui.cpp
+inline void updateDetection(ThresholdResults& results, VarianceTracker const& tracker,
+                            double boom_threshold, int boom_confirmation,
+                            double white_threshold, int white_confirmation) {
+    auto const& history = tracker.getHistory();
+
+    // Check for boom detection
+    if (!results.boom_frame.has_value()) {
+        int boom = checkThresholdCrossing(history, boom_threshold, boom_confirmation);
+        if (boom >= 0) {
+            results.boom_frame = boom;
+            results.boom_variance = tracker.getVarianceAt(boom);
+        }
+    }
+
+    // Check for white detection (only after boom)
+    if (results.boom_frame.has_value() && !results.white_frame.has_value()) {
+        int white = checkThresholdCrossing(history, white_threshold, white_confirmation);
+        if (white >= 0) {
+            results.white_frame = white;
+            results.white_variance = tracker.getVarianceAt(white);
+        }
+    }
 }
 
 } // namespace VarianceUtils

@@ -216,27 +216,18 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     // Extended analysis tracking (includes energy and brightness)
     state.analysis_tracker.update(state.pendulums, 0.0f, 0.0f);
 
-    // Check for boom
-    if (!state.boom_frame.has_value()) {
-        int boom = VarianceUtils::checkThresholdCrossing(state.variance_tracker.getHistory(),
-                                                         state.config.detection.boom_threshold,
-                                                         state.config.detection.boom_confirmation);
-        if (boom >= 0) {
-            state.boom_frame = boom;
-            state.boom_variance = state.variance_tracker.getVarianceAt(boom);
-        }
-    }
-
-    // Check for white
-    if (state.boom_frame.has_value() && !state.white_frame.has_value()) {
-        int white = VarianceUtils::checkThresholdCrossing(
-            state.variance_tracker.getHistory(), state.config.detection.white_threshold,
-            state.config.detection.white_confirmation);
-        if (white >= 0) {
-            state.white_frame = white;
-            state.white_variance = state.variance_tracker.getVarianceAt(white);
-        }
-    }
+    // Update detection using shared utility
+    VarianceUtils::ThresholdResults detection{state.boom_frame, state.boom_variance,
+                                               state.white_frame, state.white_variance};
+    VarianceUtils::updateDetection(detection, state.variance_tracker,
+                                   state.config.detection.boom_threshold,
+                                   state.config.detection.boom_confirmation,
+                                   state.config.detection.white_threshold,
+                                   state.config.detection.white_confirmation);
+    state.boom_frame = detection.boom_frame;
+    state.boom_variance = detection.boom_variance;
+    state.white_frame = detection.white_frame;
+    state.white_variance = detection.white_variance;
 
     auto sim_end = std::chrono::high_resolution_clock::now();
     state.sim_time_ms = std::chrono::duration<double, std::milli>(sim_end - start).count();
@@ -455,6 +446,247 @@ void drawExportPanel(AppState& state) {
     }
 }
 
+// Helper for consistent tooltips
+void tooltip(const char* text) {
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", text);
+    }
+}
+
+void drawPreviewSection(AppState& state) {
+    if (ImGui::CollapsingHeader("Preview", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::SliderInt("Pendulums", &state.preview.pendulum_count, 1000, 100000);
+        tooltip("Number of pendulums in preview (lower = faster)");
+
+        ImGui::SliderInt("Preview Size", &state.preview.width, 270, 1080);
+        tooltip("Preview resolution (lower = faster)");
+        state.preview.height = state.preview.width;
+
+        ImGui::SliderInt("Substeps", &state.preview.substeps, 1, 50);
+        tooltip("Physics substeps per frame (higher = more accurate)");
+    }
+}
+
+void drawPhysicsSection(AppState& state) {
+    if (ImGui::CollapsingHeader("Physics", ImGuiTreeNodeFlags_DefaultOpen)) {
+        auto gravity = static_cast<float>(state.config.physics.gravity);
+        if (ImGui::SliderFloat("Gravity", &gravity, 0.1f, 20.0f)) {
+            state.config.physics.gravity = gravity;
+        }
+        tooltip("Gravitational acceleration (m/s^2)");
+
+        auto length1 = static_cast<float>(state.config.physics.length1);
+        if (ImGui::SliderFloat("Length 1", &length1, 0.1f, 3.0f)) {
+            state.config.physics.length1 = length1;
+        }
+        tooltip("Length of first pendulum arm (m)");
+
+        auto length2 = static_cast<float>(state.config.physics.length2);
+        if (ImGui::SliderFloat("Length 2", &length2, 0.1f, 3.0f)) {
+            state.config.physics.length2 = length2;
+        }
+        tooltip("Length of second pendulum arm (m)");
+
+        auto mass1 = static_cast<float>(state.config.physics.mass1);
+        if (ImGui::SliderFloat("Mass 1", &mass1, 0.1f, 5.0f)) {
+            state.config.physics.mass1 = mass1;
+        }
+        tooltip("Mass of first bob (kg)");
+
+        auto mass2 = static_cast<float>(state.config.physics.mass2);
+        if (ImGui::SliderFloat("Mass 2", &mass2, 0.1f, 5.0f)) {
+            state.config.physics.mass2 = mass2;
+        }
+        tooltip("Mass of second bob (kg)");
+
+        auto angle1_deg = static_cast<float>(rad2deg(state.config.physics.initial_angle1));
+        if (ImGui::SliderFloat("Initial Angle 1", &angle1_deg, -180.0f, 180.0f)) {
+            state.config.physics.initial_angle1 = deg2rad(angle1_deg);
+        }
+        tooltip("Starting angle of first arm (degrees from vertical)");
+
+        auto angle2_deg = static_cast<float>(rad2deg(state.config.physics.initial_angle2));
+        if (ImGui::SliderFloat("Initial Angle 2", &angle2_deg, -180.0f, 180.0f)) {
+            state.config.physics.initial_angle2 = deg2rad(angle2_deg);
+        }
+        tooltip("Starting angle of second arm (degrees from vertical)");
+
+        auto vel1 = static_cast<float>(state.config.physics.initial_velocity1);
+        if (ImGui::SliderFloat("Initial Vel 1", &vel1, -10.0f, 10.0f)) {
+            state.config.physics.initial_velocity1 = vel1;
+        }
+        tooltip("Starting angular velocity of first arm (rad/s)");
+
+        auto vel2 = static_cast<float>(state.config.physics.initial_velocity2);
+        if (ImGui::SliderFloat("Initial Vel 2", &vel2, -10.0f, 10.0f)) {
+            state.config.physics.initial_velocity2 = vel2;
+        }
+        tooltip("Starting angular velocity of second arm (rad/s)");
+    }
+}
+
+void drawSimulationSection(AppState& state) {
+    if (ImGui::CollapsingHeader("Simulation")) {
+        auto variation_deg = static_cast<float>(rad2deg(state.config.simulation.angle_variation));
+        if (ImGui::SliderFloat("Angle Variation", &variation_deg, 0.001f, 5.0f, "%.3f deg")) {
+            state.config.simulation.angle_variation = deg2rad(variation_deg);
+        }
+        tooltip("Total spread of initial angles across all pendulums");
+
+        auto duration = static_cast<float>(state.config.simulation.duration_seconds);
+        if (ImGui::SliderFloat("Duration (s)", &duration, 1.0f, 60.0f)) {
+            state.config.simulation.duration_seconds = duration;
+        }
+        tooltip("Total simulation time in physical seconds");
+
+        ImGui::SliderInt("Total Frames", &state.config.simulation.total_frames, 60, 3600);
+        tooltip("Number of frames to render");
+
+        // Physics quality settings
+        const char* quality_names[] = {"Low", "Medium", "High", "Ultra", "Custom"};
+        int quality_idx = static_cast<int>(state.config.simulation.physics_quality);
+        if (ImGui::Combo("Physics Quality", &quality_idx, quality_names, 5)) {
+            state.config.simulation.physics_quality = static_cast<PhysicsQuality>(quality_idx);
+            if (quality_idx < 4) { // Not Custom
+                state.config.simulation.max_dt =
+                    qualityToMaxDt(state.config.simulation.physics_quality);
+            }
+        }
+        tooltip("Low=20ms, Medium=12ms, High=7ms, Ultra=3ms max timestep");
+
+        // Show max_dt slider (editable, sets quality to Custom)
+        auto max_dt_ms = static_cast<float>(state.config.simulation.max_dt * 1000.0);
+        if (ImGui::SliderFloat("Max dt (ms)", &max_dt_ms, 1.0f, 30.0f, "%.1f")) {
+            state.config.simulation.max_dt = max_dt_ms / 1000.0;
+            state.config.simulation.physics_quality = PhysicsQuality::Custom;
+        }
+        tooltip("Maximum physics timestep (lower = more accurate)");
+
+        // Display computed values
+        ImGui::Text("Substeps: %d, dt = %.4f ms", state.config.simulation.substeps(),
+                    state.config.simulation.dt() * 1000.0);
+    }
+}
+
+void drawColorSection(AppState& state) {
+    if (ImGui::CollapsingHeader("Color")) {
+        bool color_changed = false;
+
+        const char* schemes[] = {"Spectrum", "Rainbow", "Heat", "Cool", "Monochrome"};
+        int scheme_idx = static_cast<int>(state.config.color.scheme);
+        if (ImGui::Combo("Color Scheme", &scheme_idx, schemes, 5)) {
+            state.config.color.scheme = static_cast<ColorScheme>(scheme_idx);
+            color_changed = true;
+        }
+        tooltip("Color mapping for pendulum index");
+
+        auto color_start = static_cast<float>(state.config.color.start);
+        if (ImGui::SliderFloat("Start", &color_start, 0.0f, 1.0f, "%.2f")) {
+            state.config.color.start = color_start;
+            color_changed = true;
+        }
+        tooltip("Start position in color range [0-1]");
+
+        auto color_end = static_cast<float>(state.config.color.end);
+        if (ImGui::SliderFloat("End", &color_end, 0.0f, 1.0f, "%.2f")) {
+            state.config.color.end = color_end;
+            color_changed = true;
+        }
+        tooltip("End position in color range [0-1]");
+
+        if (color_changed && state.running) {
+            ColorSchemeGenerator color_gen(state.config.color);
+            int n = static_cast<int>(state.colors.size());
+            for (int i = 0; i < n; ++i) {
+                state.colors[i] = color_gen.getColorForIndex(i, n);
+            }
+            state.needs_redraw = true;
+        }
+    }
+}
+
+void drawPostProcessSection(AppState& state) {
+    if (ImGui::CollapsingHeader("Post-Processing", ImGuiTreeNodeFlags_DefaultOpen)) {
+        bool pp_changed = false;
+
+        // Normalization mode
+        const char* norm_names[] = {"Per-Frame (auto)", "By Count (consistent)"};
+        int current_norm = static_cast<int>(state.config.post_process.normalization);
+        if (ImGui::Combo("Normalization", &current_norm, norm_names, 2)) {
+            state.config.post_process.normalization = static_cast<NormalizationMode>(current_norm);
+            pp_changed = true;
+        }
+        tooltip("Per-Frame: auto-adjusts brightness\n"
+                "By Count: consistent brightness regardless of pendulum count");
+
+        const char* tone_map_names[] = {"None (Linear)", "Reinhard", "Reinhard Extended",
+                                        "ACES Filmic", "Logarithmic"};
+        int current_tone_map = static_cast<int>(state.config.post_process.tone_map);
+        if (ImGui::Combo("Tone Mapping", &current_tone_map, tone_map_names, 5)) {
+            state.config.post_process.tone_map = static_cast<ToneMapOperator>(current_tone_map);
+            pp_changed = true;
+        }
+        tooltip("HDR to SDR tone mapping curve");
+
+        if (state.config.post_process.tone_map == ToneMapOperator::ReinhardExtended ||
+            state.config.post_process.tone_map == ToneMapOperator::Logarithmic) {
+            auto white_point = static_cast<float>(state.config.post_process.reinhard_white_point);
+            if (ImGui::SliderFloat("White Point", &white_point, 0.5f, 10.0f)) {
+                state.config.post_process.reinhard_white_point = white_point;
+                pp_changed = true;
+            }
+            tooltip("Input value that maps to pure white");
+        }
+
+        auto exposure = static_cast<float>(state.config.post_process.exposure);
+        if (ImGui::SliderFloat("Exposure", &exposure, -3.0f, 10.0f, "%.2f stops")) {
+            state.config.post_process.exposure = exposure;
+            pp_changed = true;
+        }
+        tooltip("Brightness in stops (0 = no change, +1 = 2x brighter)");
+
+        auto contrast = static_cast<float>(state.config.post_process.contrast);
+        if (ImGui::SliderFloat("Contrast", &contrast, 0.5f, 2.0f)) {
+            state.config.post_process.contrast = contrast;
+            pp_changed = true;
+        }
+        tooltip("Contrast adjustment (1.0 = no change)");
+
+        auto gamma = static_cast<float>(state.config.post_process.gamma);
+        if (ImGui::SliderFloat("Gamma", &gamma, 1.0f, 3.0f)) {
+            state.config.post_process.gamma = gamma;
+            pp_changed = true;
+        }
+        tooltip("Display gamma (2.2 = sRGB standard)");
+
+        if (pp_changed && state.running) {
+            state.needs_redraw = true;
+        }
+    }
+}
+
+void drawDetectionSection(AppState& state) {
+    if (ImGui::CollapsingHeader("Detection")) {
+        auto boom_thresh = static_cast<float>(state.config.detection.boom_threshold);
+        if (ImGui::SliderFloat("Boom Threshold", &boom_thresh, 0.01f, 1.0f, "%.3f rad^2")) {
+            state.config.detection.boom_threshold = boom_thresh;
+        }
+        tooltip("Variance threshold for chaos onset detection");
+
+        ImGui::SliderInt("Boom Confirm", &state.config.detection.boom_confirmation, 1, 30);
+        tooltip("Consecutive frames above threshold to confirm boom");
+
+        auto white_thresh = static_cast<float>(state.config.detection.white_threshold);
+        if (ImGui::InputFloat("White Threshold", &white_thresh, 10.0f, 100.0f, "%.1f rad^2")) {
+            state.config.detection.white_threshold = white_thresh;
+        }
+        tooltip("Variance threshold for full chaos (white noise)");
+
+        ImGui::SliderInt("White Confirm", &state.config.detection.white_confirmation, 1, 30);
+        tooltip("Consecutive frames above threshold to confirm white");
+    }
+}
+
 void drawControlPanel(AppState& state, GLRenderer& renderer) {
     ImGui::Begin("Controls");
 
@@ -505,214 +737,13 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
 
     ImGui::Separator();
 
-    // Preview settings
-    if (ImGui::CollapsingHeader("Preview", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::SliderInt("Pendulums", &state.preview.pendulum_count, 1000, 100000);
-        ImGui::SliderInt("Preview Size", &state.preview.width, 270, 1080);
-        state.preview.height = state.preview.width;
-        ImGui::SliderInt("Substeps", &state.preview.substeps, 1, 50);
-    }
-
-    // Physics parameters
-    if (ImGui::CollapsingHeader("Physics", ImGuiTreeNodeFlags_DefaultOpen)) {
-        auto gravity = static_cast<float>(state.config.physics.gravity);
-        if (ImGui::SliderFloat("Gravity", &gravity, 0.1f, 20.0f)) {
-            state.config.physics.gravity = gravity;
-        }
-
-        auto length1 = static_cast<float>(state.config.physics.length1);
-        if (ImGui::SliderFloat("Length 1", &length1, 0.1f, 3.0f)) {
-            state.config.physics.length1 = length1;
-        }
-
-        auto length2 = static_cast<float>(state.config.physics.length2);
-        if (ImGui::SliderFloat("Length 2", &length2, 0.1f, 3.0f)) {
-            state.config.physics.length2 = length2;
-        }
-
-        auto mass1 = static_cast<float>(state.config.physics.mass1);
-        if (ImGui::SliderFloat("Mass 1", &mass1, 0.1f, 5.0f)) {
-            state.config.physics.mass1 = mass1;
-        }
-
-        auto mass2 = static_cast<float>(state.config.physics.mass2);
-        if (ImGui::SliderFloat("Mass 2", &mass2, 0.1f, 5.0f)) {
-            state.config.physics.mass2 = mass2;
-        }
-
-        auto angle1_deg = static_cast<float>(rad2deg(state.config.physics.initial_angle1));
-        if (ImGui::SliderFloat("Initial Angle 1", &angle1_deg, -180.0f, 180.0f)) {
-            state.config.physics.initial_angle1 = deg2rad(angle1_deg);
-        }
-
-        auto angle2_deg = static_cast<float>(rad2deg(state.config.physics.initial_angle2));
-        if (ImGui::SliderFloat("Initial Angle 2", &angle2_deg, -180.0f, 180.0f)) {
-            state.config.physics.initial_angle2 = deg2rad(angle2_deg);
-        }
-
-        auto vel1 = static_cast<float>(state.config.physics.initial_velocity1);
-        if (ImGui::SliderFloat("Initial Vel 1", &vel1, -10.0f, 10.0f)) {
-            state.config.physics.initial_velocity1 = vel1;
-        }
-
-        auto vel2 = static_cast<float>(state.config.physics.initial_velocity2);
-        if (ImGui::SliderFloat("Initial Vel 2", &vel2, -10.0f, 10.0f)) {
-            state.config.physics.initial_velocity2 = vel2;
-        }
-    }
-
-    // Simulation parameters
-    if (ImGui::CollapsingHeader("Simulation")) {
-        auto variation_deg = static_cast<float>(rad2deg(state.config.simulation.angle_variation));
-        if (ImGui::SliderFloat("Angle Variation", &variation_deg, 0.001f, 5.0f, "%.3f deg")) {
-            state.config.simulation.angle_variation = deg2rad(variation_deg);
-        }
-
-        auto duration = static_cast<float>(state.config.simulation.duration_seconds);
-        if (ImGui::SliderFloat("Duration (s)", &duration, 1.0f, 60.0f)) {
-            state.config.simulation.duration_seconds = duration;
-        }
-
-        ImGui::SliderInt("Total Frames", &state.config.simulation.total_frames, 60, 3600);
-
-        // Physics quality settings
-        const char* quality_names[] = {"Low", "Medium", "High", "Ultra", "Custom"};
-        int quality_idx = static_cast<int>(state.config.simulation.physics_quality);
-        if (ImGui::Combo("Physics Quality", &quality_idx, quality_names, 5)) {
-            state.config.simulation.physics_quality = static_cast<PhysicsQuality>(quality_idx);
-            if (quality_idx < 4) { // Not Custom
-                state.config.simulation.max_dt =
-                    qualityToMaxDt(state.config.simulation.physics_quality);
-            }
-        }
-
-        // Show max_dt slider (editable, sets quality to Custom)
-        auto max_dt_ms = static_cast<float>(state.config.simulation.max_dt * 1000.0);
-        if (ImGui::SliderFloat("Max dt (ms)", &max_dt_ms, 1.0f, 30.0f, "%.1f")) {
-            state.config.simulation.max_dt = max_dt_ms / 1000.0;
-            state.config.simulation.physics_quality = PhysicsQuality::Custom;
-        }
-
-        // Display computed values
-        ImGui::Text("Substeps: %d, dt = %.4f ms", state.config.simulation.substeps(),
-                    state.config.simulation.dt() * 1000.0);
-    }
-
-    // Color parameters
-    if (ImGui::CollapsingHeader("Color")) {
-        bool color_changed = false;
-
-        const char* schemes[] = {"Spectrum", "Rainbow", "Heat", "Cool", "Monochrome"};
-        int scheme_idx = static_cast<int>(state.config.color.scheme);
-        if (ImGui::Combo("Color Scheme", &scheme_idx, schemes, 5)) {
-            state.config.color.scheme = static_cast<ColorScheme>(scheme_idx);
-            color_changed = true;
-        }
-
-        auto color_start = static_cast<float>(state.config.color.start);
-        if (ImGui::SliderFloat("Start", &color_start, 0.0f, 1.0f, "%.2f")) {
-            state.config.color.start = color_start;
-            color_changed = true;
-        }
-
-        auto color_end = static_cast<float>(state.config.color.end);
-        if (ImGui::SliderFloat("End", &color_end, 0.0f, 1.0f, "%.2f")) {
-            state.config.color.end = color_end;
-            color_changed = true;
-        }
-
-        if (color_changed && state.running) {
-            ColorSchemeGenerator color_gen(state.config.color);
-            int n = static_cast<int>(state.colors.size());
-            for (int i = 0; i < n; ++i) {
-                state.colors[i] = color_gen.getColorForIndex(i, n);
-            }
-            state.needs_redraw = true;
-        }
-    }
-
-    // Post-processing parameters
-    if (ImGui::CollapsingHeader("Post-Processing", ImGuiTreeNodeFlags_DefaultOpen)) {
-        bool pp_changed = false;
-
-        // Normalization mode - this is the key setting for consistent results
-        const char* norm_names[] = {"Per-Frame (auto)", "By Count (consistent)"};
-        int current_norm = static_cast<int>(state.config.post_process.normalization);
-        if (ImGui::Combo("Normalization", &current_norm, norm_names, 2)) {
-            state.config.post_process.normalization = static_cast<NormalizationMode>(current_norm);
-            pp_changed = true;
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Per-Frame: auto-adjusts brightness\n"
-                              "By Count: consistent brightness regardless of pendulum count");
-        }
-
-        const char* tone_map_names[] = {"None (Linear)", "Reinhard", "Reinhard Extended",
-                                        "ACES Filmic", "Logarithmic"};
-        int current_tone_map = static_cast<int>(state.config.post_process.tone_map);
-        if (ImGui::Combo("Tone Mapping", &current_tone_map, tone_map_names, 5)) {
-            state.config.post_process.tone_map = static_cast<ToneMapOperator>(current_tone_map);
-            pp_changed = true;
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("HDR to SDR tone mapping curve");
-        }
-
-        if (state.config.post_process.tone_map == ToneMapOperator::ReinhardExtended ||
-            state.config.post_process.tone_map == ToneMapOperator::Logarithmic) {
-            auto white_point = static_cast<float>(state.config.post_process.reinhard_white_point);
-            if (ImGui::SliderFloat("White Point", &white_point, 0.5f, 10.0f)) {
-                state.config.post_process.reinhard_white_point = white_point;
-                pp_changed = true;
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Input value that maps to pure white");
-            }
-        }
-
-        auto exposure = static_cast<float>(state.config.post_process.exposure);
-        if (ImGui::SliderFloat("Exposure", &exposure, -3.0f, 10.0f, "%.2f stops")) {
-            state.config.post_process.exposure = exposure;
-            pp_changed = true;
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Brightness in stops (0 = no change, +1 = 2x brighter)");
-        }
-
-        auto contrast = static_cast<float>(state.config.post_process.contrast);
-        if (ImGui::SliderFloat("Contrast", &contrast, 0.5f, 2.0f)) {
-            state.config.post_process.contrast = contrast;
-            pp_changed = true;
-        }
-
-        auto gamma = static_cast<float>(state.config.post_process.gamma);
-        if (ImGui::SliderFloat("Gamma", &gamma, 1.0f, 3.0f)) {
-            state.config.post_process.gamma = gamma;
-            pp_changed = true;
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Display gamma (2.2 = sRGB standard)");
-        }
-
-        if (pp_changed && state.running) {
-            state.needs_redraw = true;
-        }
-    }
-
-    // Detection thresholds
-    if (ImGui::CollapsingHeader("Detection")) {
-        auto boom_thresh = static_cast<float>(state.config.detection.boom_threshold);
-        if (ImGui::SliderFloat("Boom Threshold", &boom_thresh, 0.01f, 1.0f, "%.3f rad^2")) {
-            state.config.detection.boom_threshold = boom_thresh;
-        }
-        ImGui::SliderInt("Boom Confirm", &state.config.detection.boom_confirmation, 1, 30);
-
-        auto white_thresh = static_cast<float>(state.config.detection.white_threshold);
-        if (ImGui::InputFloat("White Threshold", &white_thresh, 10.0f, 100.0f, "%.1f rad^2")) {
-            state.config.detection.white_threshold = white_thresh;
-        }
-        ImGui::SliderInt("White Confirm", &state.config.detection.white_confirmation, 1, 30);
-    }
+    // Draw each section
+    drawPreviewSection(state);
+    drawPhysicsSection(state);
+    drawSimulationSection(state);
+    drawColorSection(state);
+    drawPostProcessSection(state);
+    drawDetectionSection(state);
 
     drawExportPanel(state);
 

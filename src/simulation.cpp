@@ -1,5 +1,7 @@
 #include "simulation.h"
 
+#include "enum_strings.h"
+
 #include <atomic>
 #include <chrono>
 #include <ctime>
@@ -51,7 +53,7 @@ Simulation::~Simulation() {
 std::string Simulation::createRunDirectory() {
     std::string path;
 
-    if (config_.output.skip_run_subdirectory) {
+    if (config_.output.mode == OutputMode::Direct) {
         // Use output directory directly (for batch mode)
         path = config_.output.directory;
     } else {
@@ -95,18 +97,6 @@ void Simulation::saveMetadata(SimulationResults const& results) {
     std::ostringstream time_str;
     time_str << std::put_time(&tm, "%Y-%m-%dT%H:%M:%S");
 
-    // Physics quality name
-    auto qualityName = [](PhysicsQuality q) -> char const* {
-        switch (q) {
-        case PhysicsQuality::Low: return "low";
-        case PhysicsQuality::Medium: return "medium";
-        case PhysicsQuality::High: return "high";
-        case PhysicsQuality::Ultra: return "ultra";
-        case PhysicsQuality::Custom: return "custom";
-        }
-        return "unknown";
-    };
-
     out << std::fixed << std::setprecision(6);
     out << "{\n";
     out << "  \"version\": \"1.0\",\n";
@@ -118,7 +108,7 @@ void Simulation::saveMetadata(SimulationResults const& results) {
     out << "    \"pendulum_count\": " << config_.simulation.pendulum_count << ",\n";
     out << "    \"width\": " << config_.render.width << ",\n";
     out << "    \"height\": " << config_.render.height << ",\n";
-    out << "    \"physics_quality\": \"" << qualityName(config_.simulation.physics_quality) << "\",\n";
+    out << "    \"physics_quality\": \"" << toString(config_.simulation.physics_quality) << "\",\n";
     out << "    \"max_dt\": " << config_.simulation.max_dt << ",\n";
     out << "    \"substeps\": " << config_.simulation.substeps() << ",\n";
     out << "    \"dt\": " << config_.simulation.dt() << "\n";
@@ -277,31 +267,23 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
             analysis_tracker_.update(pendulums, 0.0f, 0.0f);  // GPU stats updated after render
         }
 
-        // Check for boom detection
-        if (!results.boom_frame.has_value()) {
-            int boom = VarianceUtils::checkThresholdCrossing(
-                variance_tracker_.getHistory(), detect.boom_threshold, detect.boom_confirmation);
-            if (boom >= 0) {
-                results.boom_frame = boom;
-                results.boom_variance = variance_tracker_.getVarianceAt(boom);
-            }
-        }
+        // Update detection results using shared utility
+        bool had_white = results.white_frame.has_value();
+        VarianceUtils::ThresholdResults detection{results.boom_frame, results.boom_variance,
+                                                   results.white_frame, results.white_variance};
+        VarianceUtils::updateDetection(detection, variance_tracker_,
+                                       detect.boom_threshold, detect.boom_confirmation,
+                                       detect.white_threshold, detect.white_confirmation);
+        results.boom_frame = detection.boom_frame;
+        results.boom_variance = detection.boom_variance;
+        results.white_frame = detection.white_frame;
+        results.white_variance = detection.white_variance;
 
-        // Check for white detection (only after boom)
-        if (results.boom_frame.has_value() && !results.white_frame.has_value()) {
-            int white = VarianceUtils::checkThresholdCrossing(
-                variance_tracker_.getHistory(), detect.white_threshold, detect.white_confirmation);
-            if (white >= 0) {
-                results.white_frame = white;
-                results.white_variance = variance_tracker_.getVarianceAt(white);
-
-                // Early stop if configured
-                if (detect.early_stop_after_white) {
-                    results.frames_completed = frame + 1;
-                    early_stopped = true;
-                    break;
-                }
-            }
+        // Early stop if white was newly detected and configured
+        if (!had_white && results.white_frame.has_value() && detect.early_stop_after_white) {
+            results.frames_completed = frame + 1;
+            early_stopped = true;
+            break;
         }
 
         // Render timing (GPU)

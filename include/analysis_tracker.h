@@ -29,22 +29,13 @@ public:
             return analysis;
         }
 
-        // Compute variance of angle2 (same as VarianceTracker)
+        // Compute variance of angle2 using shared function
         std::vector<double> angles;
         angles.reserve(pendulums.size());
         for (auto const& p : pendulums) {
             angles.push_back(p.getTheta2());
         }
-
-        double sum = std::accumulate(angles.begin(), angles.end(), 0.0);
-        double mean = sum / angles.size();
-
-        double var_sum = 0.0;
-        for (double a : angles) {
-            double diff = a - mean;
-            var_sum += diff * diff;
-        }
-        analysis.variance = var_sum / angles.size();
+        analysis.variance = computeVariance(angles);
 
         // GPU statistics
         analysis.max_value = max_val;

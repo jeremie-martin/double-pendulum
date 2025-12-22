@@ -1,4 +1,5 @@
 #include "batch_generator.h"
+#include "enum_strings.h"
 #include "music_manager.h"
 #include "simulation.h"
 
@@ -70,48 +71,6 @@ int runSimulation(CLIOptions const& opts) {
         static_cast<double>(config.simulation.total_frames) / config.output.video_fps;
     int total_physics_steps = config.simulation.total_frames * config.simulation.substeps();
 
-    // Get physics quality string
-    auto qualityName = [](PhysicsQuality q) -> char const* {
-        switch (q) {
-        case PhysicsQuality::Low: return "low";
-        case PhysicsQuality::Medium: return "medium";
-        case PhysicsQuality::High: return "high";
-        case PhysicsQuality::Ultra: return "ultra";
-        case PhysicsQuality::Custom: return "custom";
-        }
-        return "unknown";
-    };
-
-    auto toneMapName = [](ToneMapOperator tm) -> char const* {
-        switch (tm) {
-        case ToneMapOperator::None: return "none";
-        case ToneMapOperator::Reinhard: return "reinhard";
-        case ToneMapOperator::ReinhardExtended: return "reinhard_extended";
-        case ToneMapOperator::ACES: return "aces";
-        case ToneMapOperator::Logarithmic: return "logarithmic";
-        }
-        return "unknown";
-    };
-
-    auto colorSchemeName = [](ColorScheme cs) -> char const* {
-        switch (cs) {
-        case ColorScheme::Spectrum: return "spectrum";
-        case ColorScheme::Rainbow: return "rainbow";
-        case ColorScheme::Heat: return "heat";
-        case ColorScheme::Cool: return "cool";
-        case ColorScheme::Monochrome: return "monochrome";
-        }
-        return "unknown";
-    };
-
-    auto normModeName = [](NormalizationMode nm) -> char const* {
-        switch (nm) {
-        case NormalizationMode::PerFrame: return "per_frame";
-        case NormalizationMode::ByCount: return "by_count";
-        }
-        return "unknown";
-    };
-
     // Print comprehensive config summary
     std::cout << "\n=== Double Pendulum Simulation ===\n\n";
 
@@ -128,7 +87,7 @@ int runSimulation(CLIOptions const& opts) {
               << "  Duration:       " << config.simulation.duration_seconds << "s physics -> "
               << config.simulation.total_frames << " frames @ " << config.output.video_fps << " FPS ("
               << std::fixed << std::setprecision(1) << video_duration << "s video)\n"
-              << "  Quality:        " << qualityName(config.simulation.physics_quality)
+              << "  Quality:        " << toString(config.simulation.physics_quality)
               << " (max_dt=" << std::setprecision(1) << (config.simulation.max_dt * 1000) << "ms)\n"
               << "  Substeps:       " << config.simulation.substeps() << " per frame"
               << " (dt=" << std::setprecision(2) << (config.simulation.dt() * 1000) << "ms)\n"
@@ -136,9 +95,9 @@ int runSimulation(CLIOptions const& opts) {
 
     std::cout << "Rendering:\n"
               << "  Resolution:     " << config.render.width << "x" << config.render.height << "\n"
-              << "  Color scheme:   " << colorSchemeName(config.color.scheme) << "\n"
-              << "  Tone mapping:   " << toneMapName(config.post_process.tone_map) << "\n"
-              << "  Normalization:  " << normModeName(config.post_process.normalization) << "\n"
+              << "  Color scheme:   " << toString(config.color.scheme) << "\n"
+              << "  Tone mapping:   " << toString(config.post_process.tone_map) << "\n"
+              << "  Normalization:  " << toString(config.post_process.normalization) << "\n"
               << "  Exposure:       " << std::showpos << std::setprecision(1) << config.post_process.exposure
               << std::noshowpos << " stops\n"
               << "  Gamma:          " << config.post_process.gamma << "\n\n";
