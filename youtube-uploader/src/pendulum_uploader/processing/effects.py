@@ -13,13 +13,12 @@ def add_zoom_effect(
     zoom_factor: float = 1.3,
     ramp_duration: float = 0.5,
     hold_duration: float = 0.5,
-    output_size: str = "1080x1080",
-    fps: int = 60,
+    width: int = 1080,
+    height: int = 1080,
 ) -> FFmpegCommand:
     """Add a zoom punch-in effect centered on the boom moment.
 
-    The effect smoothly zooms in before the boom, holds at peak zoom,
-    then smoothly zooms back out.
+    Uses scale + crop filters for smooth video zoom (zoompan is for stills).
 
     Timeline:
         [normal] -> [ramp up] -> [peak hold] -> [ramp down] -> [normal]
@@ -32,8 +31,8 @@ def add_zoom_effect(
         zoom_factor: Maximum zoom level (1.3 = 130% = 30% zoom in)
         ramp_duration: Duration of zoom in/out ramp in seconds
         hold_duration: Duration to hold at peak zoom
-        output_size: Output video dimensions
-        fps: Output frame rate
+        width: Video width
+        height: Video height
 
     Returns:
         The modified FFmpegCommand
@@ -44,41 +43,32 @@ def add_zoom_effect(
     zoom_hold_end = boom_seconds + hold_duration
     zoom_end = zoom_hold_end + ramp_duration
 
-    # Build the zoom expression
-    # FFmpeg zoompan 'z' is the zoom level where 1.0 = no zoom
-    # Note: zoompan uses 'in_time' for input timestamp, not 't'
-    #
-    # The expression uses nested if() for different time segments:
-    # 1. Before zoom_start: z = 1.0 (no zoom)
-    # 2. zoom_start to zoom_peak: linear ramp from 1.0 to zoom_factor
-    # 3. zoom_peak to zoom_hold_end: z = zoom_factor (hold)
-    # 4. zoom_hold_end to zoom_end: linear ramp from zoom_factor to 1.0
-    # 5. After zoom_end: z = 1.0 (no zoom)
-    #
-    # Linear interpolation: z = start + (end - start) * ((in_time - t_start) / duration)
-
+    # Build the zoom expression using 't' (time in seconds)
+    # zoom goes from 1.0 to zoom_factor and back
+    # Using nested if() for different time segments
     zoom_expr = (
-        f"if(lt(in_time,{zoom_start:.3f}),1,"  # Before ramp: no zoom
-        f"if(lt(in_time,{zoom_peak:.3f}),"  # During ramp up
-        f"1+{zoom_factor - 1:.3f}*((in_time-{zoom_start:.3f})/{ramp_duration:.3f}),"
-        f"if(lt(in_time,{zoom_hold_end:.3f}),{zoom_factor:.3f},"  # Hold at peak
-        f"if(lt(in_time,{zoom_end:.3f}),"  # During ramp down
-        f"{zoom_factor:.3f}-{zoom_factor - 1:.3f}*((in_time-{zoom_hold_end:.3f})/{ramp_duration:.3f}),"
+        f"if(lt(t,{zoom_start:.3f}),1,"  # Before ramp: no zoom
+        f"if(lt(t,{zoom_peak:.3f}),"  # During ramp up
+        f"1+{zoom_factor - 1:.3f}*((t-{zoom_start:.3f})/{ramp_duration:.3f}),"
+        f"if(lt(t,{zoom_hold_end:.3f}),{zoom_factor:.3f},"  # Hold at peak
+        f"if(lt(t,{zoom_end:.3f}),"  # During ramp down
+        f"{zoom_factor:.3f}-{zoom_factor - 1:.3f}*((t-{zoom_hold_end:.3f})/{ramp_duration:.3f}),"
         f"1))))"  # After: no zoom
     )
 
-    # Center the zoom (pan to keep center point fixed)
-    x_expr = "iw/2-(iw/zoom/2)"
-    y_expr = "ih/2-(ih/zoom/2)"
+    # Scale up by zoom factor, then crop back to original size (centered)
+    # scale: multiply dimensions by zoom (eval=frame enables per-frame expressions)
+    # crop: take center portion at original size
+    scale_w = f"trunc(iw*({zoom_expr})/2)*2"  # Ensure even dimensions
+    scale_h = f"trunc(ih*({zoom_expr})/2)*2"
 
-    cmd.add_zoompan(
-        zoom_expr=zoom_expr,
-        x_expr=x_expr,
-        y_expr=y_expr,
-        fps=fps,
-        duration=1,  # 1 output frame per input frame
-        size=output_size,
-    )
+    # Crop from center (use 'in_w' and 'in_h' for crop input dimensions)
+    crop_x = f"(in_w-{width})/2"
+    crop_y = f"(in_h-{height})/2"
+
+    # Add scale filter with eval=frame for per-frame expression evaluation
+    cmd.add_filter(f"scale=w='{scale_w}':h='{scale_h}':eval=frame")
+    cmd.add_filter(f"crop={width}:{height}:{crop_x}:{crop_y}")
 
     return cmd
 

@@ -175,8 +175,8 @@ CAPTION_STYLES: dict[str, dict[str, CaptionDefinition]] = {
     # Science/educational framing
     "science": {
         "intro": ("Same starting position.", 0, 3),
-        "mid": ("Tiny differences...", 3, "boom-1"),
-        "boom": ("CHAOS.", "boom", "boom+2"),
+        "mid": ("Tiny differences...", 3, "boom-0.3"),
+        "boom": ("CHAOS.", "boom-0.3", "boom+2"),
     },
 
     # Viewer challenge/engagement

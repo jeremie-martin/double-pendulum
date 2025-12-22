@@ -142,15 +142,14 @@ class ProcessingPipeline:
         except Exception:
             width, height = self.metadata.config.width, self.metadata.config.height
 
-        # Apply zoom effect (must come before text overlays if using zoompan)
-        # Note: zoompan changes the frame timing, so we apply it first
+        # Apply zoom effect (must come before text overlays and padding)
         if self.config.zoom and self.metadata.boom_seconds is not None:
             add_zoom_effect(
                 cmd,
                 boom_seconds=self.metadata.boom_seconds,
                 zoom_factor=self.config.zoom_factor,
-                output_size=f"{width}x{height}",
-                fps=self.metadata.config.video_fps,
+                width=width,
+                height=height,
             )
 
         # Apply text overlays
