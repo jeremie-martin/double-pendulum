@@ -25,11 +25,14 @@ C++20 double pendulum physics simulation with GPU-accelerated rendering. Simulat
 | File | Purpose |
 |------|---------|
 | `src/simulation.cpp` | Main simulation loop, coordinates physics + rendering |
+| `src/batch_generator.cpp` | Batch video generation with probe filtering |
 | `src/gl_renderer.cpp` | GPU line rendering with GLSL shaders |
 | `src/headless_gl.cpp` | EGL context for headless GPU rendering |
 | `include/pendulum.h` | RK4 physics integration (Lagrangian mechanics) |
 | `include/config.h` | TOML config parsing, all parameters |
-| `include/variance_tracker.h` | Chaos detection via angle variance |
+| `include/batch_generator.h` | Batch config, filter criteria, probe filter |
+| `include/variance_tracker.h` | Chaos detection via angle variance + spread metrics |
+| `include/probe_results.h` | Results struct for probe-only simulations |
 
 ## Rendering Pipeline
 
@@ -61,6 +64,17 @@ C++20 double pendulum physics simulation with GPU-accelerated rendering. Simulat
 - Uses RK4 integration with Lagrangian equations of motion
 - Thread-safe (each pendulum is independent)
 
+### Add new filter criterion for batch probing
+1. Add field to `FilterCriteria` struct in `include/batch_generator.h`
+2. Add check in `ProbeFilter::passes()` method
+3. Add reason string in `ProbeFilter::rejectReason()`
+4. Add TOML parsing in `BatchConfig::load()` in `src/batch_generator.cpp`
+
+### Add new spread/analysis metric
+1. Add field to `SpreadMetrics` struct in `include/variance_tracker.h`
+2. Compute in `computeSpread()` function
+3. Access via `VarianceTracker::getFinalSpread()` or `getSpreadHistory()`
+
 ### Physics Quality System
 The simulation uses a `physics_quality` setting that maps to maximum timestep (`max_dt`):
 
@@ -77,6 +91,68 @@ substeps = max(1, ceil(frame_dt / max_dt))
 ```
 
 This ensures consistent simulation quality regardless of frame count or duration. You can also specify `max_dt` directly in the config for fine control.
+
+### Batch Generation with Probe Filtering
+
+The batch system supports a two-phase workflow for generating videos with quality filtering:
+
+**Phase 1 - Probe**: Run a fast physics-only simulation (no GPU, no rendering) with fewer pendulums (e.g., 1000) to evaluate if parameters produce a good animation.
+
+**Phase 2 - Render**: Only if the probe passes all filter criteria, run the full simulation with GPU rendering.
+
+#### Filter Criteria
+
+| Criterion | Purpose |
+|-----------|---------|
+| `min_boom_seconds` | Boom must happen after this time |
+| `max_boom_seconds` | Boom must happen before this time |
+| `min_spread_ratio` | Minimum fraction of pendulums above horizontal |
+| `require_boom` | Reject simulations with no detectable boom |
+
+#### Spread Metrics
+
+The `VarianceTracker` now also computes spread metrics:
+- `spread_ratio`: Fraction of pendulums with angle1 in [-π/2, π/2] (above horizontal)
+- `angle1_mean`, `angle1_variance`: For debugging/analysis
+
+#### Color Presets
+
+Define curated color combinations in batch configs:
+```toml
+[[color_presets]]
+scheme = "spectrum"
+start = 0.2
+end = 0.8
+
+[[color_presets]]
+scheme = "heat"
+start = 0.0
+end = 0.7
+```
+
+In random batch mode, one preset is randomly selected per video.
+
+#### Example Batch Config with Probing
+
+```toml
+[batch]
+count = 100
+base_config = "config/default.toml"
+
+[probe]
+enabled = true
+pendulum_count = 1000    # Fast probing
+max_retries = 10         # Retry with new params if rejected
+
+[filter]
+min_boom_seconds = 8.0   # Boom between 8-15 seconds
+max_boom_seconds = 15.0
+min_spread_ratio = 0.3   # At least 30% above horizontal
+
+[physics_ranges]
+initial_angle1_deg = [140.0, 200.0]
+initial_angle2_deg = [140.0, 200.0]
+```
 
 ## Build Commands
 

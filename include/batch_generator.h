@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "music_manager.h"
+#include "probe_results.h"
 
 #include <filesystem>
 #include <map>
@@ -27,6 +28,86 @@ struct GridConfig {
 
     // Total number of combinations
     size_t totalCombinations() const;
+};
+
+// Filter criteria for probe validation
+// Used to reject simulations with unsuitable parameters before full rendering
+struct FilterCriteria {
+    double min_boom_seconds = 0.0; // Minimum boom time (0 = no minimum)
+    double max_boom_seconds = 0.0; // Maximum boom time (0 = no maximum)
+    double min_spread_ratio = 0.0; // Minimum spread ratio (0 = no requirement)
+    bool require_boom = true;      // Reject simulations with no detectable boom
+
+    // Check if filtering is enabled (any non-default values)
+    bool isEnabled() const {
+        return min_boom_seconds > 0.0 || max_boom_seconds > 0.0 || min_spread_ratio > 0.0 ||
+               require_boom;
+    }
+};
+
+// Evaluates probe results against filter criteria
+class ProbeFilter {
+public:
+    explicit ProbeFilter(FilterCriteria const& criteria) : criteria_(criteria) {}
+
+    // Check if probe results pass all filter criteria
+    bool passes(ProbeResults const& results) const {
+        // Check boom requirement
+        if (criteria_.require_boom && !results.boom_frame.has_value()) {
+            return false;
+        }
+
+        // Check boom time range
+        if (results.boom_frame.has_value()) {
+            if (criteria_.min_boom_seconds > 0.0 &&
+                results.boom_seconds < criteria_.min_boom_seconds) {
+                return false;
+            }
+            if (criteria_.max_boom_seconds > 0.0 &&
+                results.boom_seconds > criteria_.max_boom_seconds) {
+                return false;
+            }
+        }
+
+        // Check spread ratio
+        if (criteria_.min_spread_ratio > 0.0 &&
+            results.final_spread_ratio < criteria_.min_spread_ratio) {
+            return false;
+        }
+
+        return true;
+    }
+
+    // Get human-readable rejection reason
+    std::string rejectReason(ProbeResults const& results) const {
+        if (criteria_.require_boom && !results.boom_frame.has_value()) {
+            return "no boom detected";
+        }
+
+        if (results.boom_frame.has_value()) {
+            if (criteria_.min_boom_seconds > 0.0 &&
+                results.boom_seconds < criteria_.min_boom_seconds) {
+                return "boom too early (" + std::to_string(results.boom_seconds) + "s < " +
+                       std::to_string(criteria_.min_boom_seconds) + "s)";
+            }
+            if (criteria_.max_boom_seconds > 0.0 &&
+                results.boom_seconds > criteria_.max_boom_seconds) {
+                return "boom too late (" + std::to_string(results.boom_seconds) + "s > " +
+                       std::to_string(criteria_.max_boom_seconds) + "s)";
+            }
+        }
+
+        if (criteria_.min_spread_ratio > 0.0 &&
+            results.final_spread_ratio < criteria_.min_spread_ratio) {
+            return "spread too low (" + std::to_string(results.final_spread_ratio) + " < " +
+                   std::to_string(criteria_.min_spread_ratio) + ")";
+        }
+
+        return "unknown";
+    }
+
+private:
+    FilterCriteria criteria_;
 };
 
 // Batch configuration loaded from TOML
@@ -58,6 +139,18 @@ struct BatchConfig {
     bool random_music = true;
     std::string fixed_track_id; // If random_music is false
 
+    // Probe settings for pre-filtering (Random mode only)
+    int probe_pendulum_count = 1000;  // Pendulum count for fast probing
+    int max_probe_retries = 10;       // Max retries before giving up on a slot
+    bool probe_enabled = false;       // Enable probe-based filtering
+
+    // Filter criteria for probe validation
+    FilterCriteria filter;
+
+    // Color presets (for Random mode)
+    // If non-empty, randomly select from these instead of base_config.color
+    std::vector<ColorParams> color_presets;
+
     static BatchConfig load(std::string const& path);
 };
 
@@ -67,7 +160,11 @@ struct RunResult {
     std::string video_path;     // Path to video file
     bool success = false;
     std::optional<int> boom_frame;
+    double boom_seconds = 0.0;
     double duration_seconds = 0.0;
+    double final_spread_ratio = 0.0;  // Spread at end of simulation
+    int probe_retries = 0;            // Number of probe retries before success
+    double simulation_speed = 1.0;    // Real-time multiplier (physics_time / video_time)
 };
 
 // Progress tracking for batch operations
@@ -100,6 +197,7 @@ private:
     std::mt19937 rng_;
     std::filesystem::path batch_dir_;
     BatchProgress progress_;
+    ProbeFilter filter_;
 
     // Grid mode: pre-computed combinations
     std::vector<std::map<std::string, std::string>> grid_combinations_;
@@ -121,6 +219,10 @@ private:
 
     // Generate folder name from grid params
     std::string generateGridFolderName(std::map<std::string, std::string> const& params) const;
+
+    // Run probe simulation and check if it passes filter criteria
+    // Returns pair of (passes, probe_results)
+    std::pair<bool, ProbeResults> runProbe(Config const& config);
 
     // Pick a random music track
     std::optional<MusicTrack> pickMusicTrack();

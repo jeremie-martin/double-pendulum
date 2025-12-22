@@ -97,6 +97,19 @@ void Simulation::saveMetadata(SimulationResults const& results) {
     std::ostringstream time_str;
     time_str << std::put_time(&tm, "%Y-%m-%dT%H:%M:%S");
 
+    // Calculate simulation speed (physics time / video time)
+    double video_duration =
+        static_cast<double>(config_.simulation.total_frames) / config_.output.video_fps;
+    double simulation_speed = config_.simulation.duration_seconds / video_duration;
+
+    // Calculate boom_seconds if available
+    double boom_seconds = 0.0;
+    if (results.boom_frame) {
+        double frame_duration =
+            config_.simulation.duration_seconds / config_.simulation.total_frames;
+        boom_seconds = *results.boom_frame * frame_duration;
+    }
+
     out << std::fixed << std::setprecision(6);
     out << "{\n";
     out << "  \"version\": \"1.0\",\n";
@@ -105,6 +118,8 @@ void Simulation::saveMetadata(SimulationResults const& results) {
     out << "    \"duration_seconds\": " << config_.simulation.duration_seconds << ",\n";
     out << "    \"total_frames\": " << config_.simulation.total_frames << ",\n";
     out << "    \"video_fps\": " << config_.output.video_fps << ",\n";
+    out << "    \"video_duration\": " << video_duration << ",\n";
+    out << "    \"simulation_speed\": " << simulation_speed << ",\n";
     out << "    \"pendulum_count\": " << config_.simulation.pendulum_count << ",\n";
     out << "    \"width\": " << config_.render.width << ",\n";
     out << "    \"height\": " << config_.render.height << ",\n";
@@ -117,9 +132,11 @@ void Simulation::saveMetadata(SimulationResults const& results) {
     out << "    \"frames_completed\": " << results.frames_completed << ",\n";
     if (results.boom_frame) {
         out << "    \"boom_frame\": " << *results.boom_frame << ",\n";
+        out << "    \"boom_seconds\": " << boom_seconds << ",\n";
         out << "    \"boom_variance\": " << results.boom_variance << ",\n";
     } else {
         out << "    \"boom_frame\": null,\n";
+        out << "    \"boom_seconds\": null,\n";
         out << "    \"boom_variance\": null,\n";
     }
     if (results.white_frame) {
@@ -392,13 +409,16 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         std::cout << "=== Simulation Complete ===\n";
     }
 
+    // Calculate simulation speed
+    double simulation_speed = config_.simulation.duration_seconds / video_duration;
+
     std::cout << std::fixed << std::setprecision(2);
     std::cout << "Frames:      " << results.frames_completed << "/" << total_frames;
     if (early_stopped)
         std::cout << " (early stop)";
     std::cout << "\n";
     std::cout << "Video:       " << video_duration << "s @ " << config_.output.video_fps
-              << " FPS\n";
+              << " FPS (" << simulation_speed << "x speed)\n";
     std::cout << "Pendulums:   " << pendulum_count << "\n";
     std::cout << "Physics:     " << substeps << " substeps/frame, dt=" << (dt * 1000) << "ms\n";
     std::cout << "Total time:  " << results.timing.total_seconds << "s\n";
@@ -423,6 +443,90 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     }
 
     std::cout << "\nOutput: " << output_path << "\n";
+
+    return results;
+}
+
+ProbeResults Simulation::runProbe(ProgressCallback progress) {
+    // Physics-only simulation for parameter evaluation
+    // No GL, no rendering, no I/O - just physics + variance/spread tracking
+
+    ProbeResults results;
+
+    int const pendulum_count = config_.simulation.pendulum_count;
+    int const total_frames = config_.simulation.total_frames;
+    int const substeps = config_.simulation.substeps();
+    double const dt = config_.simulation.dt();
+
+    // Determine thread count
+    int thread_count = config_.render.thread_count;
+    if (thread_count <= 0) {
+        thread_count = std::thread::hardware_concurrency();
+    }
+
+    // Initialize pendulums
+    std::vector<Pendulum> pendulums(pendulum_count);
+    initializePendulums(pendulums);
+
+    // Allocate state buffer
+    std::vector<PendulumState> states(pendulum_count);
+
+    // Reset variance tracker
+    variance_tracker_.reset();
+
+    // Detection thresholds from config
+    auto const& detect = config_.detection;
+    VarianceUtils::ThresholdResults detection;
+
+    // Time per frame for boom_seconds calculation
+    double const frame_duration = config_.simulation.duration_seconds / total_frames;
+
+    // Main physics loop
+    for (int frame = 0; frame < total_frames; ++frame) {
+        // Step physics
+        stepPendulums(pendulums, states, substeps, dt, thread_count);
+
+        // Extract angles for variance and spread tracking
+        std::vector<double> angle1s, angle2s;
+        angle1s.reserve(pendulum_count);
+        angle2s.reserve(pendulum_count);
+        for (auto const& state : states) {
+            angle1s.push_back(state.th1);
+            angle2s.push_back(state.th2);
+        }
+
+        // Update variance and spread tracking
+        variance_tracker_.updateWithSpread(angle2s, angle1s);
+
+        // Update boom/white detection
+        VarianceUtils::updateDetection(detection, variance_tracker_, detect.boom_threshold,
+                                       detect.boom_confirmation, detect.white_threshold,
+                                       detect.white_confirmation);
+
+        // Store boom info as soon as detected
+        if (detection.boom_frame.has_value() && !results.boom_frame.has_value()) {
+            results.boom_frame = detection.boom_frame;
+            results.boom_variance = detection.boom_variance;
+            results.boom_seconds = *detection.boom_frame * frame_duration;
+        }
+
+        results.frames_completed = frame + 1;
+
+        // Progress callback
+        if (progress) {
+            progress(frame + 1, total_frames);
+        }
+    }
+
+    // Populate final results
+    results.success = true;
+    results.final_variance = variance_tracker_.getCurrentVariance();
+
+    // Get final spread metrics
+    SpreadMetrics const& spread = variance_tracker_.getFinalSpread();
+    results.final_spread_ratio = spread.spread_ratio;
+    results.angle1_mean = spread.angle1_mean;
+    results.angle1_variance = spread.angle1_variance;
 
     return results;
 }

@@ -206,6 +206,72 @@ BatchConfig BatchConfig::load(std::string const& path) {
             }
         }
 
+        // Probe settings
+        if (auto probe = tbl["probe"].as_table()) {
+            config.probe_enabled = true; // Enable probing if section exists
+            if (auto pc = probe->get("pendulum_count")) {
+                config.probe_pendulum_count = pc->value<int>().value_or(1000);
+            }
+            if (auto mr = probe->get("max_retries")) {
+                config.max_probe_retries = mr->value<int>().value_or(10);
+            }
+            if (auto enabled = probe->get("enabled")) {
+                config.probe_enabled = enabled->value<bool>().value_or(true);
+            }
+        }
+
+        // Filter criteria
+        if (auto filter = tbl["filter"].as_table()) {
+            if (auto min_boom = filter->get("min_boom_seconds")) {
+                config.filter.min_boom_seconds = min_boom->value<double>().value_or(0.0);
+            }
+            if (auto max_boom = filter->get("max_boom_seconds")) {
+                config.filter.max_boom_seconds = max_boom->value<double>().value_or(0.0);
+            }
+            if (auto min_spread = filter->get("min_spread_ratio")) {
+                config.filter.min_spread_ratio = min_spread->value<double>().value_or(0.0);
+            }
+            if (auto req_boom = filter->get("require_boom")) {
+                config.filter.require_boom = req_boom->value<bool>().value_or(true);
+            }
+        }
+
+        // Color presets
+        if (auto presets_arr = tbl["color_presets"].as_array()) {
+            for (auto const& item : *presets_arr) {
+                if (auto preset_tbl = item.as_table()) {
+                    ColorParams preset;
+
+                    // Parse scheme
+                    if (auto scheme_node = preset_tbl->get("scheme")) {
+                        std::string scheme_str =
+                            scheme_node->value<std::string>().value_or("spectrum");
+                        if (scheme_str == "rainbow") {
+                            preset.scheme = ColorScheme::Rainbow;
+                        } else if (scheme_str == "heat") {
+                            preset.scheme = ColorScheme::Heat;
+                        } else if (scheme_str == "cool") {
+                            preset.scheme = ColorScheme::Cool;
+                        } else if (scheme_str == "monochrome") {
+                            preset.scheme = ColorScheme::Monochrome;
+                        } else {
+                            preset.scheme = ColorScheme::Spectrum;
+                        }
+                    }
+
+                    // Parse start/end
+                    if (auto start_node = preset_tbl->get("start")) {
+                        preset.start = start_node->value<double>().value_or(0.0);
+                    }
+                    if (auto end_node = preset_tbl->get("end")) {
+                        preset.end = end_node->value<double>().value_or(1.0);
+                    }
+
+                    config.color_presets.push_back(preset);
+                }
+            }
+        }
+
     } catch (toml::parse_error const& err) {
         std::cerr << "Error parsing batch config: " << err.description() << "\n";
     }
@@ -261,7 +327,7 @@ BatchProgress BatchProgress::load(std::filesystem::path const& path) {
 }
 
 BatchGenerator::BatchGenerator(BatchConfig const& config)
-    : config_(config), rng_(std::random_device{}()) {}
+    : config_(config), rng_(std::random_device{}()), filter_(config.filter) {}
 
 void BatchGenerator::setupBatchDirectory() {
     // Create timestamp-based batch directory
@@ -415,15 +481,65 @@ bool BatchGenerator::generateOne(int index) {
     std::string video_name = name_stream.str();
 
     try {
-        // Generate random config
-        Config config = generateRandomConfig();
+        Config config;
+        int probe_retries = 0;
+        ProbeResults probe_result;
 
+        // Phase 1: Probe validation (if enabled)
+        if (config_.probe_enabled) {
+            bool found_valid = false;
+
+            for (int retry = 0; retry <= config_.max_probe_retries; ++retry) {
+                // Generate random config
+                config = generateRandomConfig();
+
+                std::cout << "Probe " << (retry + 1) << "/" << (config_.max_probe_retries + 1)
+                          << ": angles=" << std::fixed << std::setprecision(1)
+                          << rad2deg(config.physics.initial_angle1) << ", "
+                          << rad2deg(config.physics.initial_angle2) << " deg... ";
+                std::cout.flush();
+
+                // Run probe (physics only)
+                auto [passes, result] = runProbe(config);
+                probe_result = result;
+
+                if (passes) {
+                    std::cout << "OK (boom=" << std::setprecision(2) << result.boom_seconds
+                              << "s, spread=" << std::setprecision(2) << result.final_spread_ratio
+                              << ")\n";
+                    probe_retries = retry;
+                    found_valid = true;
+                    break;
+                } else {
+                    std::cout << "REJECT: " << filter_.rejectReason(result) << "\n";
+                }
+            }
+
+            if (!found_valid) {
+                std::cerr << "Max probe retries exceeded for video " << index << "\n";
+
+                auto end_time = std::chrono::steady_clock::now();
+                double duration = std::chrono::duration<double>(end_time - start_time).count();
+
+                RunResult result{video_name, "", false, std::nullopt, 0.0, duration, 0.0,
+                                 config_.max_probe_retries + 1, 1.0};
+                progress_.results.push_back(result);
+                progress_.failed_ids.push_back(video_name);
+                return false;
+            }
+        } else {
+            // No probing - just generate random config
+            config = generateRandomConfig();
+        }
+
+        // Phase 2: Full render
         // Set output directory for this video (direct mode, no timestamp subdirectory)
         config.output.directory = batch_dir_.string() + "/" + video_name;
         config.output.format = OutputFormat::Video;
         config.output.mode = OutputMode::Direct;
 
-        std::cout << "Initial angles: " << rad2deg(config.physics.initial_angle1) << ", "
+        std::cout << "Rendering: angles=" << std::fixed << std::setprecision(1)
+                  << rad2deg(config.physics.initial_angle1) << ", "
                   << rad2deg(config.physics.initial_angle2) << " deg\n";
 
         // Run simulation
@@ -452,8 +568,28 @@ bool BatchGenerator::generateOne(int index) {
         auto end_time = std::chrono::steady_clock::now();
         double duration = std::chrono::duration<double>(end_time - start_time).count();
 
+        // Calculate simulation speed (physics time / video time)
+        double video_duration =
+            static_cast<double>(config.simulation.total_frames) / config.output.video_fps;
+        double simulation_speed = config.simulation.duration_seconds / video_duration;
+
+        // Calculate boom_seconds from boom_frame
+        double boom_seconds = 0.0;
+        if (results.boom_frame) {
+            double frame_duration = config.simulation.duration_seconds / config.simulation.total_frames;
+            boom_seconds = *results.boom_frame * frame_duration;
+        }
+
         // Track result and create symlink
-        RunResult result{video_name, final_video_path, true, results.boom_frame, duration};
+        RunResult result{video_name,
+                         final_video_path,
+                         true,
+                         results.boom_frame,
+                         boom_seconds,
+                         duration,
+                         probe_result.final_spread_ratio,
+                         probe_retries,
+                         simulation_speed};
         progress_.results.push_back(result);
         progress_.completed_ids.push_back(video_name);
 
@@ -468,7 +604,7 @@ bool BatchGenerator::generateOne(int index) {
         auto end_time = std::chrono::steady_clock::now();
         double duration = std::chrono::duration<double>(end_time - start_time).count();
 
-        RunResult result{video_name, "", false, std::nullopt, duration};
+        RunResult result{video_name, "", false, std::nullopt, 0.0, duration, 0.0, 0, 1.0};
         progress_.results.push_back(result);
         progress_.failed_ids.push_back(video_name);
         return false;
@@ -489,6 +625,13 @@ Config BatchGenerator::generateRandomConfig() {
     config.physics.initial_angle1 = deg2rad(angle1_dist(rng_));
     config.physics.initial_angle2 = deg2rad(angle2_dist(rng_));
     config.simulation.angle_variation = deg2rad(variation_dist(rng_));
+
+    // Select random color preset if available
+    if (!config_.color_presets.empty()) {
+        std::uniform_int_distribution<size_t> preset_dist(0, config_.color_presets.size() - 1);
+        size_t preset_idx = preset_dist(rng_);
+        config.color = config_.color_presets[preset_idx];
+    }
 
     return config;
 }
@@ -518,6 +661,21 @@ std::string BatchGenerator::generateGridFolderName(std::map<std::string, std::st
     }
 
     return name.str();
+}
+
+std::pair<bool, ProbeResults> BatchGenerator::runProbe(Config const& config) {
+    // Create a modified config for probing (fewer pendulums)
+    Config probe_config = config;
+    probe_config.simulation.pendulum_count = config_.probe_pendulum_count;
+
+    // Run probe simulation (physics only, no rendering)
+    Simulation sim(probe_config);
+    ProbeResults results = sim.runProbe();
+
+    // Check if results pass filter criteria
+    bool passes = filter_.passes(results);
+
+    return {passes, results};
 }
 
 bool BatchGenerator::generateOneGrid(int index, std::map<std::string, std::string> const& params) {
@@ -566,8 +724,29 @@ bool BatchGenerator::generateOneGrid(int index, std::map<std::string, std::strin
         auto end_time = std::chrono::steady_clock::now();
         double duration = std::chrono::duration<double>(end_time - start_time).count();
 
+        // Calculate simulation speed (physics time / video time)
+        double video_duration =
+            static_cast<double>(config.simulation.total_frames) / config.output.video_fps;
+        double simulation_speed = config.simulation.duration_seconds / video_duration;
+
+        // Calculate boom_seconds from boom_frame
+        double boom_seconds = 0.0;
+        if (results.boom_frame) {
+            double frame_duration =
+                config.simulation.duration_seconds / config.simulation.total_frames;
+            boom_seconds = *results.boom_frame * frame_duration;
+        }
+
         // Track result and create symlink
-        RunResult result{folder_name, final_video_path, true, results.boom_frame, duration};
+        RunResult result{folder_name,
+                         final_video_path,
+                         true,
+                         results.boom_frame,
+                         boom_seconds,
+                         duration,
+                         0.0, // No spread tracking in grid mode
+                         0,   // No probe retries in grid mode
+                         simulation_speed};
         progress_.results.push_back(result);
         progress_.completed_ids.push_back(folder_name);
 
@@ -582,7 +761,7 @@ bool BatchGenerator::generateOneGrid(int index, std::map<std::string, std::strin
         auto end_time = std::chrono::steady_clock::now();
         double duration = std::chrono::duration<double>(end_time - start_time).count();
 
-        RunResult result{folder_name, "", false, std::nullopt, duration};
+        RunResult result{folder_name, "", false, std::nullopt, 0.0, duration, 0.0, 0, 1.0};
         progress_.results.push_back(result);
         progress_.failed_ids.push_back(folder_name);
         return false;
@@ -642,9 +821,9 @@ void BatchGenerator::createVideoSymlink(std::string const& video_path, std::stri
 
 void BatchGenerator::printSummary() const {
     std::cout << "\n";
-    std::cout << "╔══════════════════════════════════════════════════════════════════════╗\n";
-    std::cout << "║                          BATCH COMPLETE                              ║\n";
-    std::cout << "╠══════════════════════════════════════════════════════════════════════╣\n";
+    std::cout << "╔════════════════════════════════════════════════════════════════════════════╗\n";
+    std::cout << "║                              BATCH COMPLETE                                ║\n";
+    std::cout << "╠════════════════════════════════════════════════════════════════════════════╣\n";
 
     // Calculate totals
     double total_time = 0.0;
@@ -654,52 +833,65 @@ void BatchGenerator::printSummary() const {
 
     std::cout << "║  Total: " << std::setw(4) << progress_.total
               << "    Completed: " << std::setw(4) << progress_.completed
-              << "    Failed: " << std::setw(4) << progress_.failed;
-    int padding = 17;
-    for (int i = 0; i < padding; ++i) std::cout << " ";
-    std::cout << "║\n";
+              << "    Failed: " << std::setw(4) << progress_.failed
+              << std::string(25, ' ') << "║\n";
 
     std::cout << "║  Total time: " << std::fixed << std::setprecision(1) << total_time << "s";
     if (progress_.completed > 0) {
-        std::cout << "    Avg: " << std::setprecision(1) << (total_time / progress_.completed) << "s/run";
+        std::cout << "    Avg: " << std::setprecision(1) << (total_time / progress_.completed)
+                  << "s/run";
     }
-    std::cout << std::string(70 - 14 - std::to_string(static_cast<int>(total_time)).length() - 20, ' ') << "║\n";
+    std::cout << std::string(76 - 14 - std::to_string(static_cast<int>(total_time)).length() - 20,
+                             ' ')
+              << "║\n";
 
-    std::cout << "╠══════════════════════════════════════════════════════════════════════╣\n";
-    std::cout << "║  Name                                      Status   Boom    Time    ║\n";
-    std::cout << "╠══════════════════════════════════════════════════════════════════════╣\n";
+    std::cout << "╠════════════════════════════════════════════════════════════════════════════╣\n";
+    std::cout << "║  Name                              Status  Boom(s)  Spread  Retries  Time  ║\n";
+    std::cout << "╠════════════════════════════════════════════════════════════════════════════╣\n";
 
     for (auto const& r : progress_.results) {
         std::cout << "║  ";
 
         // Name (truncate if too long)
         std::string name = r.name;
-        if (name.length() > 40) {
-            name = name.substr(0, 37) + "...";
+        if (name.length() > 32) {
+            name = name.substr(0, 29) + "...";
         }
-        std::cout << std::left << std::setw(40) << name << "  ";
+        std::cout << std::left << std::setw(32) << name << "  ";
 
         // Status
         if (r.success) {
-            std::cout << "\033[32m" << std::setw(6) << "OK" << "\033[0m" << "   ";
+            std::cout << "\033[32m" << std::setw(6) << "OK" << "\033[0m" << "  ";
         } else {
-            std::cout << "\033[31m" << std::setw(6) << "FAIL" << "\033[0m" << "   ";
+            std::cout << "\033[31m" << std::setw(6) << "FAIL" << "\033[0m" << "  ";
         }
 
-        // Boom frame
+        // Boom time in seconds
         if (r.boom_frame) {
-            std::cout << std::right << std::setw(5) << *r.boom_frame;
+            std::cout << std::right << std::fixed << std::setprecision(1) << std::setw(6)
+                      << r.boom_seconds << "  ";
         } else {
-            std::cout << std::setw(5) << "-";
+            std::cout << std::setw(6) << "-" << "  ";
         }
-        std::cout << "   ";
+
+        // Spread ratio
+        if (r.success && r.final_spread_ratio > 0) {
+            std::cout << std::right << std::fixed << std::setprecision(2) << std::setw(6)
+                      << r.final_spread_ratio << "  ";
+        } else {
+            std::cout << std::setw(6) << "-" << "  ";
+        }
+
+        // Probe retries
+        std::cout << std::right << std::setw(5) << r.probe_retries << "   ";
 
         // Duration
         std::cout << std::fixed << std::setprecision(1) << std::setw(5) << r.duration_seconds << "s";
-        std::cout << "  ║\n";
+        std::cout << " ║\n";
     }
 
-    std::cout << "╠══════════════════════════════════════════════════════════════════════╣\n";
-    std::cout << "║  Output: " << std::left << std::setw(60) << batch_dir_.string().substr(0, 60) << "║\n";
-    std::cout << "╚══════════════════════════════════════════════════════════════════════╝\n";
+    std::cout << "╠════════════════════════════════════════════════════════════════════════════╣\n";
+    std::cout << "║  Output: " << std::left << std::setw(66)
+              << batch_dir_.string().substr(0, 66) << "║\n";
+    std::cout << "╚════════════════════════════════════════════════════════════════════════════╝\n";
 }

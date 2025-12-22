@@ -6,6 +6,7 @@
 #include "gl_renderer.h"
 #include "headless_gl.h"
 #include "pendulum.h"
+#include "probe_results.h"
 #include "variance_tracker.h"
 #include "video_writer.h"
 
@@ -47,6 +48,11 @@ public:
     // If config_path is provided, the config file will be copied to the output directory
     SimulationResults run(ProgressCallback progress = nullptr,
                           std::string const& config_path = "");
+
+    // Run probe simulation (physics only, no rendering)
+    // Used for quick parameter evaluation before committing to full render
+    // Much faster than run() since it skips GL initialization and all I/O
+    ProbeResults runProbe(ProgressCallback progress = nullptr);
 
 private:
     Config config_;
