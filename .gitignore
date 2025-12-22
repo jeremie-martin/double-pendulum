@@ -36,3 +36,15 @@ imgui.ini
 # Legacy
 fds/
 test/
+grid_output/
+
+.venv
+__pycache__/
+*.pyc
+.ruff_cache/
+.mypy_cache/
+
+# YouTube uploader credentials (OAuth secrets)
+youtube-uploader/credentials/
+youtube-uploader/.venv/
+uv.lock

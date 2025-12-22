@@ -1,0 +1,33 @@
+[project]
+name = "pendulum-uploader"
+version = "0.1.0"
+description = "YouTube uploader for double pendulum simulations"
+readme = "README.md"
+authors = [
+    { name = "Jérémie Martin", email = "martin.jeremie42@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "google-api-python-client>=2.100.0",
+    "google-auth-oauthlib>=1.1.0",
+    "google-auth-httplib2>=0.1.0",
+    "pydantic>=2.0.0",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+pendulum-upload = "pendulum_uploader.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pendulum_uploader"]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]

@@ -108,6 +108,7 @@ The batch system supports a two-phase workflow for generating videos with qualit
 | `max_boom_seconds` | Boom must happen before this time |
 | `min_spread_ratio` | Minimum fraction of pendulums above horizontal |
 | `require_boom` | Reject simulations with no detectable boom |
+| `require_valid_music` | Fail if no music track has drop > boom time |
 
 #### Spread Metrics
 
@@ -182,3 +183,50 @@ Optional: SDL2 (GUI), FFmpeg (video output)
 - Rendering is GPU-bound (millions of line quads)
 - I/O can dominate for PNG output (use video format)
 - 1M pendulums @ 4K: ~5s/frame (RTX 4090)
+
+## YouTube Uploader (Python)
+
+A standalone Python tool for uploading videos to YouTube with auto-generated metadata.
+
+### Location
+`youtube-uploader/` - Python project managed with `uv`
+
+### Setup
+```bash
+cd youtube-uploader
+uv sync
+# Place OAuth credentials in credentials/client_secrets.json
+```
+
+### Commands
+```bash
+# Preview generated metadata
+uv run pendulum-upload preview /path/to/video_dir
+
+# Upload single video
+uv run pendulum-upload upload /path/to/video_dir --privacy unlisted
+
+# Upload entire batch
+uv run pendulum-upload batch /path/to/batch_output --limit 10
+
+# Dry run (no upload)
+uv run pendulum-upload upload /path/to/video_dir --dry-run
+```
+
+### Key Files
+| File | Purpose |
+|------|---------|
+| `src/pendulum_uploader/cli.py` | Click CLI commands |
+| `src/pendulum_uploader/uploader.py` | YouTube API integration |
+| `src/pendulum_uploader/templates.py` | Title/description/tag generation |
+| `src/pendulum_uploader/models.py` | Pydantic models for metadata.json |
+
+### Music Selection with Boom Timing
+
+The batch generator now ensures that music drops happen AFTER the visual boom:
+
+1. After rendering, `boom_seconds` is calculated
+2. `pickMusicTrackForBoom(boom_seconds)` filters tracks where `drop_time > boom_seconds`
+3. If no valid track and `require_valid_music = true`, video fails and retries with new parameters
+
+This ensures the visual climax always syncs with (or leads) the music drop.

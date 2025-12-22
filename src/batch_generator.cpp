@@ -234,6 +234,9 @@ BatchConfig BatchConfig::load(std::string const& path) {
             if (auto req_boom = filter->get("require_boom")) {
                 config.filter.require_boom = req_boom->value<bool>().value_or(true);
             }
+            if (auto req_music = filter->get("require_valid_music")) {
+                config.filter.require_valid_music = req_music->value<bool>().value_or(true);
+            }
         }
 
         // Color presets
@@ -548,20 +551,37 @@ bool BatchGenerator::generateOne(int index) {
             std::cout << "\rFrame " << current << "/" << total << std::flush;
         });
 
+        // Calculate boom_seconds from boom_frame (needed for music selection)
+        double boom_seconds = 0.0;
+        if (results.boom_frame) {
+            double frame_duration = config.simulation.duration_seconds / config.simulation.total_frames;
+            boom_seconds = *results.boom_frame * frame_duration;
+        }
+
         // Mux with music if we have tracks and a boom frame
         std::string final_video_path = results.video_path;
-        if (auto track = pickMusicTrack(); track && results.boom_frame) {
-            std::filesystem::path video_path = results.video_path;
-            std::filesystem::path output_path =
-                video_path.parent_path() / (video_path.stem().string() + "_with_music.mp4");
+        if (results.boom_frame && music_.trackCount() > 0) {
+            auto track = pickMusicTrackForBoom(boom_seconds);
+            if (track) {
+                std::filesystem::path video_path = results.video_path;
+                std::filesystem::path output_path =
+                    video_path.parent_path() / (video_path.stem().string() + "_with_music.mp4");
 
-            std::cout << "\nAdding music: " << track->title << "\n";
-            if (MusicManager::muxWithAudio(video_path, track->filepath, output_path,
-                                           *results.boom_frame, track->drop_time_ms,
-                                           config.output.video_fps)) {
-                // Replace original with muxed version
-                std::filesystem::remove(video_path);
-                std::filesystem::rename(output_path, video_path);
+                std::cout << "\nAdding music: " << track->title << "\n";
+                if (MusicManager::muxWithAudio(video_path, track->filepath, output_path,
+                                               *results.boom_frame, track->drop_time_ms,
+                                               config.output.video_fps)) {
+                    // Replace original with muxed version
+                    std::filesystem::remove(video_path);
+                    std::filesystem::rename(output_path, video_path);
+                }
+            } else if (config_.filter.require_valid_music) {
+                // No valid music track found (drop not after boom) - fail and retry
+                std::cout << "\nNo music track with drop > " << std::fixed << std::setprecision(1)
+                          << boom_seconds << "s - failing video for retry\n";
+                // Clean up the rendered video
+                std::filesystem::remove(results.video_path);
+                return false;
             }
         }
 
@@ -572,13 +592,6 @@ bool BatchGenerator::generateOne(int index) {
         double video_duration =
             static_cast<double>(config.simulation.total_frames) / config.output.video_fps;
         double simulation_speed = config.simulation.duration_seconds / video_duration;
-
-        // Calculate boom_seconds from boom_frame
-        double boom_seconds = 0.0;
-        if (results.boom_frame) {
-            double frame_duration = config.simulation.duration_seconds / config.simulation.total_frames;
-            boom_seconds = *results.boom_frame * frame_duration;
-        }
 
         // Track result and create symlink
         RunResult result{video_name,
@@ -704,20 +717,38 @@ bool BatchGenerator::generateOneGrid(int index, std::map<std::string, std::strin
             std::cout << "\rFrame " << current << "/" << total << std::flush;
         });
 
+        // Calculate boom_seconds from boom_frame (needed for music selection)
+        double boom_seconds = 0.0;
+        if (results.boom_frame) {
+            double frame_duration =
+                config.simulation.duration_seconds / config.simulation.total_frames;
+            boom_seconds = *results.boom_frame * frame_duration;
+        }
+
         // Mux with music if we have tracks and a boom frame
         std::string final_video_path = results.video_path;
-        if (auto track = pickMusicTrack(); track && results.boom_frame) {
-            std::filesystem::path video_path = results.video_path;
-            std::filesystem::path output_path =
-                video_path.parent_path() / (video_path.stem().string() + "_with_music.mp4");
+        if (results.boom_frame && music_.trackCount() > 0) {
+            auto track = pickMusicTrackForBoom(boom_seconds);
+            if (track) {
+                std::filesystem::path video_path = results.video_path;
+                std::filesystem::path output_path =
+                    video_path.parent_path() / (video_path.stem().string() + "_with_music.mp4");
 
-            std::cout << "\nAdding music: " << track->title << "\n";
-            if (MusicManager::muxWithAudio(video_path, track->filepath, output_path,
-                                           *results.boom_frame, track->drop_time_ms,
-                                           config.output.video_fps)) {
-                // Replace original with muxed version
-                std::filesystem::remove(video_path);
-                std::filesystem::rename(output_path, video_path);
+                std::cout << "\nAdding music: " << track->title << "\n";
+                if (MusicManager::muxWithAudio(video_path, track->filepath, output_path,
+                                               *results.boom_frame, track->drop_time_ms,
+                                               config.output.video_fps)) {
+                    // Replace original with muxed version
+                    std::filesystem::remove(video_path);
+                    std::filesystem::rename(output_path, video_path);
+                }
+            } else if (config_.filter.require_valid_music) {
+                // No valid music track found (drop not after boom) - fail
+                std::cout << "\nNo music track with drop > " << std::fixed << std::setprecision(1)
+                          << boom_seconds << "s - failing video\n";
+                // Clean up the rendered video
+                std::filesystem::remove(results.video_path);
+                return false;
             }
         }
 
@@ -728,14 +759,6 @@ bool BatchGenerator::generateOneGrid(int index, std::map<std::string, std::strin
         double video_duration =
             static_cast<double>(config.simulation.total_frames) / config.output.video_fps;
         double simulation_speed = config.simulation.duration_seconds / video_duration;
-
-        // Calculate boom_seconds from boom_frame
-        double boom_seconds = 0.0;
-        if (results.boom_frame) {
-            double frame_duration =
-                config.simulation.duration_seconds / config.simulation.total_frames;
-            boom_seconds = *results.boom_frame * frame_duration;
-        }
 
         // Track result and create symlink
         RunResult result{folder_name,
@@ -777,6 +800,40 @@ std::optional<MusicTrack> BatchGenerator::pickMusicTrack() {
         return music_.randomTrack();
     } else if (!config_.fixed_track_id.empty()) {
         return music_.getTrack(config_.fixed_track_id);
+    }
+
+    return std::nullopt;
+}
+
+std::optional<MusicTrack> BatchGenerator::pickMusicTrackForBoom(double boom_seconds) {
+    if (music_.tracks().empty()) {
+        return std::nullopt;
+    }
+
+    // Filter: only tracks where drop happens AFTER boom
+    std::vector<MusicTrack const*> valid_tracks;
+    for (auto const& track : music_.tracks()) {
+        if (track.dropTimeSeconds() > boom_seconds) {
+            valid_tracks.push_back(&track);
+        }
+    }
+
+    if (valid_tracks.empty()) {
+        return std::nullopt; // No valid tracks - will trigger retry
+    }
+
+    // Random selection from valid tracks
+    if (config_.random_music) {
+        std::uniform_int_distribution<size_t> dist(0, valid_tracks.size() - 1);
+        return *valid_tracks[dist(rng_)];
+    } else if (!config_.fixed_track_id.empty()) {
+        // Check if fixed track is valid for this boom time
+        for (auto const* track : valid_tracks) {
+            if (track->id == config_.fixed_track_id) {
+                return *track;
+            }
+        }
+        return std::nullopt; // Fixed track not valid for this boom time
     }
 
     return std::nullopt;

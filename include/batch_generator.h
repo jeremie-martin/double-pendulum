@@ -37,6 +37,7 @@ struct FilterCriteria {
     double max_boom_seconds = 0.0; // Maximum boom time (0 = no maximum)
     double min_spread_ratio = 0.0; // Minimum spread ratio (0 = no requirement)
     bool require_boom = true;      // Reject simulations with no detectable boom
+    bool require_valid_music = true; // Fail if no music track has drop > boom time
 
     // Check if filtering is enabled (any non-default values)
     bool isEnabled() const {
@@ -224,8 +225,12 @@ private:
     // Returns pair of (passes, probe_results)
     std::pair<bool, ProbeResults> runProbe(Config const& config);
 
-    // Pick a random music track
+    // Pick a random music track (legacy, doesn't check boom timing)
     std::optional<MusicTrack> pickMusicTrack();
+
+    // Pick a music track where drop_time > boom_seconds
+    // Returns nullopt if no valid track found (triggers video failure/retry)
+    std::optional<MusicTrack> pickMusicTrackForBoom(double boom_seconds);
 
     // Save progress after each video
     void saveProgress();
