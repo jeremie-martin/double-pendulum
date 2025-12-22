@@ -1,5 +1,6 @@
 #include "simulation.h"
 #include "music_manager.h"
+#include "batch_generator.h"
 #include <iostream>
 #include <string>
 #include <cstring>
@@ -8,12 +9,17 @@ void printUsage(char const* program) {
     std::cout << "Double Pendulum Simulation\n\n"
               << "Usage:\n"
               << "  " << program << " [config.toml]           Run simulation\n"
+              << "  " << program << " --batch <batch.toml>    Run batch generation\n"
+              << "  " << program << " --batch <batch.toml> --resume\n"
+              << "                                      Resume batch generation\n"
               << "  " << program << " --add-music <video> <track-id> <boom-frame> <fps>\n"
               << "                                      Add music to existing video\n"
               << "  " << program << " --list-tracks           List available music tracks\n"
               << "  " << program << " -h, --help              Show this help\n\n"
               << "Examples:\n"
               << "  " << program << " config/default.toml\n"
+              << "  " << program << " --batch config/batch.toml\n"
+              << "  " << program << " --batch config/batch.toml --resume\n"
               << "  " << program << " --add-music output/run_xxx/video.mp4 petrunko 32 60\n"
               << "  " << program << " --list-tracks\n";
 }
@@ -90,6 +96,21 @@ int addMusic(std::string const& video_path, std::string const& track_id,
     return success ? 0 : 1;
 }
 
+int runBatch(std::string const& batch_config_path, bool resume) {
+    std::cout << "Loading batch config from: " << batch_config_path << "\n";
+    BatchConfig config = BatchConfig::load(batch_config_path);
+
+    BatchGenerator generator(config);
+
+    if (resume) {
+        generator.resume();
+    } else {
+        generator.run();
+    }
+
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         // Default: run simulation with default config
@@ -105,6 +126,16 @@ int main(int argc, char* argv[]) {
 
     if (arg == "--list-tracks") {
         return listTracks();
+    }
+
+    if (arg == "--batch") {
+        if (argc < 3) {
+            std::cerr << "Usage: " << argv[0] << " --batch <batch.toml> [--resume]\n";
+            return 1;
+        }
+        std::string batch_config = argv[2];
+        bool resume = (argc >= 4 && std::string(argv[3]) == "--resume");
+        return runBatch(batch_config, resume);
     }
 
     if (arg == "--add-music") {

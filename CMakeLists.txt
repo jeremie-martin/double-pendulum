@@ -24,6 +24,7 @@ add_executable(pendulum
     src/simulation.cpp
     src/video_writer.cpp
     src/music_manager.cpp
+    src/batch_generator.cpp
 )
 
 target_include_directories(pendulum PRIVATE
@@ -50,6 +51,9 @@ if(BUILD_GUI)
     add_executable(pendulum-gui
         src/main_gui.cpp
         src/config.cpp
+        src/simulation.cpp
+        src/video_writer.cpp
+        src/music_manager.cpp
         src/gl_renderer.cpp
         external/imgui/imgui.cpp
         external/imgui/imgui_draw.cpp

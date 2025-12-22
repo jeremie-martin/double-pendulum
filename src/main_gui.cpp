@@ -2,6 +2,7 @@
 #include "config.h"
 #include "gl_renderer.h"
 #include "pendulum.h"
+#include "simulation.h"
 #include "variance_tracker.h"
 
 #include <GL/glew.h>
@@ -10,9 +11,12 @@
 #include <imgui_impl_opengl3.h>
 #include <imgui_impl_sdl2.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 // Preview parameters (lower resolution for real-time)
@@ -22,6 +26,29 @@ struct PreviewParams
     int height = 540;
     int pendulum_count = 10000;
     int substeps = 10;
+};
+
+// Export state (thread-safe)
+struct ExportState
+{
+    std::atomic<bool> active{false};
+    std::atomic<bool> cancel_requested{false};
+    std::atomic<int> current_frame{0};
+    std::atomic<int> total_frames{0};
+    std::mutex result_mutex;
+    std::string result_message;
+    std::string output_path;
+    std::thread export_thread;
+
+    void reset() {
+        active = false;
+        cancel_requested = false;
+        current_frame = 0;
+        total_frames = 0;
+        std::lock_guard<std::mutex> lock(result_mutex);
+        result_message.clear();
+        output_path.clear();
+    }
 };
 
 // Application state
@@ -52,6 +79,9 @@ struct AppState
     double fps = 0.0;
     double sim_time_ms = 0.0;
     double render_time_ms = 0.0;
+
+    // Export
+    ExportState export_state;
 };
 
 void initSimulation(AppState& state, GLRenderer& renderer) {
@@ -238,6 +268,91 @@ void drawVarianceGraph(AppState const& state, ImVec2 size) {
     }
 
     ImGui::Dummy(size);
+}
+
+void startExport(AppState& state) {
+    if (state.export_state.active) return;
+
+    // Join previous thread if exists
+    if (state.export_state.export_thread.joinable()) {
+        state.export_state.export_thread.join();
+    }
+
+    state.export_state.reset();
+    state.export_state.active = true;
+    state.export_state.total_frames = state.config.simulation.total_frames;
+
+    // Create a copy of config for the export thread
+    Config export_config = state.config;
+
+    state.export_state.export_thread = std::thread([&state, export_config]() {
+        try {
+            Simulation sim(export_config);
+
+            sim.run([&state](int current, int total) {
+                state.export_state.current_frame = current;
+                state.export_state.total_frames = total;
+            });
+
+            // Update result
+            {
+                std::lock_guard<std::mutex> lock(state.export_state.result_mutex);
+                state.export_state.result_message = "Export completed successfully!";
+                state.export_state.output_path = export_config.output.directory;
+            }
+        } catch (std::exception const& e) {
+            std::lock_guard<std::mutex> lock(state.export_state.result_mutex);
+            state.export_state.result_message = std::string("Export failed: ") + e.what();
+        }
+
+        state.export_state.active = false;
+    });
+}
+
+void drawExportPanel(AppState& state) {
+    ImGui::Separator();
+    ImGui::Text("Export");
+
+    if (state.export_state.active) {
+        // Show progress
+        int current = state.export_state.current_frame;
+        int total = state.export_state.total_frames;
+        float progress = total > 0 ? static_cast<float>(current) / total : 0.0f;
+
+        ImGui::ProgressBar(progress, ImVec2(-1, 0));
+        ImGui::Text("Frame %d / %d", current, total);
+
+        if (ImGui::Button("Cancel")) {
+            state.export_state.cancel_requested = true;
+        }
+    } else {
+        // Show export button and settings
+        if (ImGui::CollapsingHeader("Export Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::SliderInt("Width", &state.config.render.width, 540, 4320);
+            ImGui::SliderInt("Height", &state.config.render.height, 540, 4320);
+            ImGui::SliderInt("Pendulum Count", &state.config.simulation.pendulum_count, 1000, 500000);
+            ImGui::SliderInt("Video FPS", &state.config.output.video_fps, 24, 120);
+
+            const char* formats[] = {"PNG Sequence", "Video (MP4)"};
+            int format_idx = state.config.output.format == OutputFormat::PNG ? 0 : 1;
+            if (ImGui::Combo("Format", &format_idx, formats, 2)) {
+                state.config.output.format = format_idx == 0 ? OutputFormat::PNG : OutputFormat::Video;
+            }
+        }
+
+        if (ImGui::Button("Export Full Quality", ImVec2(-1, 40))) {
+            startExport(state);
+        }
+
+        // Show result message if any
+        std::lock_guard<std::mutex> lock(state.export_state.result_mutex);
+        if (!state.export_state.result_message.empty()) {
+            ImGui::TextWrapped("%s", state.export_state.result_message.c_str());
+            if (!state.export_state.output_path.empty()) {
+                ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Output: %s", state.export_state.output_path.c_str());
+            }
+        }
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -583,6 +698,9 @@ int main(int argc, char* argv[]) {
             ImGui::SliderInt("White Confirm", &state.config.detection.white_confirmation, 1, 30);
         }
 
+        // Export section
+        drawExportPanel(state);
+
         ImGui::End();
 
         // Preview window
@@ -608,6 +726,12 @@ int main(int argc, char* argv[]) {
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         SDL_GL_SwapWindow(window);
+    }
+
+    // Wait for export thread to finish if running
+    if (state.export_state.export_thread.joinable()) {
+        state.export_state.cancel_requested = true;
+        state.export_state.export_thread.join();
     }
 
     // Cleanup

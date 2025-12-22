@@ -1,0 +1,19 @@
+# Batch Generation Configuration
+# Generate multiple videos with randomized parameters
+
+[batch]
+output_directory = "batch_output"
+count = 10                          # Number of videos to generate
+base_config = "config/default.toml" # Base parameters for non-randomized values
+
+[physics_ranges]
+# Random initial angles (in degrees)
+initial_angle1_deg = [-180.0, 180.0]
+initial_angle2_deg = [-180.0, 180.0]
+# Random angle variation (in degrees)
+angle_variation_deg = [0.05, 0.2]
+
+[music]
+database = "music"
+random_selection = true
+# track_id = "petrunko"  # Use this instead of random_selection for fixed track
