@@ -86,6 +86,13 @@ struct PostProcessParams {
     double exposure = 0.0;
     double contrast = 1.0;
     double gamma = 2.2;
+
+    // Fixed normalization max value
+    // If > 0, use this value for normalization instead of computing per-frame max
+    // This ensures consistent brightness across animations regardless of pendulum count
+    // Useful for comparing runs or ensuring visual consistency
+    // Set to 0 (default) for automatic per-frame normalization
+    double fixed_max = 0.0;
 };
 
 enum class ColorScheme { Spectrum, Rainbow, Heat, Cool, Monochrome };

@@ -142,15 +142,20 @@ void Simulation::saveMetadata(SimulationResults const& results) {
     out << "}\n";
 }
 
-void Simulation::saveVarianceCSV(std::vector<double> const& variance) {
+void Simulation::saveVarianceCSV(std::vector<double> const& variance,
+                                  std::vector<float> const& max_values) {
     std::ofstream out(run_directory_ + "/variance.csv");
     if (!out)
         return;
 
-    out << "frame,variance\n";
+    out << "frame,variance,max_value\n";
     out << std::fixed << std::setprecision(6);
     for (size_t i = 0; i < variance.size(); ++i) {
-        out << i << "," << variance[i] << "\n";
+        out << i << "," << variance[i];
+        if (i < max_values.size()) {
+            out << "," << max_values[i];
+        }
+        out << "\n";
     }
 }
 
@@ -183,6 +188,10 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     Duration render_time{0};
     Duration io_time{0};
     auto total_start = Clock::now();
+
+    // Max value tracking for diagnostics
+    std::vector<float> max_values;
+    max_values.reserve(total_frames);
 
     // Determine thread count
     int thread_count = config_.render.thread_count;
@@ -293,7 +302,9 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
                              static_cast<float>(config_.post_process.contrast),
                              static_cast<float>(config_.post_process.gamma),
                              config_.post_process.tone_map,
-                             static_cast<float>(config_.post_process.reinhard_white_point));
+                             static_cast<float>(config_.post_process.reinhard_white_point),
+                             static_cast<float>(config_.post_process.fixed_max));
+        max_values.push_back(renderer_.lastMax());
         render_time += Clock::now() - render_start;
 
         // I/O timing
@@ -338,7 +349,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         saveConfigCopy(config_path);
     }
     if (!results.variance_history.empty()) {
-        saveVarianceCSV(results.variance_history);
+        saveVarianceCSV(results.variance_history, max_values);
     }
 
     // Store output paths in results

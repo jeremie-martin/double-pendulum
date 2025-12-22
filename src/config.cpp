@@ -142,6 +142,7 @@ Config Config::load(std::string const& path) {
             config.post_process.exposure = get_or(*pp, "exposure", 0.0);
             config.post_process.contrast = get_or(*pp, "contrast", 1.0);
             config.post_process.gamma = get_or(*pp, "gamma", 2.2);
+            config.post_process.fixed_max = get_or(*pp, "fixed_max", 0.0);
         }
 
         // Color

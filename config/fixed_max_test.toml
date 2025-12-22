@@ -1,0 +1,38 @@
+# Test config for fixed_max feature
+[physics]
+initial_angle1_deg = 152
+initial_angle2_deg = 152.0
+
+[simulation]
+pendulum_count = 100000
+angle_variation_deg = 0.1
+duration_seconds = 20.0
+total_frames = 150
+physics_quality = "high"
+
+[render]
+width = 1080
+height = 1080
+
+[post_process]
+exposure = 4.0
+contrast = 1.0
+gamma = 2.2
+# Fixed max value - bypasses per-frame normalization
+# Use a value that works across the entire animation
+fixed_max = 60000.0
+
+[color]
+scheme = "spectrum"
+start = 0.0
+end = 1.0
+
+[detection]
+boom_threshold = 2.0
+white_threshold = 500
+
+[output]
+format = "video"
+directory = "output/fixed_max_test"
+video_fps = 60
+video_crf = 2

@@ -32,21 +32,26 @@ public:
 
     // Read back the framebuffer to CPU (for saving/display)
     // Applies full post-processing pipeline: normalize -> exposure -> tone_map -> contrast -> gamma
+    // If fixed_max > 0, use that value for normalization instead of computing per-frame max
     void readPixels(std::vector<uint8_t>& out, float exposure = 0.0f, float contrast = 1.0f,
                     float gamma = 2.2f, ToneMapOperator tone_map = ToneMapOperator::None,
-                    float white_point = 1.0f);
+                    float white_point = 1.0f, float fixed_max = 0.0f);
 
     // Get the texture ID for ImGui display
     GLuint getTextureID() const { return display_texture_; }
 
     // Update display texture from float buffer (with standard post-processing)
     // Uses same pipeline as CPU: normalize -> exposure -> tone_map -> contrast -> gamma
+    // If fixed_max > 0, use that value for normalization instead of computing per-frame max
     void updateDisplayTexture(float exposure = 0.0f, float contrast = 1.0f, float gamma = 2.2f,
                               ToneMapOperator tone_map = ToneMapOperator::None,
-                              float white_point = 1.0f);
+                              float white_point = 1.0f, float fixed_max = 0.0f);
 
     int width() const { return width_; }
     int height() const { return height_; }
+
+    // Get the last computed/used max value (for diagnostics)
+    float lastMax() const { return last_max_; }
 
 private:
     int width_ = 0;
@@ -87,6 +92,9 @@ private:
     GLuint max_compute_shader_ = 0;
     GLuint max_ssbo_ = 0;  // Shader storage buffer for reduction result
     bool has_compute_shaders_ = false;
+
+    // Last computed/used max value (for diagnostics)
+    float last_max_ = 0.0f;
 
     bool createFramebuffer();
     bool createComputeShader();

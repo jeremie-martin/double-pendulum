@@ -66,5 +66,6 @@ private:
     std::string createRunDirectory();
     void saveConfigCopy(std::string const& config_path);
     void saveMetadata(SimulationResults const& results);
-    void saveVarianceCSV(std::vector<double> const& variance);
+    void saveVarianceCSV(std::vector<double> const& variance,
+                         std::vector<float> const& max_values);
 };

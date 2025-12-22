@@ -586,9 +586,9 @@ void GLRenderer::flush() {
 }
 
 void GLRenderer::readPixels(std::vector<uint8_t>& out, float exposure, float contrast, float gamma,
-                            ToneMapOperator tone_map, float white_point) {
+                            ToneMapOperator tone_map, float white_point, float fixed_max) {
     // Process on GPU first
-    updateDisplayTexture(exposure, contrast, gamma, tone_map, white_point);
+    updateDisplayTexture(exposure, contrast, gamma, tone_map, white_point, fixed_max);
 
     // Read back 8-bit display texture (4x smaller transfer than float texture)
     std::vector<uint8_t> rgba(static_cast<size_t>(width_) * height_ * 4);
@@ -698,14 +698,19 @@ float GLRenderer::computeMaxGPU() {
 }
 
 void GLRenderer::updateDisplayTexture(float exposure, float contrast, float gamma,
-                                      ToneMapOperator tone_map, float white_point) {
+                                      ToneMapOperator tone_map, float white_point,
+                                      float fixed_max) {
     // Flush any pending lines first
     flush();
 
-    // Find max value - use GPU compute shader if available, else CPU
+    // Find max value for normalization
     float max_val = 0.0f;
 
-    if (has_compute_shaders_) {
+    if (fixed_max > 0.0f) {
+        // Use fixed max value (skips GPU/CPU max computation entirely)
+        max_val = fixed_max;
+    } else if (has_compute_shaders_) {
+        // Compute max on GPU
         max_val = computeMaxGPU();
 
 #ifdef DEBUG_GPU_MAX
@@ -739,6 +744,9 @@ void GLRenderer::updateDisplayTexture(float exposure, float contrast, float gamm
     if (max_val < 1e-6f) {
         max_val = 1.0f;
     }
+
+    // Store last computed max for diagnostics
+    last_max_ = max_val;
 
     // Precompute shader uniforms
     float exposure_mult = std::pow(2.0f, exposure);
