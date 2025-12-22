@@ -40,15 +40,17 @@ target_compile_options(pendulum PRIVATE
     -Wall -Wextra -Wpedantic
 )
 
-# GUI executable (Phase 2 - optional)
+# GUI executable (Phase 3 - optional)
 option(BUILD_GUI "Build GUI application with ImGui" OFF)
 if(BUILD_GUI)
     find_package(SDL2 REQUIRED)
     find_package(OpenGL REQUIRED)
+    find_package(GLEW REQUIRED)
 
     add_executable(pendulum-gui
         src/main_gui.cpp
         src/config.cpp
+        src/gl_renderer.cpp
         external/imgui/imgui.cpp
         external/imgui/imgui_draw.cpp
         external/imgui/imgui_tables.cpp
@@ -69,6 +71,11 @@ if(BUILD_GUI)
         Threads::Threads
         ${SDL2_LIBRARIES}
         OpenGL::GL
+        GLEW::GLEW
+    )
+
+    target_compile_options(pendulum-gui PRIVATE
+        -Wall -Wextra -Wpedantic
     )
 endif()
 
