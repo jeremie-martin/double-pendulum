@@ -159,6 +159,20 @@ void Simulation::saveVarianceCSV(std::vector<double> const& variance,
     }
 }
 
+void Simulation::saveAnalysisCSV(std::vector<FrameAnalysis> const& analysis) {
+    std::ofstream out(run_directory_ + "/analysis.csv");
+    if (!out)
+        return;
+
+    out << "frame,variance,max_value,brightness,total_energy\n";
+    out << std::fixed << std::setprecision(6);
+    for (size_t i = 0; i < analysis.size(); ++i) {
+        auto const& a = analysis[i];
+        out << i << "," << a.variance << "," << a.max_value << ","
+            << a.brightness << "," << a.total_energy << "\n";
+    }
+}
+
 SimulationResults Simulation::run(ProgressCallback progress, std::string const& config_path) {
     int const pendulum_count = config_.simulation.pendulum_count;
     int const total_frames = config_.simulation.total_frames;
@@ -251,6 +265,11 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         }
         variance_tracker_.update(angles);
 
+        // Extended analysis (when enabled - includes energy computation)
+        if (config_.analysis.enabled) {
+            analysis_tracker_.update(pendulums, 0.0f, 0.0f);  // GPU stats updated after render
+        }
+
         // Check for boom detection
         if (!results.boom_frame.has_value()) {
             int boom = VarianceUtils::checkThresholdCrossing(
@@ -306,6 +325,12 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
                              config_.post_process.normalization,
                              pendulum_count);
         max_values.push_back(renderer_.lastMax());
+
+        // Update analysis with GPU stats (brightness)
+        if (config_.analysis.enabled) {
+            analysis_tracker_.updateGPUStats(renderer_.lastMax(), renderer_.lastBrightness());
+        }
+
         render_time += Clock::now() - render_start;
 
         // I/O timing
@@ -344,12 +369,15 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
 
     results.variance_history = variance_tracker_.getHistory();
 
-    // Save metadata, config copy, and variance
+    // Save metadata, config copy, and statistics
     saveMetadata(results);
     if (!config_path.empty()) {
         saveConfigCopy(config_path);
     }
-    if (!results.variance_history.empty()) {
+    // Save extended analysis or basic variance depending on mode
+    if (config_.analysis.enabled && !analysis_tracker_.getHistory().empty()) {
+        saveAnalysisCSV(analysis_tracker_.getHistory());
+    } else if (!results.variance_history.empty()) {
         saveVarianceCSV(results.variance_history, max_values);
     }
 

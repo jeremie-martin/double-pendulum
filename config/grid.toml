@@ -1,0 +1,27 @@
+# Grid mode batch configuration
+# Generates all combinations of the specified parameter values
+
+[batch]
+mode = "grid"
+base_config = "config/perf.toml"  # Use test config for quick iterations
+output_directory = "grid_output"
+
+# Parameter grid - all combinations will be generated
+# Use dot notation for parameter paths (e.g., "simulation.pendulum_count")
+# Total runs = product of all array lengths
+
+[grid]
+# Example: 2 x 3 x 2 = 12 combinations
+"simulation.pendulum_count" = [50000, 500000]
+"post_process.normalization" = ["per_frame", "by_count"]
+
+# Other parameters you might want to sweep:
+# "post_process.normalization" = ["per_frame", "by_count"]
+# "post_process.tone_map" = ["none", "reinhard", "aces"]
+# "post_process.gamma" = [1.8, 2.2, 2.6]
+# "physics.initial_angle1_deg" = [150, 170, 180]
+# "simulation.physics_quality" = ["medium", "high", "ultra"]
+
+[music]
+database = "music"
+random_selection = false  # No music for quick tests

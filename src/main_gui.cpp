@@ -1,3 +1,4 @@
+#include "analysis_tracker.h"
 #include "color_scheme.h"
 #include "config.h"
 #include "gl_renderer.h"
@@ -24,6 +25,13 @@ struct PreviewParams {
     int height = 540;
     int pendulum_count = 10000;
     int substeps = 10;
+};
+
+// Graph metric selection
+enum class GraphMetric {
+    Variance,
+    Brightness,
+    Energy
 };
 
 // Export state (thread-safe)
@@ -58,6 +66,8 @@ struct AppState {
     std::vector<PendulumState> states;
     std::vector<Color> colors;
     VarianceTracker variance_tracker;
+    AnalysisTracker analysis_tracker;
+    GraphMetric selected_metric = GraphMetric::Variance;
 
     // Frame history for timeline scrubbing
     std::vector<std::vector<PendulumState>> frame_history;
@@ -162,8 +172,7 @@ void renderStates(AppState& state, GLRenderer& renderer,
         static_cast<float>(state.config.post_process.contrast),
         static_cast<float>(state.config.post_process.gamma), state.config.post_process.tone_map,
         static_cast<float>(state.config.post_process.reinhard_white_point),
-        state.config.post_process.normalization,
-        static_cast<int>(states_to_render.size()));
+        state.config.post_process.normalization, static_cast<int>(states_to_render.size()));
 
     auto render_end = std::chrono::high_resolution_clock::now();
     state.render_time_ms =
@@ -208,6 +217,9 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     }
     state.variance_tracker.update(angles);
 
+    // Extended analysis tracking (includes energy and brightness)
+    state.analysis_tracker.update(state.pendulums, 0.0f, 0.0f);
+
     // Check for boom
     if (!state.boom_frame.has_value()) {
         int boom = VarianceUtils::checkThresholdCrossing(state.variance_tracker.getHistory(),
@@ -245,10 +257,12 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     state.display_frame = state.current_frame;
 }
 
-void drawVarianceGraph(AppState const& state, ImVec2 size) {
-    auto const& history = state.variance_tracker.getHistory();
-    if (history.empty())
+void drawMetricGraph(AppState const& state, ImVec2 size) {
+    auto const& analysis = state.analysis_tracker.getHistory();
+    auto const& variance_history = state.variance_tracker.getHistory();
+    if (variance_history.empty()) {
         return;
+    }
 
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     ImVec2 pos = ImGui::GetCursorScreenPos();
@@ -257,46 +271,86 @@ void drawVarianceGraph(AppState const& state, ImVec2 size) {
     draw_list->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y),
                              IM_COL32(30, 30, 30, 255));
 
-    // Find max variance for scaling
-    double max_var = 1.0;
-    for (double v : history) {
-        max_var = std::max(max_var, v);
+    size_t data_size = variance_history.size();
+    float x_scale = size.x / std::max(1.0f, static_cast<float>(data_size - 1));
+
+    // Get data for selected metric and find max for scaling
+    std::vector<double> data;
+    data.reserve(data_size);
+    double max_val = 1.0;
+    ImU32 line_color = IM_COL32(100, 200, 100, 255);
+    char const* metric_label = "Variance";
+
+    switch (state.selected_metric) {
+    case GraphMetric::Variance:
+        data = variance_history;
+        line_color = IM_COL32(100, 200, 100, 255);
+        metric_label = "Variance";
+        break;
+    case GraphMetric::Brightness:
+        for (auto const& a : analysis) {
+            data.push_back(a.brightness);
+        }
+        line_color = IM_COL32(200, 200, 100, 255);
+        metric_label = "Brightness";
+        break;
+    case GraphMetric::Energy:
+        for (auto const& a : analysis) {
+            data.push_back(a.total_energy);
+        }
+        line_color = IM_COL32(100, 150, 255, 255);
+        metric_label = "Energy";
+        break;
     }
 
-    // Draw variance line
-    float x_scale = size.x / std::max(1.0f, static_cast<float>(history.size() - 1));
+    // Pad data if analysis tracker has fewer entries
+    while (data.size() < data_size) {
+        data.push_back(0.0);
+    }
 
-    for (size_t i = 1; i < history.size(); ++i) {
+    for (double v : data) {
+        max_val = std::max(max_val, std::abs(v));
+    }
+
+    // Draw metric line
+    for (size_t i = 1; i < data.size(); ++i) {
         float x0 = pos.x + (i - 1) * x_scale;
         float x1 = pos.x + i * x_scale;
-        float y0 = pos.y + size.y - (history[i - 1] / max_var) * size.y;
-        float y1 = pos.y + size.y - (history[i] / max_var) * size.y;
+        float y0 = pos.y + size.y - static_cast<float>((data[i - 1] / max_val) * size.y);
+        float y1 = pos.y + size.y - static_cast<float>((data[i] / max_val) * size.y);
 
-        draw_list->AddLine(ImVec2(x0, y0), ImVec2(x1, y1), IM_COL32(100, 200, 100, 255));
+        draw_list->AddLine(ImVec2(x0, y0), ImVec2(x1, y1), line_color);
     }
 
-    // Draw boom threshold line
-    float boom_y = pos.y + size.y - (state.config.detection.boom_threshold / max_var) * size.y;
-    draw_list->AddLine(ImVec2(pos.x, boom_y), ImVec2(pos.x + size.x, boom_y),
-                       IM_COL32(255, 200, 50, 100));
+    // Draw threshold lines only for variance
+    if (state.selected_metric == GraphMetric::Variance) {
+        float boom_y = pos.y + size.y - static_cast<float>((state.config.detection.boom_threshold / max_val) * size.y);
+        draw_list->AddLine(ImVec2(pos.x, boom_y), ImVec2(pos.x + size.x, boom_y),
+                           IM_COL32(255, 200, 50, 100));
 
-    // Draw white threshold line
-    float white_y = pos.y + size.y - (state.config.detection.white_threshold / max_var) * size.y;
-    draw_list->AddLine(ImVec2(pos.x, white_y), ImVec2(pos.x + size.x, white_y),
-                       IM_COL32(255, 255, 255, 100));
+        float white_y = pos.y + size.y - static_cast<float>((state.config.detection.white_threshold / max_val) * size.y);
+        draw_list->AddLine(ImVec2(pos.x, white_y), ImVec2(pos.x + size.x, white_y),
+                           IM_COL32(255, 255, 255, 100));
+    }
 
-    // Draw boom marker
+    // Draw boom/white markers (always shown)
     if (state.boom_frame.has_value()) {
         float x = pos.x + *state.boom_frame * x_scale;
         draw_list->AddLine(ImVec2(x, pos.y), ImVec2(x, pos.y + size.y),
                            IM_COL32(255, 200, 50, 255));
     }
 
-    // Draw white marker
     if (state.white_frame.has_value()) {
         float x = pos.x + *state.white_frame * x_scale;
         draw_list->AddLine(ImVec2(x, pos.y), ImVec2(x, pos.y + size.y),
                            IM_COL32(255, 255, 255, 255));
+    }
+
+    // Show current value and metric label
+    if (!data.empty()) {
+        char label[64];
+        snprintf(label, sizeof(label), "%s: %.4g (max: %.4g)", metric_label, data.back(), max_val);
+        draw_list->AddText(ImVec2(pos.x + 5, pos.y + 5), IM_COL32(255, 255, 255, 200), label);
     }
 
     ImGui::Dummy(size);
@@ -433,7 +487,12 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
     ImGui::Text("FPS: %.1f", state.fps);
     ImGui::Text("Sim: %.2f ms", state.sim_time_ms);
     ImGui::Text("Render: %.2f ms", state.render_time_ms);
+
+    // Analysis metrics
+    ImGui::Separator();
     ImGui::Text("Variance: %.4f", state.variance_tracker.getCurrentVariance());
+    auto const& current = state.analysis_tracker.getCurrent();
+    ImGui::Text("Energy:   %.2f", current.total_energy);
 
     if (state.boom_frame.has_value()) {
         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Boom: frame %d (var=%.4f)",
@@ -522,7 +581,8 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
         if (ImGui::Combo("Physics Quality", &quality_idx, quality_names, 5)) {
             state.config.simulation.physics_quality = static_cast<PhysicsQuality>(quality_idx);
             if (quality_idx < 4) { // Not Custom
-                state.config.simulation.max_dt = qualityToMaxDt(state.config.simulation.physics_quality);
+                state.config.simulation.max_dt =
+                    qualityToMaxDt(state.config.simulation.physics_quality);
             }
         }
 
@@ -534,8 +594,7 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
         }
 
         // Display computed values
-        ImGui::Text("Substeps: %d, dt = %.4f ms",
-                    state.config.simulation.substeps(),
+        ImGui::Text("Substeps: %d, dt = %.4f ms", state.config.simulation.substeps(),
                     state.config.simulation.dt() * 1000.0);
     }
 
@@ -902,11 +961,19 @@ int main(int argc, char* argv[]) {
                      preview_size, ImVec2(0, 1), ImVec2(1, 0));
         ImGui::End();
 
-        // Variance graph
-        ImGui::Begin("Variance");
+        // Analysis graph with metric selector
+        ImGui::Begin("Analysis");
+
+        // Metric selector
+        char const* metric_names[] = {"Variance", "Brightness", "Energy"};
+        int current_metric = static_cast<int>(state.selected_metric);
+        if (ImGui::Combo("Metric", &current_metric, metric_names, 3)) {
+            state.selected_metric = static_cast<GraphMetric>(current_metric);
+        }
+
         ImVec2 graph_size = ImGui::GetContentRegionAvail();
         graph_size.y = std::max(100.0f, graph_size.y);
-        drawVarianceGraph(state, graph_size);
+        drawMetricGraph(state, graph_size);
         ImGui::End();
 
         // Timeline

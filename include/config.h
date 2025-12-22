@@ -133,6 +133,11 @@ struct OutputParams {
     int video_fps = 60; // Only affects video encoding, not simulation
 };
 
+// Analysis mode parameters for extended statistics
+struct AnalysisParams {
+    bool enabled = false;
+};
+
 struct Config {
     PhysicsParams physics;
     SimulationParams simulation;
@@ -141,10 +146,15 @@ struct Config {
     ColorParams color;
     DetectionParams detection;
     OutputParams output;
+    AnalysisParams analysis;
 
     // Load from TOML file
     static Config load(std::string const& path);
 
     // Load with defaults
     static Config defaults();
+
+    // Apply a parameter override from CLI (e.g., "simulation.pendulum_count", "100000")
+    // Returns true if the key was recognized and applied
+    bool applyOverride(std::string const& key, std::string const& value);
 };

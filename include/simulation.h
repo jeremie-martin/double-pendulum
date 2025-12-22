@@ -1,5 +1,6 @@
 #pragma once
 
+#include "analysis_tracker.h"
 #include "color_scheme.h"
 #include "config.h"
 #include "gl_renderer.h"
@@ -53,6 +54,7 @@ private:
     GLRenderer renderer_;
     ColorSchemeGenerator color_gen_;
     VarianceTracker variance_tracker_;
+    AnalysisTracker analysis_tracker_;
     std::string run_directory_;
 
     void initializePendulums(std::vector<Pendulum>& pendulums);
@@ -68,4 +70,5 @@ private:
     void saveMetadata(SimulationResults const& results);
     void saveVarianceCSV(std::vector<double> const& variance,
                          std::vector<float> const& max_values);
+    void saveAnalysisCSV(std::vector<FrameAnalysis> const& analysis);
 };

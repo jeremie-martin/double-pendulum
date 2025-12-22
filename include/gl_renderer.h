@@ -57,6 +57,9 @@ public:
     // Get the last computed/used max value (for diagnostics)
     float lastMax() const { return last_max_; }
 
+    // Get the last computed mean brightness (0-1 range, analysis mode)
+    float lastBrightness() const { return last_brightness_; }
+
 private:
     int width_ = 0;
     int height_ = 0;
@@ -99,6 +102,9 @@ private:
 
     // Last computed/used max value (for diagnostics)
     float last_max_ = 0.0f;
+
+    // Last computed mean brightness (0-1 range, analysis mode)
+    float last_brightness_ = 0.0f;
 
     bool createFramebuffer();
     bool createComputeShader();

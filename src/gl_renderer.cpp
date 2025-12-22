@@ -596,13 +596,26 @@ void GLRenderer::readPixels(std::vector<uint8_t>& out, float exposure, float con
     glBindTexture(GL_TEXTURE_2D, display_texture_);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
 
-    // Convert RGBA to RGB (shader already flipped Y)
+    // Convert RGBA to RGB (shader already flipped Y) and compute brightness
     out.resize(static_cast<size_t>(width_) * height_ * 3);
-    for (int i = 0; i < width_ * height_; ++i) {
-        out[i * 3 + 0] = rgba[i * 4 + 0];
-        out[i * 3 + 1] = rgba[i * 4 + 1];
-        out[i * 3 + 2] = rgba[i * 4 + 2];
+    double brightness_sum = 0.0;
+    int const pixel_count = width_ * height_;
+
+    for (int i = 0; i < pixel_count; ++i) {
+        uint8_t r = rgba[i * 4 + 0];
+        uint8_t g = rgba[i * 4 + 1];
+        uint8_t b = rgba[i * 4 + 2];
+
+        out[i * 3 + 0] = r;
+        out[i * 3 + 1] = g;
+        out[i * 3 + 2] = b;
+
+        // Luminance using standard sRGB weights
+        brightness_sum += 0.2126 * r + 0.7152 * g + 0.0722 * b;
     }
+
+    // Normalize to 0-1 range
+    last_brightness_ = static_cast<float>(brightness_sum / (pixel_count * 255.0));
 }
 
 bool GLRenderer::createComputeShader() {

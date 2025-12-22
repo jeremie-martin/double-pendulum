@@ -5,39 +5,70 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 void printUsage(char const* program) {
     std::cout << "Double Pendulum Simulation (GPU)\n\n"
               << "Usage:\n"
-              << "  " << program << " [config.toml]           Run simulation\n"
-              << "  " << program << " [config.toml] --music <track-id|random>\n"
-              << "                                      Run simulation with music\n"
-              << "  " << program << " --batch <batch.toml>    Run batch generation\n"
-              << "  " << program << " --batch <batch.toml> --resume\n"
-              << "                                      Resume batch generation\n"
+              << "  " << program << " [config.toml] [options]  Run simulation\n"
+              << "  " << program << " --batch <batch.toml> [options]\n"
+              << "                                      Run batch generation\n"
               << "  " << program << " --add-music <video> <track-id> <boom-frame> <fps>\n"
               << "                                      Add music to existing video\n"
               << "  " << program << " --list-tracks           List available music tracks\n"
               << "  " << program << " -h, --help              Show this help\n\n"
+              << "Options:\n"
+              << "  --set <key>=<value>    Override config parameter (can be used multiple times)\n"
+              << "  --analysis             Enable analysis mode (extended statistics)\n"
+              << "  --music <track|random> Add music synced to chaos onset\n"
+              << "  --resume               Resume interrupted batch (with --batch)\n\n"
+              << "Parameter keys use dot notation: section.parameter\n"
+              << "  Sections: physics, simulation, render, post_process, color, detection, output\n\n"
               << "Examples:\n"
               << "  " << program << " config/default.toml\n"
+              << "  " << program << " config/default.toml --set simulation.pendulum_count=50000\n"
+              << "  " << program << " config/default.toml --set post_process.exposure=2.0 --analysis\n"
               << "  " << program << " config/default.toml --music random\n"
-              << "  " << program << " config/default.toml --music petrunko\n"
               << "  " << program << " --batch config/batch.toml\n"
               << "  " << program << " --batch config/batch.toml --resume\n"
-              << "  " << program << " --add-music output/run_xxx/video.mp4 petrunko 32 60\n"
-              << "  " << program << " --list-tracks\n";
+              << "  " << program << " --batch config/grid.toml --set render.width=1920\n"
+              << "  " << program << " --add-music output/run_xxx/video.mp4 petrunko 32 60\n";
 }
 
-int runSimulation(std::string const& config_path, std::string const& music_track = "") {
-    // Load configuration
-    std::cout << "Loading config from: " << config_path << "\n";
-    Config config = Config::load(config_path);
+// Parsed command-line options
+struct CLIOptions {
+    std::string config_path = "config/default.toml";
+    std::string music_track;
+    std::vector<std::pair<std::string, std::string>> overrides;
+    bool analysis = false;
+};
 
-    // Calculate video duration
+int runSimulation(CLIOptions const& opts) {
+    // Load configuration
+    std::cout << "Loading config from: " << opts.config_path << "\n";
+    Config config = Config::load(opts.config_path);
+
+    // Apply command-line overrides
+    for (auto const& [key, value] : opts.overrides) {
+        if (!config.applyOverride(key, value)) {
+            return 1;
+        }
+        std::cout << "Override: " << key << " = " << value << "\n";
+    }
+
+    // Apply analysis flag
+    if (opts.analysis) {
+        config.analysis.enabled = true;
+        std::cout << "Analysis mode: enabled\n";
+    }
+
+    // Calculate derived values
     double video_duration =
         static_cast<double>(config.simulation.total_frames) / config.output.video_fps;
+    int total_physics_steps = config.simulation.total_frames * config.simulation.substeps();
 
     // Get physics quality string
     auto qualityName = [](PhysicsQuality q) -> char const* {
@@ -51,28 +82,81 @@ int runSimulation(std::string const& config_path, std::string const& music_track
         return "unknown";
     };
 
-    // Print config summary
-    std::cout << "\nSimulation parameters:\n"
-              << "  Pendulums: " << config.simulation.pendulum_count << "\n"
-              << "  Physics duration: " << config.simulation.duration_seconds << "s\n"
-              << "  Frames: " << config.simulation.total_frames << "\n"
-              << "  Video: " << video_duration << "s @ " << config.output.video_fps << " FPS\n"
-              << "  Resolution: " << config.render.width << "x" << config.render.height << "\n"
-              << "  Physics quality: " << qualityName(config.simulation.physics_quality)
-              << " (max_dt=" << (config.simulation.max_dt * 1000) << "ms"
-              << ", substeps=" << config.simulation.substeps()
-              << ", dt=" << std::fixed << std::setprecision(2) << (config.simulation.dt() * 1000) << "ms)\n"
-              << "  Output: " << config.output.directory << "/\n"
-              << "  Renderer: GPU\n";
+    auto toneMapName = [](ToneMapOperator tm) -> char const* {
+        switch (tm) {
+        case ToneMapOperator::None: return "none";
+        case ToneMapOperator::Reinhard: return "reinhard";
+        case ToneMapOperator::ReinhardExtended: return "reinhard_extended";
+        case ToneMapOperator::ACES: return "aces";
+        case ToneMapOperator::Logarithmic: return "logarithmic";
+        }
+        return "unknown";
+    };
 
-    if (!music_track.empty()) {
-        std::cout << "  Music: " << music_track << "\n";
+    auto colorSchemeName = [](ColorScheme cs) -> char const* {
+        switch (cs) {
+        case ColorScheme::Spectrum: return "spectrum";
+        case ColorScheme::Rainbow: return "rainbow";
+        case ColorScheme::Heat: return "heat";
+        case ColorScheme::Cool: return "cool";
+        case ColorScheme::Monochrome: return "monochrome";
+        }
+        return "unknown";
+    };
+
+    auto normModeName = [](NormalizationMode nm) -> char const* {
+        switch (nm) {
+        case NormalizationMode::PerFrame: return "per_frame";
+        case NormalizationMode::ByCount: return "by_count";
+        }
+        return "unknown";
+    };
+
+    // Print comprehensive config summary
+    std::cout << "\n=== Double Pendulum Simulation ===\n\n";
+
+    std::cout << "Physics:\n"
+              << "  Gravity:        " << config.physics.gravity << " m/s^2\n"
+              << "  Lengths:        L1=" << config.physics.length1 << "m, L2=" << config.physics.length2 << "m\n"
+              << "  Masses:         M1=" << config.physics.mass1 << "kg, M2=" << config.physics.mass2 << "kg\n"
+              << "  Initial angles: th1=" << rad2deg(config.physics.initial_angle1) << " deg, "
+              << "th2=" << rad2deg(config.physics.initial_angle2) << " deg\n"
+              << "  Angle spread:   +/- " << rad2deg(config.simulation.angle_variation) << " deg\n\n";
+
+    std::cout << "Simulation:\n"
+              << "  Pendulums:      " << config.simulation.pendulum_count << "\n"
+              << "  Duration:       " << config.simulation.duration_seconds << "s physics -> "
+              << config.simulation.total_frames << " frames @ " << config.output.video_fps << " FPS ("
+              << std::fixed << std::setprecision(1) << video_duration << "s video)\n"
+              << "  Quality:        " << qualityName(config.simulation.physics_quality)
+              << " (max_dt=" << std::setprecision(1) << (config.simulation.max_dt * 1000) << "ms)\n"
+              << "  Substeps:       " << config.simulation.substeps() << " per frame"
+              << " (dt=" << std::setprecision(2) << (config.simulation.dt() * 1000) << "ms)\n"
+              << "  Total steps:    " << total_physics_steps << "\n\n";
+
+    std::cout << "Rendering:\n"
+              << "  Resolution:     " << config.render.width << "x" << config.render.height << "\n"
+              << "  Color scheme:   " << colorSchemeName(config.color.scheme) << "\n"
+              << "  Tone mapping:   " << toneMapName(config.post_process.tone_map) << "\n"
+              << "  Normalization:  " << normModeName(config.post_process.normalization) << "\n"
+              << "  Exposure:       " << std::showpos << std::setprecision(1) << config.post_process.exposure
+              << std::noshowpos << " stops\n"
+              << "  Gamma:          " << config.post_process.gamma << "\n\n";
+
+    std::cout << "Output:\n"
+              << "  Directory:      " << config.output.directory << "/\n"
+              << "  Format:         " << (config.output.format == OutputFormat::Video ? "video" : "png") << "\n";
+    if (config.analysis.enabled) {
+        std::cout << "  Analysis:       enabled\n";
+    }
+    if (!opts.music_track.empty()) {
+        std::cout << "  Music:          " << opts.music_track << "\n";
     }
     std::cout << "\n";
 
     // Run simulation
     Simulation sim(config);
-    auto results = sim.run(nullptr, config_path);
+    auto results = sim.run(nullptr, opts.config_path);
 
     if (results.frames_completed == 0) {
         std::cerr << "Simulation failed\n";
@@ -80,7 +164,7 @@ int runSimulation(std::string const& config_path, std::string const& music_track
     }
 
     // Add music if requested and we have a video with boom_frame
-    if (!music_track.empty() && !results.video_path.empty() && results.boom_frame) {
+    if (!opts.music_track.empty() && !results.video_path.empty() && results.boom_frame) {
         MusicManager music;
         if (!music.load("music")) {
             std::cerr << "Failed to load music database\n";
@@ -88,16 +172,16 @@ int runSimulation(std::string const& config_path, std::string const& music_track
         }
 
         std::optional<MusicTrack> track;
-        if (music_track == "random") {
+        if (opts.music_track == "random") {
             if (music.trackCount() > 0) {
                 track = music.randomTrack();
             }
         } else {
-            track = music.getTrack(music_track);
+            track = music.getTrack(opts.music_track);
         }
 
         if (!track) {
-            std::cerr << "Track not found: " << music_track << "\n";
+            std::cerr << "Track not found: " << opts.music_track << "\n";
             std::cerr << "Use --list-tracks to see available tracks\n";
             return 1;
         }
@@ -167,9 +251,28 @@ int addMusic(std::string const& video_path, std::string const& track_id, int boo
     return success ? 0 : 1;
 }
 
-int runBatch(std::string const& batch_config_path, bool resume) {
+// Parse --set key=value argument
+std::optional<std::pair<std::string, std::string>> parseSetArg(std::string const& arg) {
+    auto eq_pos = arg.find('=');
+    if (eq_pos == std::string::npos) {
+        std::cerr << "Invalid --set argument (missing '='): " << arg << "\n";
+        return std::nullopt;
+    }
+    return std::make_pair(arg.substr(0, eq_pos), arg.substr(eq_pos + 1));
+}
+
+int runBatch(std::string const& batch_config_path, bool resume,
+             std::vector<std::pair<std::string, std::string>> const& overrides) {
     std::cout << "Loading batch config from: " << batch_config_path << "\n";
     BatchConfig config = BatchConfig::load(batch_config_path);
+
+    // Apply overrides to base config
+    for (auto const& [key, value] : overrides) {
+        if (!config.base_config.applyOverride(key, value)) {
+            return 1;
+        }
+        std::cout << "Override: " << key << " = " << value << "\n";
+    }
 
     BatchGenerator generator(config);
 
@@ -185,7 +288,8 @@ int runBatch(std::string const& batch_config_path, bool resume) {
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         // Default: run simulation with default config
-        return runSimulation("config/default.toml");
+        CLIOptions opts;
+        return runSimulation(opts);
     }
 
     std::string arg = argv[1];
@@ -197,16 +301,6 @@ int main(int argc, char* argv[]) {
 
     if (arg == "--list-tracks") {
         return listTracks();
-    }
-
-    if (arg == "--batch") {
-        if (argc < 3) {
-            std::cerr << "Usage: " << argv[0] << " --batch <batch.toml> [--resume]\n";
-            return 1;
-        }
-        std::string batch_config = argv[2];
-        bool resume = (argc >= 4 && std::string(argv[3]) == "--resume");
-        return runBatch(batch_config, resume);
     }
 
     if (arg == "--add-music") {
@@ -222,15 +316,45 @@ int main(int argc, char* argv[]) {
         return addMusic(video, track_id, boom_frame, fps);
     }
 
-    // Otherwise, treat argument as config path
-    // Check for --music option
-    std::string music_track;
+    if (arg == "--batch") {
+        if (argc < 3) {
+            std::cerr << "Usage: " << argv[0] << " --batch <batch.toml> [options]\n";
+            return 1;
+        }
+        std::string batch_config = argv[2];
+        bool resume = false;
+        std::vector<std::pair<std::string, std::string>> overrides;
 
+        for (int i = 3; i < argc; ++i) {
+            std::string opt = argv[i];
+            if (opt == "--resume") {
+                resume = true;
+            } else if (opt == "--set" && i + 1 < argc) {
+                auto parsed = parseSetArg(argv[++i]);
+                if (!parsed) return 1;
+                overrides.push_back(*parsed);
+            }
+        }
+        return runBatch(batch_config, resume, overrides);
+    }
+
+    // Otherwise, treat argument as config path
+    CLIOptions opts;
+    opts.config_path = arg;
+
+    // Parse remaining options
     for (int i = 2; i < argc; ++i) {
-        if (std::string(argv[i]) == "--music" && i + 1 < argc) {
-            music_track = argv[i + 1];
+        std::string opt = argv[i];
+        if (opt == "--music" && i + 1 < argc) {
+            opts.music_track = argv[++i];
+        } else if (opt == "--set" && i + 1 < argc) {
+            auto parsed = parseSetArg(argv[++i]);
+            if (!parsed) return 1;
+            opts.overrides.push_back(*parsed);
+        } else if (opt == "--analysis") {
+            opts.analysis = true;
         }
     }
 
-    return runSimulation(arg, music_track);
+    return runSimulation(opts);
 }

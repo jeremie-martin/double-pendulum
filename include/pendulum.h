@@ -71,6 +71,35 @@ public:
     double getOmega1() const { return w1; }
     double getOmega2() const { return w2; }
 
+    // Compute total mechanical energy (kinetic + potential)
+    // Energy should be conserved in ideal simulation (useful for validation)
+    double totalEnergy() const {
+        // Reference: ground level is at y = 0 (pivot point)
+        // Potential energy is negative below pivot
+
+        // Positions (y increases downward in our convention)
+        double y1 = -L1 * std::cos(th1);  // Height of first bob (negative = below pivot)
+        double y2 = y1 - L2 * std::cos(th2);  // Height of second bob
+
+        // Potential energy (PE = mgh, with h measured upward from pivot)
+        double PE = -M1 * G * y1 - M2 * G * y2;
+
+        // Velocities of first bob
+        double v1x = L1 * w1 * std::cos(th1);
+        double v1y = L1 * w1 * std::sin(th1);
+        double v1_sq = v1x * v1x + v1y * v1y;
+
+        // Velocities of second bob (relative to first + first's velocity)
+        double v2x = v1x + L2 * w2 * std::cos(th2);
+        double v2y = v1y + L2 * w2 * std::sin(th2);
+        double v2_sq = v2x * v2x + v2y * v2y;
+
+        // Kinetic energy (KE = 0.5 * m * v^2)
+        double KE = 0.5 * M1 * v1_sq + 0.5 * M2 * v2_sq;
+
+        return KE + PE;
+    }
+
 private:
     double G, L1, L2, M1, M2;
     double th1, th2, w1, w2;

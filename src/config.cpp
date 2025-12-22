@@ -184,6 +184,11 @@ Config Config::load(std::string const& path) {
             config.output.video_fps = get_or(*out, "video_fps", 60);
         }
 
+        // Analysis mode
+        if (auto analysis_tbl = tbl["analysis"].as_table()) {
+            config.analysis.enabled = get_or(*analysis_tbl, "enabled", false);
+        }
+
     } catch (toml::parse_error const& err) {
         std::cerr << "Error parsing config: " << err.description() << "\n";
         std::cerr << "Using defaults\n";
@@ -218,4 +223,163 @@ Config Config::load(std::string const& path) {
     }
 
     return config;
+}
+
+bool Config::applyOverride(std::string const& key, std::string const& value) {
+    // Parse dot-notation key (e.g., "simulation.pendulum_count")
+    auto dot_pos = key.find('.');
+    if (dot_pos == std::string::npos) {
+        std::cerr << "Invalid parameter key (missing section): " << key << "\n";
+        return false;
+    }
+
+    std::string section = key.substr(0, dot_pos);
+    std::string param = key.substr(dot_pos + 1);
+
+    try {
+        // Physics parameters
+        if (section == "physics") {
+            if (param == "gravity") {
+                physics.gravity = std::stod(value);
+            } else if (param == "length1") {
+                physics.length1 = std::stod(value);
+            } else if (param == "length2") {
+                physics.length2 = std::stod(value);
+            } else if (param == "mass1") {
+                physics.mass1 = std::stod(value);
+            } else if (param == "mass2") {
+                physics.mass2 = std::stod(value);
+            } else if (param == "initial_angle1_deg") {
+                physics.initial_angle1 = deg2rad(std::stod(value));
+            } else if (param == "initial_angle2_deg") {
+                physics.initial_angle2 = deg2rad(std::stod(value));
+            } else if (param == "initial_velocity1") {
+                physics.initial_velocity1 = std::stod(value);
+            } else if (param == "initial_velocity2") {
+                physics.initial_velocity2 = std::stod(value);
+            } else {
+                std::cerr << "Unknown physics parameter: " << param << "\n";
+                return false;
+            }
+        }
+        // Simulation parameters
+        else if (section == "simulation") {
+            if (param == "pendulum_count") {
+                simulation.pendulum_count = std::stoi(value);
+            } else if (param == "angle_variation_deg") {
+                simulation.angle_variation = deg2rad(std::stod(value));
+            } else if (param == "duration_seconds") {
+                simulation.duration_seconds = std::stod(value);
+            } else if (param == "total_frames") {
+                simulation.total_frames = std::stoi(value);
+            } else if (param == "physics_quality") {
+                simulation.physics_quality = parsePhysicsQuality(value);
+                simulation.max_dt = qualityToMaxDt(simulation.physics_quality);
+            } else if (param == "max_dt") {
+                simulation.max_dt = std::stod(value);
+                simulation.physics_quality = PhysicsQuality::Custom;
+            } else {
+                std::cerr << "Unknown simulation parameter: " << param << "\n";
+                return false;
+            }
+        }
+        // Render parameters
+        else if (section == "render") {
+            if (param == "width") {
+                render.width = std::stoi(value);
+            } else if (param == "height") {
+                render.height = std::stoi(value);
+            } else if (param == "thread_count") {
+                render.thread_count = std::stoi(value);
+            } else {
+                std::cerr << "Unknown render parameter: " << param << "\n";
+                return false;
+            }
+        }
+        // Post-process parameters
+        else if (section == "post_process") {
+            if (param == "tone_map") {
+                post_process.tone_map = parseToneMapOperator(value);
+            } else if (param == "reinhard_white_point") {
+                post_process.reinhard_white_point = std::stod(value);
+            } else if (param == "exposure") {
+                post_process.exposure = std::stod(value);
+            } else if (param == "contrast") {
+                post_process.contrast = std::stod(value);
+            } else if (param == "gamma") {
+                post_process.gamma = std::stod(value);
+            } else if (param == "normalization") {
+                post_process.normalization = parseNormalizationMode(value);
+            } else {
+                std::cerr << "Unknown post_process parameter: " << param << "\n";
+                return false;
+            }
+        }
+        // Color parameters
+        else if (section == "color") {
+            if (param == "scheme") {
+                color.scheme = parseColorScheme(value);
+            } else if (param == "start") {
+                color.start = std::stod(value);
+            } else if (param == "end") {
+                color.end = std::stod(value);
+            } else {
+                std::cerr << "Unknown color parameter: " << param << "\n";
+                return false;
+            }
+        }
+        // Detection parameters
+        else if (section == "detection") {
+            if (param == "boom_threshold") {
+                detection.boom_threshold = std::stod(value);
+            } else if (param == "boom_confirmation") {
+                detection.boom_confirmation = std::stoi(value);
+            } else if (param == "white_threshold") {
+                detection.white_threshold = std::stod(value);
+            } else if (param == "white_confirmation") {
+                detection.white_confirmation = std::stoi(value);
+            } else if (param == "early_stop_after_white") {
+                detection.early_stop_after_white = (value == "true" || value == "1");
+            } else {
+                std::cerr << "Unknown detection parameter: " << param << "\n";
+                return false;
+            }
+        }
+        // Output parameters
+        else if (section == "output") {
+            if (param == "format") {
+                output.format = parseOutputFormat(value);
+            } else if (param == "directory") {
+                output.directory = value;
+            } else if (param == "filename_prefix") {
+                output.filename_prefix = value;
+            } else if (param == "video_codec") {
+                output.video_codec = value;
+            } else if (param == "video_crf") {
+                output.video_crf = std::stoi(value);
+            } else if (param == "video_fps") {
+                output.video_fps = std::stoi(value);
+            } else {
+                std::cerr << "Unknown output parameter: " << param << "\n";
+                return false;
+            }
+        }
+        // Analysis parameters
+        else if (section == "analysis") {
+            if (param == "enabled") {
+                analysis.enabled = (value == "true" || value == "1");
+            } else {
+                std::cerr << "Unknown analysis parameter: " << param << "\n";
+                return false;
+            }
+        } else {
+            std::cerr << "Unknown section: " << section << "\n";
+            return false;
+        }
+    } catch (std::exception const& e) {
+        std::cerr << "Error parsing value for " << key << ": " << e.what() << "\n";
+        return false;
+    }
+
+    return true;
 }
