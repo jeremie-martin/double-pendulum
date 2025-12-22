@@ -11,15 +11,15 @@ initial_angle1_deg = 200.2
 initial_angle2_deg = 200.0
 
 [simulation]
-pendulum_count = 100000    # Enough to see accumulation differences
+pendulum_count = 1000000    # Enough to see accumulation differences
 angle_variation_deg = 0.1
 duration_seconds = 20.0    # 10 second physics duration
 total_frames = 10          # Only 10 frames to compare
 substeps_per_frame = 200   # High substeps for good quality per frame
 
 [render]
-width = 2160
-height = 2160
+width = 4160
+height = 4160
 thread_count = 0           # Auto-detect
 
 [post_process]

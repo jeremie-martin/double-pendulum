@@ -31,8 +31,10 @@ public:
     void flush();
 
     // Read back the framebuffer to CPU (for saving/display)
-    // Applies normalization to map float values to 0-255
-    void readPixels(std::vector<uint8_t>& out, float gamma = 1.0f);
+    // Applies full post-processing pipeline: normalize -> exposure -> tone_map -> contrast -> gamma
+    void readPixels(std::vector<uint8_t>& out, float exposure = 0.0f, float contrast = 1.0f,
+                    float gamma = 2.2f, ToneMapOperator tone_map = ToneMapOperator::None,
+                    float white_point = 1.0f);
 
     // Get the texture ID for ImGui display
     GLuint getTextureID() const { return display_texture_; }

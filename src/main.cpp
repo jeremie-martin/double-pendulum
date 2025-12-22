@@ -307,10 +307,13 @@ int runGPUSimulation(std::string const& config_path) {
             renderer.drawLine(x1, y1, x2, y2, color.r, color.g, color.b);
         }
 
-        renderer.flush();
-
-        // Read pixels with post-processing
-        renderer.readPixels(rgb_buffer, config.post_process.gamma);
+        // Read pixels with full post-processing pipeline
+        renderer.readPixels(rgb_buffer,
+                            static_cast<float>(config.post_process.exposure),
+                            static_cast<float>(config.post_process.contrast),
+                            static_cast<float>(config.post_process.gamma),
+                            config.post_process.tone_map,
+                            static_cast<float>(config.post_process.reinhard_white_point));
         render_time += Clock::now() - render_start;
 
         // I/O

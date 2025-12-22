@@ -342,7 +342,11 @@ void GLRenderer::flush() {
     line_buffer_.clear();
 }
 
-void GLRenderer::readPixels(std::vector<uint8_t>& out, float gamma) {
+void GLRenderer::readPixels(std::vector<uint8_t>& out, float exposure, float contrast, float gamma,
+                            ToneMapOperator tone_map, float white_point) {
+    // Flush any pending lines first
+    flush();
+
     out.resize(width_ * height_ * 3);
 
     // Read floating-point data
@@ -357,20 +361,41 @@ void GLRenderer::readPixels(std::vector<uint8_t>& out, float gamma) {
         max_val = std::max(max_val, float_buffer_[i + 2]);
     }
 
-    if (max_val < 0.001f)
+    if (max_val < 1e-6f)
         max_val = 1.0f;
 
-    // Normalize and apply gamma (flip Y - OpenGL has Y=0 at bottom)
+    // Precompute constants
+    float exposure_mult = std::pow(2.0f, exposure);
     float inv_gamma = 1.0f / gamma;
+
+    // Apply full post-processing pipeline (flip Y - OpenGL has Y=0 at bottom)
     for (int y = 0; y < height_; ++y) {
         for (int x = 0; x < width_; ++x) {
             size_t src_idx = (y * width_ + x) * 4;
             size_t dst_idx = ((height_ - 1 - y) * width_ + x) * 3; // Flip Y
 
             for (int c = 0; c < 3; ++c) {
-                float v = float_buffer_[src_idx + c] / max_val;
-                v = std::pow(v, inv_gamma);
+                float v = float_buffer_[src_idx + c];
+
+                // 1. Normalize to [0,1]
+                v = v / max_val;
+
+                // 2. Apply exposure (gain in HDR space)
+                v = v * exposure_mult;
+
+                // 3. Apply tone mapping (HDR -> SDR)
+                v = PostProcess::toneMap(v, tone_map, white_point);
+
+                // 4. Apply contrast (centered at 0.5)
+                v = (v - 0.5f) * contrast + 0.5f;
+
+                // 5. Clamp to [0,1]
                 v = std::max(0.0f, std::min(1.0f, v));
+
+                // 6. Apply gamma correction
+                v = std::pow(v, inv_gamma);
+
+                // 7. Scale to [0,255]
                 out[dst_idx + c] = static_cast<uint8_t>(v * 255.0f);
             }
         }
