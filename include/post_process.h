@@ -33,6 +33,10 @@ inline float toneMap(float v, ToneMapOperator op, float white_point = 1.0f) {
             float a = 2.51f, b = 0.03f, c = 2.43f, d = 0.59f, e = 0.14f;
             return std::max(0.0f, std::min(1.0f, (v * (a * v + b)) / (v * (c * v + d) + e)));
         }
+        case ToneMapOperator::Logarithmic:
+            // Logarithmic compression - very aggressive for extreme dynamic range
+            // log(1 + v) compresses large values much more than Reinhard
+            return std::log(1.0f + v) / std::log(1.0f + white_point);
         case ToneMapOperator::None:
         default:
             // Linear clamp (original behavior)

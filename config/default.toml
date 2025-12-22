@@ -26,7 +26,7 @@ thread_count = 0               # 0 = auto-detect hardware concurrency
 
 [post_process]
 # Standard post-processing pipeline: normalize -> exposure -> tone_map -> contrast -> gamma
-tone_map = "none"              # "none", "reinhard", "reinhard_extended", "aces"
+tone_map = "none"              # "none", "reinhard", "reinhard_extended", "aces", "logarithmic"
 reinhard_white_point = 1.0     # Only used with reinhard_extended
 exposure = 0.0                 # Brightness in stops (0 = no change, +1 = 2x brighter)
 contrast = 1.0                 # Centered at 0.5 (1.0 = no change, >1 = more contrast)

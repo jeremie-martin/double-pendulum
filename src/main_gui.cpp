@@ -785,9 +785,9 @@ int main(int argc, char* argv[]) {
 
             // Tone mapping operator selection
             const char* tone_map_names[] = {"None (Linear)", "Reinhard", "Reinhard Extended",
-                                            "ACES Filmic"};
+                                            "ACES Filmic", "Logarithmic"};
             int current_tone_map = static_cast<int>(state.config.post_process.tone_map);
-            if (ImGui::Combo("Tone Mapping", &current_tone_map, tone_map_names, 4)) {
+            if (ImGui::Combo("Tone Mapping", &current_tone_map, tone_map_names, 5)) {
                 state.config.post_process.tone_map = static_cast<ToneMapOperator>(current_tone_map);
                 pp_changed = true;
             }
@@ -795,8 +795,9 @@ int main(int argc, char* argv[]) {
                 ImGui::SetTooltip("HDR to SDR tone mapping curve");
             }
 
-            // Show white point slider only for Reinhard Extended
-            if (state.config.post_process.tone_map == ToneMapOperator::ReinhardExtended) {
+            // Show white point slider for Reinhard Extended and Logarithmic
+            if (state.config.post_process.tone_map == ToneMapOperator::ReinhardExtended ||
+                state.config.post_process.tone_map == ToneMapOperator::Logarithmic) {
                 float white_point =
                     static_cast<float>(state.config.post_process.reinhard_white_point);
                 if (ImGui::SliderFloat("White Point", &white_point, 0.5f, 10.0f)) {

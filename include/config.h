@@ -40,7 +40,7 @@ struct RenderParams {
     int thread_count = 0; // 0 = auto
 };
 
-enum class ToneMapOperator { None, Reinhard, ReinhardExtended, ACES };
+enum class ToneMapOperator { None, Reinhard, ReinhardExtended, ACES, Logarithmic };
 
 struct PostProcessParams {
     // Tone mapping operator for HDR -> SDR conversion

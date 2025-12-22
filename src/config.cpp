@@ -39,6 +39,8 @@ ToneMapOperator parseToneMapOperator(std::string const& str) {
         return ToneMapOperator::ReinhardExtended;
     if (str == "aces")
         return ToneMapOperator::ACES;
+    if (str == "logarithmic")
+        return ToneMapOperator::Logarithmic;
     std::cerr << "Unknown tone map operator: " << str << ", using none\n";
     return ToneMapOperator::None;
 }

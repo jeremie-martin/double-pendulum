@@ -9,10 +9,10 @@ initial_angle1_deg = 152
 initial_angle2_deg = 152.0
 
 [simulation]
-pendulum_count = 1000       # Reduced for quick test
+pendulum_count = 100000       # Reduced for quick test
 angle_variation_deg = 0.1
-duration_seconds = 11.0      # Just 20 second of physics
-total_frames = 660           # 300 frames output (5s at 60 FPS)
+duration_seconds = 15.0      # Just 20 second of physics
+total_frames = 2400           # 300 frames output (5s at 60 FPS)
 substeps_per_frame = 40
 
 [render]
