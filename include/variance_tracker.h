@@ -23,7 +23,9 @@ inline double computeVariance(std::vector<double> const& values) {
 
 // Spread metrics - how well pendulums cover the visual space
 struct SpreadMetrics {
-    double spread_ratio = 0.0;    // Fraction of pendulums above horizontal
+    double spread_ratio = 0.0;    // Fraction of pendulums above horizontal (legacy)
+    double circular_spread = 0.0; // 1 - mean resultant length (0=concentrated, 1=uniform)
+    double angular_range = 0.0;   // Angular range covered (0-1, normalized by 2*pi)
     double angle1_mean = 0.0;     // Mean of angle1 (for debugging)
     double angle1_variance = 0.0; // Variance of angle1 (for debugging)
 };
@@ -41,48 +43,83 @@ inline SpreadMetrics computeSpread(std::vector<double> const& angle1_values) {
     }
 
     constexpr double PI = 3.14159265358979323846;
+    constexpr double TWO_PI = 2.0 * PI;
     constexpr double HALF_PI = PI / 2.0;
 
-    // Count pendulums above horizontal
-    int above_count = 0;
+    // Accumulators for circular statistics
+    double cos_sum = 0.0;
+    double sin_sum = 0.0;
     double sum = 0.0;
+    int above_count = 0;
+
+    // For angular range: track min and max
+    double min_angle = PI;
+    double max_angle = -PI;
+
+    size_t n = angle1_values.size();
 
     for (double angle1 : angle1_values) {
         // Normalize angle to [-pi, pi]
-        double normalized = std::fmod(angle1, 2.0 * PI);
-        if (normalized > PI)
-            normalized -= 2.0 * PI;
-        if (normalized < -PI)
-            normalized += 2.0 * PI;
+        double normalized = std::fmod(angle1, TWO_PI);
+        if (normalized > PI) {
+            normalized -= TWO_PI;
+        }
+        if (normalized < -PI) {
+            normalized += TWO_PI;
+        }
 
-        // Check if above horizontal (|angle1| > pi/2)
+        // Count above horizontal (|angle1| > pi/2)
         if (std::abs(normalized) > HALF_PI) {
             above_count++;
         }
 
+        // Circular statistics: sum of unit vectors
+        cos_sum += std::cos(normalized);
+        sin_sum += std::sin(normalized);
+
+        // Linear statistics
         sum += normalized;
+
+        // Track range
+        min_angle = std::min(min_angle, normalized);
+        max_angle = std::max(max_angle, normalized);
     }
 
-    // Compute spread ratio
-    metrics.spread_ratio =
-        static_cast<double>(above_count) / static_cast<double>(angle1_values.size());
+    // Legacy spread ratio
+    metrics.spread_ratio = static_cast<double>(above_count) / static_cast<double>(n);
 
-    // Compute mean
-    metrics.angle1_mean = sum / static_cast<double>(angle1_values.size());
+    // Circular spread: 1 - mean resultant length
+    // Mean resultant length R = |mean vector| = sqrt(cos_mean^2 + sin_mean^2)
+    // R = 1 when all angles are identical (concentrated)
+    // R = 0 when angles are uniformly distributed (maximum spread)
+    // So circular_spread = 1 - R gives us 0 for concentrated, 1 for uniform
+    double cos_mean = cos_sum / static_cast<double>(n);
+    double sin_mean = sin_sum / static_cast<double>(n);
+    double mean_resultant_length = std::sqrt(cos_mean * cos_mean + sin_mean * sin_mean);
+    metrics.circular_spread = 1.0 - mean_resultant_length;
 
-    // Compute variance
+    // Angular range (normalized to 0-1)
+    // This handles wraparound: if min is near -pi and max near +pi, that's full coverage
+    double range = max_angle - min_angle;
+    metrics.angular_range = range / TWO_PI;
+
+    // Linear mean
+    metrics.angle1_mean = sum / static_cast<double>(n);
+
+    // Linear variance
     double var_sum = 0.0;
     for (double angle1 : angle1_values) {
-        double normalized = std::fmod(angle1, 2.0 * PI);
-        if (normalized > PI)
-            normalized -= 2.0 * PI;
-        if (normalized < -PI)
-            normalized += 2.0 * PI;
-
+        double normalized = std::fmod(angle1, TWO_PI);
+        if (normalized > PI) {
+            normalized -= TWO_PI;
+        }
+        if (normalized < -PI) {
+            normalized += TWO_PI;
+        }
         double diff = normalized - metrics.angle1_mean;
         var_sum += diff * diff;
     }
-    metrics.angle1_variance = var_sum / static_cast<double>(angle1_values.size());
+    metrics.angle1_variance = var_sum / static_cast<double>(n);
 
     return metrics;
 }
@@ -152,6 +189,45 @@ public:
             return spread_history_.back();
         }
         return SpreadMetrics{};
+    }
+
+    // Get smoothed circular spread (moving average over window_frames)
+    // Returns vector of same size as history, with smoothed values
+    std::vector<double> getSmoothedCircularSpread(int window_frames = 5) const {
+        std::vector<double> smoothed;
+        smoothed.reserve(spread_history_.size());
+
+        for (size_t i = 0; i < spread_history_.size(); ++i) {
+            // Average from frame max(0, i-window+1) to frame i
+            size_t start = (i >= static_cast<size_t>(window_frames - 1))
+                               ? i - static_cast<size_t>(window_frames - 1)
+                               : 0;
+            double sum = 0.0;
+            size_t count = 0;
+            for (size_t j = start; j <= i; ++j) {
+                sum += spread_history_[j].circular_spread;
+                ++count;
+            }
+            smoothed.push_back(count > 0 ? sum / static_cast<double>(count) : 0.0);
+        }
+        return smoothed;
+    }
+
+    // Get smoothed circular spread at specific frame
+    double getSmoothedCircularSpreadAt(size_t frame, int window_frames = 5) const {
+        if (frame >= spread_history_.size()) {
+            return 0.0;
+        }
+        size_t start = (frame >= static_cast<size_t>(window_frames - 1))
+                           ? frame - static_cast<size_t>(window_frames - 1)
+                           : 0;
+        double sum = 0.0;
+        size_t count = 0;
+        for (size_t j = start; j <= frame; ++j) {
+            sum += spread_history_[j].circular_spread;
+            ++count;
+        }
+        return count > 0 ? sum / static_cast<double>(count) : 0.0;
     }
 
 private:

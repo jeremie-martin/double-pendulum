@@ -14,6 +14,7 @@
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
 #include <imgui_impl_sdl2.h>
+#include <implot.h>
 #include <iostream>
 #include <mutex>
 #include <thread>
@@ -27,18 +28,18 @@ struct PreviewParams {
     int substeps = 10;
 };
 
-// Graph metric selection
-enum class GraphMetric {
-    Variance,
-    Brightness,
-    Energy,
-    Spread,
-    ContrastStddev,
-    ContrastRange,
-    EdgeEnergy,
-    ColorVariance,
-    Coverage,
-    Causticness
+// Graph metric flags for multi-select
+struct MetricFlags {
+    bool variance = true;
+    bool brightness = false;
+    bool energy = false;
+    bool spread = false;
+    bool contrast_stddev = false;
+    bool contrast_range = false;
+    bool edge_energy = false;
+    bool color_variance = false;
+    bool coverage = false;
+    bool causticness = false;
 };
 
 // Export state (thread-safe)
@@ -74,7 +75,7 @@ struct AppState {
     std::vector<Color> colors;
     VarianceTracker variance_tracker;
     AnalysisTracker analysis_tracker;
-    GraphMetric selected_metric = GraphMetric::Variance;
+    MetricFlags metric_flags;
 
     // Frame history for timeline scrubbing
     std::vector<std::vector<PendulumState>> frame_history;
@@ -271,172 +272,168 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     state.display_frame = state.current_frame;
 }
 
-void drawMetricGraph(AppState const& state, ImVec2 size) {
+void drawMetricGraph(AppState& state, ImVec2 size) {
     auto const& analysis = state.analysis_tracker.getHistory();
     auto const& variance_history = state.variance_tracker.getHistory();
+    auto const& spread_history = state.variance_tracker.getSpreadHistory();
+
     if (variance_history.empty()) {
+        ImGui::Text("No data yet");
         return;
     }
 
-    ImDrawList* draw_list = ImGui::GetWindowDrawList();
-    ImVec2 pos = ImGui::GetCursorScreenPos();
-
-    // Background
-    draw_list->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y),
-                             IM_COL32(30, 30, 30, 255));
-
     size_t data_size = variance_history.size();
-    float x_scale = size.x / std::max(1.0f, static_cast<float>(data_size - 1));
 
-    // Get data for selected metric and find max for scaling
-    std::vector<double> data;
-    data.reserve(data_size);
-    double max_val = 1.0;
-    ImU32 line_color = IM_COL32(100, 200, 100, 255);
-    char const* metric_label = "Variance";
-
-    switch (state.selected_metric) {
-    case GraphMetric::Variance:
-        data = variance_history;
-        line_color = IM_COL32(100, 200, 100, 255);
-        metric_label = "Variance";
-        break;
-    case GraphMetric::Brightness:
-        for (auto const& a : analysis) {
-            data.push_back(a.brightness);
-        }
-        line_color = IM_COL32(200, 200, 100, 255);
-        metric_label = "Brightness";
-        break;
-    case GraphMetric::Energy:
-        for (auto const& a : analysis) {
-            data.push_back(a.total_energy);
-        }
-        line_color = IM_COL32(100, 150, 255, 255);
-        metric_label = "Energy";
-        break;
-    case GraphMetric::Spread:
-        for (auto const& s : state.variance_tracker.getSpreadHistory()) {
-            data.push_back(s.spread_ratio);
-        }
-        line_color = IM_COL32(255, 150, 100, 255);
-        metric_label = "Spread";
-        max_val = 1.0; // Spread ratio is always 0-1
-        break;
-    case GraphMetric::ContrastStddev:
-        for (auto const& a : analysis) {
-            data.push_back(a.contrast_stddev);
-        }
-        line_color = IM_COL32(200, 100, 200, 255);
-        metric_label = "Contrast (StdDev)";
-        max_val = 0.5; // Stddev typically 0-0.5 for normalized luminance
-        break;
-    case GraphMetric::ContrastRange:
-        for (auto const& a : analysis) {
-            data.push_back(a.contrast_range);
-        }
-        line_color = IM_COL32(100, 200, 200, 255);
-        metric_label = "Contrast (Range)";
-        max_val = 1.0; // p95-p5 range is 0-1
-        break;
-    case GraphMetric::EdgeEnergy:
-        for (auto const& a : analysis) {
-            data.push_back(a.edge_energy);
-        }
-        line_color = IM_COL32(255, 100, 100, 255);
-        metric_label = "Edge Energy";
-        max_val = 0.5; // Gradient magnitude, typically 0-0.5
-        break;
-    case GraphMetric::ColorVariance:
-        for (auto const& a : analysis) {
-            data.push_back(a.color_variance);
-        }
-        line_color = IM_COL32(100, 255, 100, 255);
-        metric_label = "Color Variance";
-        max_val = 0.1; // Average channel variance
-        break;
-    case GraphMetric::Coverage:
-        for (auto const& a : analysis) {
-            data.push_back(a.coverage);
-        }
-        line_color = IM_COL32(255, 200, 100, 255);
-        metric_label = "Coverage";
-        max_val = 1.0; // Fraction of non-black pixels
-        break;
-    case GraphMetric::Causticness:
-        for (auto const& a : analysis) {
-            data.push_back(a.causticness());
-        }
-        line_color = IM_COL32(255, 50, 255, 255);
-        metric_label = "Causticness";
-        break;
+    // Create frame index array for x-axis
+    std::vector<double> frames(data_size);
+    for (size_t i = 0; i < data_size; ++i) {
+        frames[i] = static_cast<double>(i);
     }
 
-    // Pad data if analysis tracker has fewer entries
-    while (data.size() < data_size) {
-        data.push_back(0.0);
+    // Current frame marker (for dragging)
+    double current_frame_d = static_cast<double>(state.display_frame);
+
+    if (ImPlot::BeginPlot("##Metrics", size, ImPlotFlags_NoTitle)) {
+        ImPlot::SetupAxes("Frame", nullptr, ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+
+        // Plot variance
+        if (state.metric_flags.variance && !variance_history.empty()) {
+            ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.8f, 0.4f, 1.0f));
+            ImPlot::PlotLine("Variance", frames.data(), variance_history.data(), data_size);
+
+            // Draw threshold lines
+            double boom_line = state.config.detection.boom_threshold;
+            double white_line = state.config.detection.white_threshold;
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 0.5f), 1.0f);
+            ImPlot::PlotInfLines("##boom_thresh", &boom_line, 1, ImPlotInfLinesFlags_Horizontal);
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 0.5f), 1.0f);
+            ImPlot::PlotInfLines("##white_thresh", &white_line, 1, ImPlotInfLinesFlags_Horizontal);
+        }
+
+        // Plot brightness
+        if (state.metric_flags.brightness && !analysis.empty()) {
+            std::vector<double> data(analysis.size());
+            for (size_t i = 0; i < analysis.size(); ++i) {
+                data[i] = analysis[i].brightness;
+            }
+            ImPlot::SetNextLineStyle(ImVec4(0.8f, 0.8f, 0.4f, 1.0f));
+            ImPlot::PlotLine("Brightness", frames.data(), data.data(), data.size());
+        }
+
+        // Plot energy
+        if (state.metric_flags.energy && !analysis.empty()) {
+            std::vector<double> data(analysis.size());
+            for (size_t i = 0; i < analysis.size(); ++i) {
+                data[i] = analysis[i].total_energy;
+            }
+            ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.6f, 1.0f, 1.0f));
+            ImPlot::PlotLine("Energy", frames.data(), data.data(), data.size());
+        }
+
+        // Plot spread (circular spread - better metric)
+        if (state.metric_flags.spread && !spread_history.empty()) {
+            // Raw circular spread
+            std::vector<double> data(spread_history.size());
+            for (size_t i = 0; i < spread_history.size(); ++i) {
+                data[i] = spread_history[i].circular_spread;
+            }
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.4f, 0.4f)); // Faint raw
+            ImPlot::PlotLine("Spread (raw)", frames.data(), data.data(), data.size());
+
+            // Smoothed circular spread (5-frame window)
+            auto smoothed = state.variance_tracker.getSmoothedCircularSpread(5);
+            if (!smoothed.empty()) {
+                ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.4f, 1.0f), 2.0f); // Bold smoothed
+                ImPlot::PlotLine("Spread (smooth)", frames.data(), smoothed.data(),
+                                 smoothed.size());
+            }
+        }
+
+        // Plot contrast stddev
+        if (state.metric_flags.contrast_stddev && !analysis.empty()) {
+            std::vector<double> data(analysis.size());
+            for (size_t i = 0; i < analysis.size(); ++i) {
+                data[i] = analysis[i].contrast_stddev;
+            }
+            ImPlot::SetNextLineStyle(ImVec4(0.8f, 0.4f, 0.8f, 1.0f));
+            ImPlot::PlotLine("Contrast StdDev", frames.data(), data.data(), data.size());
+        }
+
+        // Plot contrast range
+        if (state.metric_flags.contrast_range && !analysis.empty()) {
+            std::vector<double> data(analysis.size());
+            for (size_t i = 0; i < analysis.size(); ++i) {
+                data[i] = analysis[i].contrast_range;
+            }
+            ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.8f, 0.8f, 1.0f));
+            ImPlot::PlotLine("Contrast Range", frames.data(), data.data(), data.size());
+        }
+
+        // Plot edge energy
+        if (state.metric_flags.edge_energy && !analysis.empty()) {
+            std::vector<double> data(analysis.size());
+            for (size_t i = 0; i < analysis.size(); ++i) {
+                data[i] = analysis[i].edge_energy;
+            }
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+            ImPlot::PlotLine("Edge Energy", frames.data(), data.data(), data.size());
+        }
+
+        // Plot color variance
+        if (state.metric_flags.color_variance && !analysis.empty()) {
+            std::vector<double> data(analysis.size());
+            for (size_t i = 0; i < analysis.size(); ++i) {
+                data[i] = analysis[i].color_variance;
+            }
+            ImPlot::SetNextLineStyle(ImVec4(0.4f, 1.0f, 0.4f, 1.0f));
+            ImPlot::PlotLine("Color Variance", frames.data(), data.data(), data.size());
+        }
+
+        // Plot coverage
+        if (state.metric_flags.coverage && !analysis.empty()) {
+            std::vector<double> data(analysis.size());
+            for (size_t i = 0; i < analysis.size(); ++i) {
+                data[i] = analysis[i].coverage;
+            }
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.4f, 1.0f));
+            ImPlot::PlotLine("Coverage", frames.data(), data.data(), data.size());
+        }
+
+        // Plot causticness
+        if (state.metric_flags.causticness && !analysis.empty()) {
+            std::vector<double> data(analysis.size());
+            for (size_t i = 0; i < analysis.size(); ++i) {
+                data[i] = analysis[i].causticness();
+            }
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.2f, 1.0f, 1.0f));
+            ImPlot::PlotLine("Causticness", frames.data(), data.data(), data.size());
+        }
+
+        // Draw boom marker
+        if (state.boom_frame.has_value()) {
+            double boom_x = static_cast<double>(*state.boom_frame);
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), 2.0f);
+            ImPlot::PlotInfLines("##boom", &boom_x, 1);
+        }
+
+        // Draw white marker
+        if (state.white_frame.has_value()) {
+            double white_x = static_cast<double>(*state.white_frame);
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), 2.0f);
+            ImPlot::PlotInfLines("##white", &white_x, 1);
+        }
+
+        // Draggable current frame marker
+        ImPlot::SetNextLineStyle(ImVec4(0.0f, 0.8f, 1.0f, 1.0f), 2.0f);
+        if (ImPlot::DragLineX(0, &current_frame_d, ImVec4(0.0f, 0.8f, 1.0f, 1.0f))) {
+            state.display_frame =
+                std::clamp(static_cast<int>(current_frame_d), 0, static_cast<int>(data_size) - 1);
+            state.scrubbing = true;
+            state.needs_redraw = true;
+        }
+
+        ImPlot::EndPlot();
     }
-
-    for (double v : data) {
-        max_val = std::max(max_val, std::abs(v));
-    }
-
-    // Draw metric line
-    for (size_t i = 1; i < data.size(); ++i) {
-        float x0 = pos.x + (i - 1) * x_scale;
-        float x1 = pos.x + i * x_scale;
-        float y0 = pos.y + size.y - static_cast<float>((data[i - 1] / max_val) * size.y);
-        float y1 = pos.y + size.y - static_cast<float>((data[i] / max_val) * size.y);
-
-        draw_list->AddLine(ImVec2(x0, y0), ImVec2(x1, y1), line_color);
-    }
-
-    // Draw threshold lines only for variance
-    if (state.selected_metric == GraphMetric::Variance) {
-        float boom_y =
-            pos.y + size.y -
-            static_cast<float>((state.config.detection.boom_threshold / max_val) * size.y);
-        draw_list->AddLine(ImVec2(pos.x, boom_y), ImVec2(pos.x + size.x, boom_y),
-                           IM_COL32(255, 200, 50, 100));
-
-        float white_y =
-            pos.y + size.y -
-            static_cast<float>((state.config.detection.white_threshold / max_val) * size.y);
-        draw_list->AddLine(ImVec2(pos.x, white_y), ImVec2(pos.x + size.x, white_y),
-                           IM_COL32(255, 255, 255, 100));
-    }
-
-    // Draw boom/white markers (always shown)
-    if (state.boom_frame.has_value()) {
-        float x = pos.x + *state.boom_frame * x_scale;
-        draw_list->AddLine(ImVec2(x, pos.y), ImVec2(x, pos.y + size.y),
-                           IM_COL32(255, 200, 50, 255));
-    }
-
-    if (state.white_frame.has_value()) {
-        float x = pos.x + *state.white_frame * x_scale;
-        draw_list->AddLine(ImVec2(x, pos.y), ImVec2(x, pos.y + size.y),
-                           IM_COL32(255, 255, 255, 255));
-    }
-
-    // Draw current frame position indicator (cyan line)
-    if (state.display_frame >= 0 && state.display_frame < static_cast<int>(data_size)) {
-        float x = pos.x + state.display_frame * x_scale;
-        draw_list->AddLine(ImVec2(x, pos.y), ImVec2(x, pos.y + size.y), IM_COL32(0, 200, 255, 200));
-    }
-
-    // Show current value and metric label
-    if (!data.empty()) {
-        char label[64];
-        double current_val =
-            (state.display_frame >= 0 && state.display_frame < static_cast<int>(data.size()))
-                ? data[state.display_frame]
-                : data.back();
-        snprintf(label, sizeof(label), "%s: %.4g (max: %.4g)", metric_label, current_val, max_val);
-        draw_list->AddText(ImVec2(pos.x + 5, pos.y + 5), IM_COL32(255, 255, 255, 200), label);
-    }
-
-    ImGui::Dummy(size);
 }
 
 void startExport(AppState& state) {
@@ -1007,9 +1004,10 @@ int main(int argc, char* argv[]) {
 
     std::cout << "DPI scale: " << dpi_scale << "\n";
 
-    // Initialize ImGui
+    // Initialize ImGui and ImPlot
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    ImPlot::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
@@ -1089,14 +1087,29 @@ int main(int argc, char* argv[]) {
         // Analysis graph with metric selector
         ImGui::Begin("Analysis");
 
-        // Metric selector
-        char const* metric_names[] = {
-            "Variance",         "Brightness",  "Energy",         "Spread",   "Contrast (StdDev)",
-            "Contrast (Range)", "Edge Energy", "Color Variance", "Coverage", "Causticness"};
-        int current_metric = static_cast<int>(state.selected_metric);
-        if (ImGui::Combo("Metric", &current_metric, metric_names, 10)) {
-            state.selected_metric = static_cast<GraphMetric>(current_metric);
-        }
+        // Metric selector (checkboxes in a compact row)
+        ImGui::Text("Metrics:");
+        ImGui::SameLine();
+        ImGui::Checkbox("Var", &state.metric_flags.variance);
+        ImGui::SameLine();
+        ImGui::Checkbox("Bright", &state.metric_flags.brightness);
+        ImGui::SameLine();
+        ImGui::Checkbox("Spread", &state.metric_flags.spread);
+        ImGui::SameLine();
+        ImGui::Checkbox("Edge", &state.metric_flags.edge_energy);
+        ImGui::SameLine();
+        ImGui::Checkbox("Caustic", &state.metric_flags.causticness);
+
+        // Second row
+        ImGui::Checkbox("Energy", &state.metric_flags.energy);
+        ImGui::SameLine();
+        ImGui::Checkbox("Contr.Std", &state.metric_flags.contrast_stddev);
+        ImGui::SameLine();
+        ImGui::Checkbox("Contr.Rng", &state.metric_flags.contrast_range);
+        ImGui::SameLine();
+        ImGui::Checkbox("ColorVar", &state.metric_flags.color_variance);
+        ImGui::SameLine();
+        ImGui::Checkbox("Coverage", &state.metric_flags.coverage);
 
         ImVec2 graph_size = ImGui::GetContentRegionAvail();
         graph_size.y = std::max(100.0f, graph_size.y - 60.0f); // Leave room for score
@@ -1151,6 +1164,7 @@ int main(int argc, char* argv[]) {
     renderer.shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
+    ImPlot::DestroyContext();
     ImGui::DestroyContext();
     SDL_GL_DeleteContext(gl_context);
     SDL_DestroyWindow(window);

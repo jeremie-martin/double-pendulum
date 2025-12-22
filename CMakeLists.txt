@@ -72,6 +72,8 @@ if(BUILD_GUI)
         external/imgui/imgui_widgets.cpp
         external/imgui/backends/imgui_impl_sdl2.cpp
         external/imgui/backends/imgui_impl_opengl3.cpp
+        external/implot/implot.cpp
+        external/implot/implot_items.cpp
     )
 
     target_include_directories(pendulum-gui PRIVATE
@@ -80,6 +82,7 @@ if(BUILD_GUI)
         ${SDL2_INCLUDE_DIRS}
         ${CMAKE_SOURCE_DIR}/external/imgui
         ${CMAKE_SOURCE_DIR}/external/imgui/backends
+        ${CMAKE_SOURCE_DIR}/external/implot
     )
 
     target_link_libraries(pendulum-gui PRIVATE
