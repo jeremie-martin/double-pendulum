@@ -157,9 +157,11 @@ void renderStates(AppState& state, GLRenderer& renderer,
         renderer.drawLine(x1, y1, x2, y2, c.r / 255.0f, c.g / 255.0f, c.b / 255.0f);
     }
 
-    renderer.updateDisplayTexture(static_cast<float>(state.config.post_process.exposure),
-                                  static_cast<float>(state.config.post_process.contrast),
-                                  static_cast<float>(state.config.post_process.gamma));
+    renderer.updateDisplayTexture(
+        static_cast<float>(state.config.post_process.exposure),
+        static_cast<float>(state.config.post_process.contrast),
+        static_cast<float>(state.config.post_process.gamma), state.config.post_process.tone_map,
+        static_cast<float>(state.config.post_process.reinhard_white_point));
 
     auto render_end = std::chrono::high_resolution_clock::now();
     state.render_time_ms =
@@ -777,12 +779,37 @@ int main(int argc, char* argv[]) {
         }
 
         // Post-processing parameters (live update)
-        // Uses standard pipeline: normalize -> exposure -> contrast -> gamma
+        // Uses standard pipeline: normalize -> exposure -> tone_map -> contrast -> gamma
         if (ImGui::CollapsingHeader("Post-Processing", ImGuiTreeNodeFlags_DefaultOpen)) {
             bool pp_changed = false;
 
+            // Tone mapping operator selection
+            const char* tone_map_names[] = {"None (Linear)", "Reinhard", "Reinhard Extended",
+                                            "ACES Filmic"};
+            int current_tone_map = static_cast<int>(state.config.post_process.tone_map);
+            if (ImGui::Combo("Tone Mapping", &current_tone_map, tone_map_names, 4)) {
+                state.config.post_process.tone_map = static_cast<ToneMapOperator>(current_tone_map);
+                pp_changed = true;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("HDR to SDR tone mapping curve");
+            }
+
+            // Show white point slider only for Reinhard Extended
+            if (state.config.post_process.tone_map == ToneMapOperator::ReinhardExtended) {
+                float white_point =
+                    static_cast<float>(state.config.post_process.reinhard_white_point);
+                if (ImGui::SliderFloat("White Point", &white_point, 0.5f, 10.0f)) {
+                    state.config.post_process.reinhard_white_point = white_point;
+                    pp_changed = true;
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Input value that maps to pure white");
+                }
+            }
+
             float exposure = static_cast<float>(state.config.post_process.exposure);
-            if (ImGui::SliderFloat("Exposure", &exposure, -3.0f, 3.0f, "%.2f stops")) {
+            if (ImGui::SliderFloat("Exposure", &exposure, -3.0f, 6.0f, "%.2f stops")) {
                 state.config.post_process.exposure = exposure;
                 pp_changed = true;
             }

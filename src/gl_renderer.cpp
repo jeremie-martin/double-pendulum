@@ -1,4 +1,5 @@
 #include "gl_renderer.h"
+#include "post_process.h"
 
 #include <GL/glew.h>
 #include <algorithm>
@@ -298,7 +299,8 @@ void GLRenderer::readPixels(std::vector<uint8_t>& out, float gamma) {
     }
 }
 
-void GLRenderer::updateDisplayTexture(float exposure, float contrast, float gamma) {
+void GLRenderer::updateDisplayTexture(float exposure, float contrast, float gamma,
+                                      ToneMapOperator tone_map, float white_point) {
     // Read floating-point data from GPU
     glBindTexture(GL_TEXTURE_2D, float_texture_);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, float_buffer_.data());
@@ -319,7 +321,7 @@ void GLRenderer::updateDisplayTexture(float exposure, float contrast, float gamm
     float inv_gamma = 1.0f / gamma;
 
     // Create 8-bit buffer with standard post-processing pipeline
-    // (same as CPU: normalize -> exposure -> contrast -> clamp -> gamma)
+    // (same as CPU: normalize -> exposure -> tone_map -> contrast -> clamp -> gamma)
     std::vector<uint8_t> rgba(width_ * height_ * 4);
 
     for (int y = 0; y < height_; ++y) {
@@ -333,19 +335,22 @@ void GLRenderer::updateDisplayTexture(float exposure, float contrast, float gamm
                 // 1. Normalize to [0,1]
                 v = v / max_val;
 
-                // 2. Apply exposure
+                // 2. Apply exposure (gain in HDR space)
                 v = v * exposure_mult;
 
-                // 3. Apply contrast (centered at 0.5)
+                // 3. Apply tone mapping (HDR -> SDR)
+                v = PostProcess::toneMap(v, tone_map, white_point);
+
+                // 4. Apply contrast (centered at 0.5)
                 v = (v - 0.5f) * contrast + 0.5f;
 
-                // 4. Clamp to [0,1]
+                // 5. Clamp to [0,1]
                 v = std::max(0.0f, std::min(1.0f, v));
 
-                // 5. Apply gamma correction
+                // 6. Apply gamma correction
                 v = std::pow(v, inv_gamma);
 
-                // 6. Scale to [0,255]
+                // 7. Scale to [0,255]
                 rgba[dst_idx + c] = static_cast<uint8_t>(v * 255.0f);
             }
             rgba[dst_idx + 3] = 255;

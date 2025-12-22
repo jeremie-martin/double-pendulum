@@ -1,5 +1,7 @@
 #pragma once
 
+#include "config.h"
+
 #include <GL/glew.h>
 #include <cstdint>
 #include <vector>
@@ -33,8 +35,10 @@ public:
     GLuint getTextureID() const { return display_texture_; }
 
     // Update display texture from float buffer (with standard post-processing)
-    // Uses same pipeline as CPU: normalize -> exposure -> contrast -> gamma
-    void updateDisplayTexture(float exposure = 0.0f, float contrast = 1.0f, float gamma = 2.2f);
+    // Uses same pipeline as CPU: normalize -> exposure -> tone_map -> contrast -> gamma
+    void updateDisplayTexture(float exposure = 0.0f, float contrast = 1.0f, float gamma = 2.2f,
+                              ToneMapOperator tone_map = ToneMapOperator::None,
+                              float white_point = 1.0f);
 
     int width() const { return width_; }
     int height() const { return height_; }

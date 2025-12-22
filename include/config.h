@@ -40,7 +40,13 @@ struct RenderParams {
     int thread_count = 0; // 0 = auto
 };
 
+enum class ToneMapOperator { None, Reinhard, ReinhardExtended, ACES };
+
 struct PostProcessParams {
+    // Tone mapping operator for HDR -> SDR conversion
+    ToneMapOperator tone_map = ToneMapOperator::None;
+    double reinhard_white_point = 1.0; // Only used with ReinhardExtended
+
     // Standard post-processing parameters:
     // exposure: Brightness in stops (0 = no change, +1 = 2x brighter, -1 = 2x darker)
     // contrast: Centered at 0.5 (1.0 = no change, >1 = more contrast)

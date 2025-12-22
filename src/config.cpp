@@ -30,6 +30,19 @@ OutputFormat parseOutputFormat(std::string const& str) {
     return OutputFormat::PNG;
 }
 
+ToneMapOperator parseToneMapOperator(std::string const& str) {
+    if (str == "none")
+        return ToneMapOperator::None;
+    if (str == "reinhard")
+        return ToneMapOperator::Reinhard;
+    if (str == "reinhard_extended")
+        return ToneMapOperator::ReinhardExtended;
+    if (str == "aces")
+        return ToneMapOperator::ACES;
+    std::cerr << "Unknown tone map operator: " << str << ", using none\n";
+    return ToneMapOperator::None;
+}
+
 // Safe value extraction helpers
 template <typename T> T get_or(toml::table const& tbl, std::string_view key, T default_val) {
     if (auto node = tbl.get(key)) {
@@ -97,6 +110,9 @@ Config Config::load(std::string const& path) {
 
         // Post-process
         if (auto pp = tbl["post_process"].as_table()) {
+            auto tone_map_str = get_string_or(*pp, "tone_map", "none");
+            config.post_process.tone_map = parseToneMapOperator(tone_map_str);
+            config.post_process.reinhard_white_point = get_or(*pp, "reinhard_white_point", 1.0);
             config.post_process.exposure = get_or(*pp, "exposure", 0.0);
             config.post_process.contrast = get_or(*pp, "contrast", 1.0);
             config.post_process.gamma = get_or(*pp, "gamma", 2.2);
