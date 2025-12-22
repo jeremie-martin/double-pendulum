@@ -62,6 +62,15 @@ class SimulationTiming(BaseModel):
     io_seconds: float
 
 
+class ScoreData(BaseModel):
+    """Quality/causticness score data from analysis."""
+
+    peak_causticness: float
+    average_causticness: float
+    best_frame: int
+    samples: list[float] = []
+
+
 class VideoMetadata(BaseModel):
     """Complete metadata for a simulation video."""
 
@@ -70,6 +79,7 @@ class VideoMetadata(BaseModel):
     config: SimulationConfig
     results: SimulationResults
     timing: SimulationTiming
+    score: Optional[ScoreData] = None
 
     @classmethod
     def from_file(cls, path: str | Path) -> VideoMetadata:
@@ -92,3 +102,10 @@ class VideoMetadata(BaseModel):
     def simulation_speed(self) -> float:
         """Convenience property for simulation speed."""
         return self.config.simulation_speed
+
+    @property
+    def best_frame_seconds(self) -> Optional[float]:
+        """Time of best visual quality frame in seconds."""
+        if self.score and self.score.best_frame:
+            return self.score.best_frame / self.config.video_fps
+        return None

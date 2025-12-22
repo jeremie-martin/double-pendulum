@@ -148,3 +148,76 @@ def generate_all_titles(metadata: VideoMetadata) -> list[str]:
         )
         for template in TITLE_TEMPLATES
     ]
+
+
+# Caption Styles for Video Overlays
+# Each style is a dict mapping phase names to caption definitions.
+# Caption definition: (text, start_time, end_time)
+# Times can be:
+#   - float: absolute seconds
+#   - "boom": boom time
+#   - "boom+N" or "boom-N": relative to boom
+#   - "end": video end time
+#
+# Text can contain {count} placeholder for pendulum count.
+
+CaptionDefinition = tuple[str, float | str, float | str]
+
+CAPTION_STYLES: dict[str, dict[str, CaptionDefinition]] = {
+    # No text overlays
+    "minimal": {},
+
+    # Simple hook - just "Wait for it..."
+    "wait_for_it": {
+        "pre_boom": ("Wait for it...", 0, "boom-1"),
+    },
+
+    # Science/educational framing
+    "science": {
+        "intro": ("Same starting position.", 0, 3),
+        "mid": ("Tiny differences...", 3, "boom-1"),
+        "boom": ("CHAOS.", "boom", "boom+2"),
+    },
+
+    # Viewer challenge/engagement
+    "viewer_challenge": {
+        "challenge": ("Can you spot when chaos begins?", 0, "boom-2"),
+        "reveal": ("Did you catch it?", "boom+1", "boom+3"),
+    },
+
+    # Micro-story narrative
+    "micro_story": {
+        "intro": ("{count} pendulums start together.", 0, 2),
+        "tension": ("Just 0.00001 degrees apart.", 2, "boom-1"),
+        "climax": ("Then THIS happens.", "boom", "boom+2"),
+    },
+
+    # Dramatic countdown feel
+    "dramatic": {
+        "setup": ("Order.", 0, 2),
+        "tension": ("...", 2, "boom-0.5"),
+        "release": ("Chaos.", "boom", "boom+2"),
+    },
+
+    # Minimal end card
+    "end_card": {
+        "end": ("{count} Double Pendulums", "boom+2", "end"),
+    },
+}
+
+
+def get_caption_style(style_name: str) -> dict[str, CaptionDefinition]:
+    """Get a caption style by name.
+
+    Args:
+        style_name: Style name or "random" for random selection
+
+    Returns:
+        Caption style dictionary
+    """
+    if style_name == "random":
+        # Exclude minimal from random selection
+        choices = [k for k in CAPTION_STYLES.keys() if k != "minimal"]
+        style_name = random.choice(choices)
+
+    return CAPTION_STYLES.get(style_name, {})
