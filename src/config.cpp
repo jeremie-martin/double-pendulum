@@ -154,5 +154,28 @@ Config Config::load(std::string const& path) {
         std::cerr << "Using defaults\n";
     }
 
+    // Minimal validation - only catch obviously broken values
+    Config defaults;
+    if (config.simulation.pendulum_count <= 0) {
+        std::cerr << "Warning: pendulum_count must be positive, using default ("
+                  << defaults.simulation.pendulum_count << ")\n";
+        config.simulation.pendulum_count = defaults.simulation.pendulum_count;
+    }
+    if (config.simulation.total_frames <= 0) {
+        std::cerr << "Warning: total_frames must be positive, using default ("
+                  << defaults.simulation.total_frames << ")\n";
+        config.simulation.total_frames = defaults.simulation.total_frames;
+    }
+    if (config.render.width <= 0) {
+        std::cerr << "Warning: width must be positive, using default (" << defaults.render.width
+                  << ")\n";
+        config.render.width = defaults.render.width;
+    }
+    if (config.render.height <= 0) {
+        std::cerr << "Warning: height must be positive, using default (" << defaults.render.height
+                  << ")\n";
+        config.render.height = defaults.render.height;
+    }
+
     return config;
 }

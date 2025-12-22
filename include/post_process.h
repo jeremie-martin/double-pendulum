@@ -35,7 +35,6 @@ inline float toneMap(float v, ToneMapOperator op, float white_point = 1.0f) {
         }
         case ToneMapOperator::Logarithmic:
             // Logarithmic compression - very aggressive for extreme dynamic range
-            // log(1 + v) compresses large values much more than Reinhard
             return std::log(1.0f + v) / std::log(1.0f + white_point);
         case ToneMapOperator::None:
         default:
@@ -44,61 +43,52 @@ inline float toneMap(float v, ToneMapOperator op, float white_point = 1.0f) {
     }
 }
 
-// Apply standard post-processing to a float buffer
+// Process a single channel value through the full pipeline
+// Input: normalized value [0,1], Output: processed value [0,1]
+inline float processValue(float v, float exposure_mult, float contrast, float inv_gamma,
+                          ToneMapOperator tone_map_op, float white_point) {
+    // Apply exposure (gain in HDR space)
+    v = v * exposure_mult;
+
+    // Apply tone mapping (HDR -> SDR)
+    v = toneMap(v, tone_map_op, white_point);
+
+    // Apply contrast (centered at 0.5)
+    v = (v - 0.5f) * contrast + 0.5f;
+
+    // Clamp to [0,1]
+    v = std::max(0.0f, std::min(1.0f, v));
+
+    // Apply gamma correction
+    v = std::pow(v, inv_gamma);
+
+    return v;
+}
+
+// Apply standard post-processing to a float buffer (RGB, 3 channels per pixel)
 // Input: HDR float values (accumulated intensities)
 // Output: Values in [0,255] range ready for 8-bit conversion
-//
-// Parameters:
-//   exposure: Brightness adjustment in stops (0 = no change, 1 = 2x brighter, -1 = 2x darker)
-//   contrast: Contrast multiplier centered at 0.5 (1.0 = no change, >1 = more contrast)
-//   gamma: Display gamma (2.2 for sRGB, 1.0 for linear)
-//   tone_map_op: Tone mapping operator (None, Reinhard, ReinhardExtended, ACES)
-//   white_point: White point for ReinhardExtended (default 1.0)
 inline void apply(float* data, size_t size, float exposure, float contrast, float gamma,
                   ToneMapOperator tone_map_op = ToneMapOperator::None, float white_point = 1.0f) {
     if (size == 0)
         return;
 
-    // Step 1: Find max value for normalization
+    // Find max value for normalization
     float max_val = 0.0f;
     for (size_t i = 0; i < size; ++i) {
         max_val = std::max(max_val, data[i]);
     }
-
-    // Avoid division by zero
-    if (max_val < 1e-6f) {
+    if (max_val < 1e-6f)
         max_val = 1.0f;
-    }
 
-    // Precompute exposure multiplier: 2^exposure
+    // Precompute constants
     float exposure_mult = std::pow(2.0f, exposure);
-
-    // Precompute inverse gamma
     float inv_gamma = 1.0f / gamma;
 
-    // Apply all transformations
+    // Process each value
     for (size_t i = 0; i < size; ++i) {
-        float v = data[i];
-
-        // Normalize to [0,1]
-        v = v / max_val;
-
-        // Apply exposure (gain in HDR space)
-        v = v * exposure_mult;
-
-        // Apply tone mapping (HDR -> SDR)
-        v = toneMap(v, tone_map_op, white_point);
-
-        // Apply contrast (centered at 0.5)
-        v = (v - 0.5f) * contrast + 0.5f;
-
-        // Clamp to [0,1]
-        v = std::max(0.0f, std::min(1.0f, v));
-
-        // Apply gamma correction
-        v = std::pow(v, inv_gamma);
-
-        // Scale to [0,255]
+        float v = data[i] / max_val;
+        v = processValue(v, exposure_mult, contrast, inv_gamma, tone_map_op, white_point);
         data[i] = v * 255.0f;
     }
 }
@@ -111,54 +101,34 @@ inline void applyToImage(Image& image, float exposure, float contrast, float gam
 }
 
 // Apply to RGBA float buffer (4 channels, skip alpha)
+// Leaves values in [0,1] range (caller handles conversion to bytes)
 inline void applyToRGBA(float* data, size_t pixel_count, float exposure, float contrast,
                         float gamma, ToneMapOperator tone_map_op = ToneMapOperator::None,
                         float white_point = 1.0f) {
     if (pixel_count == 0)
         return;
 
-    // Step 1: Find max value across RGB channels
+    // Find max value across RGB channels
     float max_val = 0.0f;
     for (size_t i = 0; i < pixel_count; ++i) {
         size_t idx = i * 4;
-        max_val = std::max(max_val, data[idx]);     // R
-        max_val = std::max(max_val, data[idx + 1]); // G
-        max_val = std::max(max_val, data[idx + 2]); // B
+        max_val = std::max(max_val, data[idx]);
+        max_val = std::max(max_val, data[idx + 1]);
+        max_val = std::max(max_val, data[idx + 2]);
     }
-
-    if (max_val < 1e-6f) {
+    if (max_val < 1e-6f)
         max_val = 1.0f;
-    }
 
+    // Precompute constants
     float exposure_mult = std::pow(2.0f, exposure);
     float inv_gamma = 1.0f / gamma;
 
-    // Apply to each pixel
+    // Process each pixel's RGB channels
     for (size_t i = 0; i < pixel_count; ++i) {
         size_t idx = i * 4;
-
         for (int c = 0; c < 3; ++c) {
-            float v = data[idx + c];
-
-            // Normalize
-            v = v / max_val;
-
-            // Exposure (gain in HDR space)
-            v = v * exposure_mult;
-
-            // Tone mapping (HDR -> SDR)
-            v = toneMap(v, tone_map_op, white_point);
-
-            // Contrast (centered)
-            v = (v - 0.5f) * contrast + 0.5f;
-
-            // Clamp
-            v = std::max(0.0f, std::min(1.0f, v));
-
-            // Gamma
-            v = std::pow(v, inv_gamma);
-
-            data[idx + c] = v;
+            float v = data[idx + c] / max_val;
+            data[idx + c] = processValue(v, exposure_mult, contrast, inv_gamma, tone_map_op, white_point);
         }
         // Alpha unchanged
     }
@@ -184,19 +154,10 @@ public:
         : tone_map_(params.tone_map), white_point_(params.reinhard_white_point),
           exposure_(params.exposure), contrast_(params.contrast), gamma_(params.gamma) {}
 
-    // Apply all post-processing to the image
     void apply(Image& image) const {
         PostProcess::applyToImage(image, static_cast<float>(exposure_),
                                   static_cast<float>(contrast_), static_cast<float>(gamma_),
                                   tone_map_, static_cast<float>(white_point_));
-    }
-
-    // Apply with custom parameters (for preview/GUI adjustment)
-    void apply(Image& image, double exposure, double contrast, double gamma,
-               ToneMapOperator tone_map, double white_point) const {
-        PostProcess::applyToImage(image, static_cast<float>(exposure), static_cast<float>(contrast),
-                                  static_cast<float>(gamma), tone_map,
-                                  static_cast<float>(white_point));
     }
 
     ToneMapOperator tone_map() const { return tone_map_; }

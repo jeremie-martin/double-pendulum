@@ -6,8 +6,11 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <json.hpp>
 #include <sstream>
 #include <toml.hpp>
+
+using json = nlohmann::json;
 
 BatchConfig BatchConfig::load(std::string const& path) {
     BatchConfig config;
@@ -77,76 +80,47 @@ BatchConfig BatchConfig::load(std::string const& path) {
 }
 
 void BatchProgress::save(std::filesystem::path const& path) const {
-    std::ofstream out(path);
-    if (!out)
-        return;
+    json j;
+    j["total"] = total;
+    j["completed"] = completed;
+    j["failed"] = failed;
+    j["completed_ids"] = completed_ids;
+    j["failed_ids"] = failed_ids;
 
-    out << "{\n";
-    out << "  \"total\": " << total << ",\n";
-    out << "  \"completed\": " << completed << ",\n";
-    out << "  \"failed\": " << failed << ",\n";
-    out << "  \"completed_ids\": [";
-    for (size_t i = 0; i < completed_ids.size(); ++i) {
-        if (i > 0)
-            out << ", ";
-        out << "\"" << completed_ids[i] << "\"";
+    std::ofstream out(path);
+    if (out) {
+        out << j.dump(2) << "\n";
     }
-    out << "],\n";
-    out << "  \"failed_ids\": [";
-    for (size_t i = 0; i < failed_ids.size(); ++i) {
-        if (i > 0)
-            out << ", ";
-        out << "\"" << failed_ids[i] << "\"";
-    }
-    out << "]\n";
-    out << "}\n";
 }
 
 BatchProgress BatchProgress::load(std::filesystem::path const& path) {
     BatchProgress progress;
 
     std::ifstream in(path);
-    if (!in)
+    if (!in) {
         return progress;
-
-    // Simple JSON parsing (just extract numbers and strings)
-    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-
-    // Parse total
-    auto pos = content.find("\"total\":");
-    if (pos != std::string::npos) {
-        progress.total = std::stoi(content.substr(pos + 8));
     }
 
-    // Parse completed count
-    pos = content.find("\"completed\":");
-    if (pos != std::string::npos) {
-        progress.completed = std::stoi(content.substr(pos + 12));
-    }
+    try {
+        json j = json::parse(in);
 
-    // Parse failed count
-    pos = content.find("\"failed\":");
-    if (pos != std::string::npos) {
-        progress.failed = std::stoi(content.substr(pos + 9));
-    }
-
-    // Parse completed_ids array
-    pos = content.find("\"completed_ids\":");
-    if (pos != std::string::npos) {
-        auto start = content.find('[', pos);
-        auto end = content.find(']', start);
-        if (start != std::string::npos && end != std::string::npos) {
-            std::string arr = content.substr(start + 1, end - start - 1);
-            size_t i = 0;
-            while ((i = arr.find('"', i)) != std::string::npos) {
-                auto j = arr.find('"', i + 1);
-                if (j != std::string::npos) {
-                    progress.completed_ids.push_back(arr.substr(i + 1, j - i - 1));
-                    i = j + 1;
-                } else
-                    break;
-            }
+        if (j.contains("total") && j["total"].is_number()) {
+            progress.total = j["total"].get<int>();
         }
+        if (j.contains("completed") && j["completed"].is_number()) {
+            progress.completed = j["completed"].get<int>();
+        }
+        if (j.contains("failed") && j["failed"].is_number()) {
+            progress.failed = j["failed"].get<int>();
+        }
+        if (j.contains("completed_ids") && j["completed_ids"].is_array()) {
+            progress.completed_ids = j["completed_ids"].get<std::vector<std::string>>();
+        }
+        if (j.contains("failed_ids") && j["failed_ids"].is_array()) {
+            progress.failed_ids = j["failed_ids"].get<std::vector<std::string>>();
+        }
+    } catch (const json::exception& e) {
+        std::cerr << "Error parsing progress file: " << e.what() << "\n";
     }
 
     return progress;

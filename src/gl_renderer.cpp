@@ -6,12 +6,16 @@
 #include <cmath>
 #include <iostream>
 
-// Vertex shader - simple passthrough
+// Vertex shader - expands line quad and passes line parameters to fragment
 static const char* vertex_shader_src = R"(
 #version 330 core
 layout (location = 0) in vec2 aPos;
 layout (location = 1) in vec4 aColor;
+layout (location = 2) in vec2 aLineDir;      // Normalized line direction
+layout (location = 3) in float aLineDist;    // Signed distance from line center (-1 to 1 across width)
+
 out vec4 vertexColor;
+out float lineDist;
 
 uniform vec2 uResolution;
 
@@ -21,17 +25,23 @@ void main() {
     ndc.y = -ndc.y;  // Flip Y
     gl_Position = vec4(ndc, 0.0, 1.0);
     vertexColor = aColor;
+    lineDist = aLineDist;
 }
 )";
 
-// Fragment shader - output color directly (additive blending done by GL)
+// Fragment shader - applies smooth anti-aliasing based on distance from line center
 static const char* fragment_shader_src = R"(
 #version 330 core
 in vec4 vertexColor;
+in float lineDist;
 out vec4 FragColor;
 
 void main() {
-    FragColor = vertexColor;
+    // Smooth falloff for anti-aliasing
+    // lineDist is -1 to 1 across the line width
+    // Use smoothstep for soft edges at the boundary
+    float alpha = 1.0 - smoothstep(0.5, 1.0, abs(lineDist));
+    FragColor = vertexColor * alpha;
 }
 )";
 
@@ -67,13 +77,24 @@ bool GLRenderer::init(int width, int height) {
     glBindVertexArray(vao_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
 
+    // Vertex format: pos(2) + color(4) + lineDir(2) + lineDist(1) = 9 floats
+    size_t stride = 9 * sizeof(float);
+
     // Position attribute
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, (void*)0);
     glEnableVertexAttribArray(0);
 
     // Color attribute
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(2 * sizeof(float)));
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, stride, (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
+
+    // Line direction attribute
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+
+    // Line distance attribute
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, stride, (void*)(8 * sizeof(float)));
+    glEnableVertexAttribArray(3);
 
     glBindVertexArray(0);
 
@@ -213,35 +234,89 @@ void GLRenderer::clear() {
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // Clear line buffer
+    line_buffer_.clear();
 }
 
 void GLRenderer::drawLine(float x0, float y0, float x1, float y1, float r, float g, float b,
                           float intensity) {
-    // Rasterize line with anti-aliasing
-    auto pixels = rasterizeLine(static_cast<int>(x0), static_cast<int>(y0), static_cast<int>(x1),
-                                static_cast<int>(y1));
+    // Buffer the line for batch rendering
+    line_buffer_.push_back({x0, y0, x1, y1, r, g, b, intensity});
+}
 
-    if (pixels.empty())
+void GLRenderer::flush() {
+    if (line_buffer_.empty())
         return;
 
-    // Build vertex data: each pixel becomes a point
-    std::vector<float> vertices;
-    vertices.reserve(pixels.size() * 6);
+    // Line thickness in pixels (for AA coverage)
+    const float thickness = 1.5f;
 
-    for (auto const& p : pixels) {
-        float px = static_cast<float>(p.x) + 0.5f;
-        float py = static_cast<float>(p.y) + 0.5f;
-        float alpha = p.intensity * intensity;
+    // Build vertex buffer - 6 vertices per line (2 triangles forming a quad)
+    // Each vertex: pos(2) + color(4) + lineDir(2) + lineDist(1) = 9 floats
+    vertex_buffer_.clear();
+    vertex_buffer_.reserve(line_buffer_.size() * 6 * 9);
 
-        vertices.push_back(px);
-        vertices.push_back(py);
-        vertices.push_back(r * alpha);
-        vertices.push_back(g * alpha);
-        vertices.push_back(b * alpha);
-        vertices.push_back(alpha);
+    for (const auto& line : line_buffer_) {
+        float dx = line.x1 - line.x0;
+        float dy = line.y1 - line.y0;
+        float len = std::sqrt(dx * dx + dy * dy);
+
+        if (len < 0.001f)
+            continue; // Skip degenerate lines
+
+        // Normalized direction along line
+        float dirX = dx / len;
+        float dirY = dy / len;
+
+        // Perpendicular direction (for thickness)
+        float perpX = -dirY * thickness;
+        float perpY = dirX * thickness;
+
+        // Color with intensity (no angle-based correction needed for GPU quad rendering)
+        float cr = line.r * line.intensity;
+        float cg = line.g * line.intensity;
+        float cb = line.b * line.intensity;
+        float ca = line.intensity;
+
+        // Four corners of the quad
+        float p0x = line.x0 - perpX;
+        float p0y = line.y0 - perpY;
+        float p1x = line.x0 + perpX;
+        float p1y = line.y0 + perpY;
+        float p2x = line.x1 - perpX;
+        float p2y = line.y1 - perpY;
+        float p3x = line.x1 + perpX;
+        float p3y = line.y1 + perpY;
+
+        // Helper to add a vertex
+        auto addVertex = [&](float px, float py, float dist) {
+            vertex_buffer_.push_back(px);
+            vertex_buffer_.push_back(py);
+            vertex_buffer_.push_back(cr);
+            vertex_buffer_.push_back(cg);
+            vertex_buffer_.push_back(cb);
+            vertex_buffer_.push_back(ca);
+            vertex_buffer_.push_back(dirX);
+            vertex_buffer_.push_back(dirY);
+            vertex_buffer_.push_back(dist);
+        };
+
+        // Triangle 1: p0, p1, p2
+        addVertex(p0x, p0y, -1.0f);
+        addVertex(p1x, p1y, 1.0f);
+        addVertex(p2x, p2y, -1.0f);
+
+        // Triangle 2: p1, p3, p2
+        addVertex(p1x, p1y, 1.0f);
+        addVertex(p3x, p3y, 1.0f);
+        addVertex(p2x, p2y, -1.0f);
     }
 
-    // Render to floating-point framebuffer with additive blending
+    if (vertex_buffer_.empty())
+        return;
+
+    // Render all lines in one draw call
     glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
     glViewport(0, 0, width_, height_);
 
@@ -254,14 +329,17 @@ void GLRenderer::drawLine(float x0, float y0, float x1, float y1, float r, float
 
     glBindVertexArray(vao_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(),
+    glBufferData(GL_ARRAY_BUFFER, vertex_buffer_.size() * sizeof(float), vertex_buffer_.data(),
                  GL_DYNAMIC_DRAW);
 
-    glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(pixels.size()));
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertex_buffer_.size() / 9));
 
     glBindVertexArray(0);
     glDisable(GL_BLEND);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // Clear line buffer after flush
+    line_buffer_.clear();
 }
 
 void GLRenderer::readPixels(std::vector<uint8_t>& out, float gamma) {
@@ -301,6 +379,9 @@ void GLRenderer::readPixels(std::vector<uint8_t>& out, float gamma) {
 
 void GLRenderer::updateDisplayTexture(float exposure, float contrast, float gamma,
                                       ToneMapOperator tone_map, float white_point) {
+    // Flush any pending lines first
+    flush();
+
     // Read floating-point data from GPU
     glBindTexture(GL_TEXTURE_2D, float_texture_);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, float_buffer_.data());
@@ -361,83 +442,4 @@ void GLRenderer::updateDisplayTexture(float exposure, float contrast, float gamm
     glBindTexture(GL_TEXTURE_2D, display_texture_);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width_, height_, GL_RGBA, GL_UNSIGNED_BYTE,
                     rgba.data());
-}
-
-// Xiaolin Wu anti-aliased line rasterization with intensity normalization
-std::vector<LinePixel> rasterizeLine(int x0, int y0, int x1, int y1) {
-    std::vector<LinePixel> pixels;
-
-    auto ipart = [](float x) { return std::floor(x); };
-    auto fpart = [](float x) { return x - std::floor(x); };
-    auto rfpart = [&fpart](float x) { return 1.0f - fpart(x); };
-
-    bool steep = std::abs(y1 - y0) > std::abs(x1 - x0);
-    if (steep) {
-        std::swap(x0, y0);
-        std::swap(x1, y1);
-    }
-    if (x0 > x1) {
-        std::swap(x0, x1);
-        std::swap(y0, y1);
-    }
-
-    float dx = static_cast<float>(x1 - x0);
-    float dy = static_cast<float>(y1 - y0);
-    float gradient = (dx == 0.0f) ? 1.0f : dy / dx;
-
-    // Intensity correction for diagonal lines
-    float intensity_scale = std::sqrt(1.0f + gradient * gradient);
-
-    // First endpoint
-    int xend = static_cast<int>(ipart(x0 + 0.5f));
-    float yend = y0 + gradient * (xend - x0);
-    float xgap = rfpart(x0 + 0.5f);
-    int xpxl1 = xend;
-    int ypxl1 = static_cast<int>(ipart(yend));
-
-    if (steep) {
-        pixels.push_back({ypxl1, xpxl1, rfpart(yend) * xgap * intensity_scale});
-        pixels.push_back({ypxl1 + 1, xpxl1, fpart(yend) * xgap * intensity_scale});
-    } else {
-        pixels.push_back({xpxl1, ypxl1, rfpart(yend) * xgap * intensity_scale});
-        pixels.push_back({xpxl1, ypxl1 + 1, fpart(yend) * xgap * intensity_scale});
-    }
-
-    float intery = yend + gradient;
-
-    // Second endpoint
-    xend = static_cast<int>(ipart(x1 + 0.5f));
-    yend = y1 + gradient * (xend - x1);
-    xgap = fpart(x1 + 0.5f);
-    int xpxl2 = xend;
-    int ypxl2 = static_cast<int>(ipart(yend));
-
-    if (steep) {
-        pixels.push_back({ypxl2, xpxl2, rfpart(yend) * xgap * intensity_scale});
-        pixels.push_back({ypxl2 + 1, xpxl2, fpart(yend) * xgap * intensity_scale});
-    } else {
-        pixels.push_back({xpxl2, ypxl2, rfpart(yend) * xgap * intensity_scale});
-        pixels.push_back({xpxl2, ypxl2 + 1, fpart(yend) * xgap * intensity_scale});
-    }
-
-    // Main loop
-    if (steep) {
-        for (int x = xpxl1 + 1; x < xpxl2; ++x) {
-            pixels.push_back(
-                {static_cast<int>(ipart(intery)), x, rfpart(intery) * intensity_scale});
-            pixels.push_back(
-                {static_cast<int>(ipart(intery)) + 1, x, fpart(intery) * intensity_scale});
-            intery += gradient;
-        }
-    } else {
-        for (int x = xpxl1 + 1; x < xpxl2; ++x) {
-            pixels.push_back(
-                {x, static_cast<int>(ipart(intery)), rfpart(intery) * intensity_scale});
-            pixels.push_back(
-                {x, static_cast<int>(ipart(intery)) + 1, fpart(intery) * intensity_scale});
-            intery += gradient;
-        }
-    }
-
-    return pixels;
 }

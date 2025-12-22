@@ -3,48 +3,10 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <json.hpp>
 #include <sstream>
 
-// Simple JSON parsing for our specific format
-namespace {
-
-std::string trim(std::string const& s) {
-    auto start = s.find_first_not_of(" \t\n\r\"");
-    if (start == std::string::npos)
-        return "";
-    auto end = s.find_last_not_of(" \t\n\r\"");
-    return s.substr(start, end - start + 1);
-}
-
-std::string extractValue(std::string const& line, std::string const& key) {
-    auto pos = line.find("\"" + key + "\"");
-    if (pos == std::string::npos)
-        return "";
-
-    auto colon = line.find(':', pos);
-    if (colon == std::string::npos)
-        return "";
-
-    auto value_start = line.find_first_not_of(" \t", colon + 1);
-    if (value_start == std::string::npos)
-        return "";
-
-    // Check if it's a number or string
-    if (line[value_start] == '"') {
-        auto value_end = line.find('"', value_start + 1);
-        if (value_end == std::string::npos)
-            return "";
-        return line.substr(value_start + 1, value_end - value_start - 1);
-    } else {
-        // Number - find end (comma or end of line)
-        auto value_end = line.find_first_of(",\n\r}", value_start);
-        if (value_end == std::string::npos)
-            value_end = line.length();
-        return trim(line.substr(value_start, value_end - value_start));
-    }
-}
-
-} // namespace
+using json = nlohmann::json;
 
 bool MusicManager::load(fs::path const& music_dir) {
     music_dir_ = music_dir;
@@ -62,40 +24,44 @@ bool MusicManager::load(fs::path const& music_dir) {
         return false;
     }
 
-    // Read entire file
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    std::string content = buffer.str();
+    try {
+        json data = json::parse(file);
 
-    // Parse tracks array (simple parsing for our specific format)
-    size_t pos = 0;
-    while ((pos = content.find('{', pos)) != std::string::npos) {
-        auto end = content.find('}', pos);
-        if (end == std::string::npos)
-            break;
-
-        std::string track_block = content.substr(pos, end - pos + 1);
-
-        MusicTrack track;
-        track.id = extractValue(track_block, "id");
-        track.title = extractValue(track_block, "title");
-
-        std::string filepath = extractValue(track_block, "filepath");
-        if (!filepath.empty()) {
-            track.filepath = music_dir / filepath;
+        // Handle both array and object with "tracks" key
+        json tracks_array;
+        if (data.is_array()) {
+            tracks_array = data;
+        } else if (data.contains("tracks") && data["tracks"].is_array()) {
+            tracks_array = data["tracks"];
+        } else {
+            std::cerr << "Invalid music database format\n";
+            return false;
         }
 
-        std::string drop_time = extractValue(track_block, "drop_time_ms");
-        if (!drop_time.empty()) {
-            track.drop_time_ms = std::stoi(drop_time);
-        }
+        for (const auto& track_json : tracks_array) {
+            MusicTrack track;
 
-        // Validate track has required fields
-        if (!track.id.empty() && !track.filepath.empty() && track.drop_time_ms > 0) {
-            tracks_.push_back(track);
-        }
+            if (track_json.contains("id") && track_json["id"].is_string()) {
+                track.id = track_json["id"].get<std::string>();
+            }
+            if (track_json.contains("title") && track_json["title"].is_string()) {
+                track.title = track_json["title"].get<std::string>();
+            }
+            if (track_json.contains("filepath") && track_json["filepath"].is_string()) {
+                track.filepath = music_dir / track_json["filepath"].get<std::string>();
+            }
+            if (track_json.contains("drop_time_ms") && track_json["drop_time_ms"].is_number()) {
+                track.drop_time_ms = track_json["drop_time_ms"].get<int>();
+            }
 
-        pos = end + 1;
+            // Validate track has required fields
+            if (!track.id.empty() && !track.filepath.empty() && track.drop_time_ms > 0) {
+                tracks_.push_back(track);
+            }
+        }
+    } catch (const json::exception& e) {
+        std::cerr << "Error parsing music database: " << e.what() << "\n";
+        return false;
     }
 
     std::cout << "Loaded " << tracks_.size() << " music tracks\n";
