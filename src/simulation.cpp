@@ -88,7 +88,19 @@ void Simulation::saveMetadata(SimulationResults const& results) {
     std::ostringstream time_str;
     time_str << std::put_time(&tm, "%Y-%m-%dT%H:%M:%S");
 
-    out << std::fixed << std::setprecision(4);
+    // Physics quality name
+    auto qualityName = [](PhysicsQuality q) -> char const* {
+        switch (q) {
+        case PhysicsQuality::Low: return "low";
+        case PhysicsQuality::Medium: return "medium";
+        case PhysicsQuality::High: return "high";
+        case PhysicsQuality::Ultra: return "ultra";
+        case PhysicsQuality::Custom: return "custom";
+        }
+        return "unknown";
+    };
+
+    out << std::fixed << std::setprecision(6);
     out << "{\n";
     out << "  \"version\": \"1.0\",\n";
     out << "  \"created_at\": \"" << time_str.str() << "\",\n";
@@ -98,7 +110,11 @@ void Simulation::saveMetadata(SimulationResults const& results) {
     out << "    \"video_fps\": " << config_.output.video_fps << ",\n";
     out << "    \"pendulum_count\": " << config_.simulation.pendulum_count << ",\n";
     out << "    \"width\": " << config_.render.width << ",\n";
-    out << "    \"height\": " << config_.render.height << "\n";
+    out << "    \"height\": " << config_.render.height << ",\n";
+    out << "    \"physics_quality\": \"" << qualityName(config_.simulation.physics_quality) << "\",\n";
+    out << "    \"max_dt\": " << config_.simulation.max_dt << ",\n";
+    out << "    \"substeps\": " << config_.simulation.substeps() << ",\n";
+    out << "    \"dt\": " << config_.simulation.dt() << "\n";
     out << "  },\n";
     out << "  \"results\": {\n";
     out << "    \"frames_completed\": " << results.frames_completed << ",\n";
@@ -138,7 +154,7 @@ void Simulation::saveVarianceCSV(std::vector<double> const& variance) {
     }
 }
 
-SimulationResults Simulation::run(ProgressCallback progress) {
+SimulationResults Simulation::run(ProgressCallback progress, std::string const& config_path) {
     int const pendulum_count = config_.simulation.pendulum_count;
     int const total_frames = config_.simulation.total_frames;
     int const substeps = config_.simulation.substeps();
@@ -316,8 +332,11 @@ SimulationResults Simulation::run(ProgressCallback progress) {
 
     results.variance_history = variance_tracker_.getHistory();
 
-    // Save metadata and variance
+    // Save metadata, config copy, and variance
     saveMetadata(results);
+    if (!config_path.empty()) {
+        saveConfigCopy(config_path);
+    }
     if (!results.variance_history.empty()) {
         saveVarianceCSV(results.variance_history);
     }
@@ -352,6 +371,7 @@ SimulationResults Simulation::run(ProgressCallback progress) {
     std::cout << "Video:       " << video_duration << "s @ " << config_.output.video_fps
               << " FPS\n";
     std::cout << "Pendulums:   " << pendulum_count << "\n";
+    std::cout << "Physics:     " << substeps << " substeps/frame, dt=" << (dt * 1000) << "ms\n";
     std::cout << "Total time:  " << results.timing.total_seconds << "s\n";
     std::cout << "  Physics:   " << std::setw(5) << results.timing.physics_seconds << "s ("
               << std::setw(4)

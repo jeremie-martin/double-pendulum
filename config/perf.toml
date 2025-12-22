@@ -9,12 +9,12 @@ initial_angle1_deg = 152
 initial_angle2_deg = 152.0
 
 [simulation]
-pendulum_count = 1000000
+pendulum_count = 100000
 angle_variation_deg = 0.1
 duration_seconds = 20.0
 total_frames = 150
-# physics_quality = "high"     # "low", "medium", "high", "ultra"
-max_dt = 0.05            # Alternative: specify max timestep directly
+physics_quality = "high"     # "low", "medium", "high", "ultra"
+# max_dt = 0.05            # Alternative: specify max timestep directly
 
 [render]
 width = 1080
@@ -35,7 +35,7 @@ boom_threshold = 2.0
 white_threshold = 500
 
 [output]
-format = "png"
+format = "video"
 directory = "output/long_test"
 filename_prefix = "frame"
 video_fps = 60              # Lower FPS for test videos

@@ -3,6 +3,7 @@
 #include "simulation.h"
 
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <string>
 
@@ -38,6 +39,18 @@ int runSimulation(std::string const& config_path, std::string const& music_track
     double video_duration =
         static_cast<double>(config.simulation.total_frames) / config.output.video_fps;
 
+    // Get physics quality string
+    auto qualityName = [](PhysicsQuality q) -> char const* {
+        switch (q) {
+        case PhysicsQuality::Low: return "low";
+        case PhysicsQuality::Medium: return "medium";
+        case PhysicsQuality::High: return "high";
+        case PhysicsQuality::Ultra: return "ultra";
+        case PhysicsQuality::Custom: return "custom";
+        }
+        return "unknown";
+    };
+
     // Print config summary
     std::cout << "\nSimulation parameters:\n"
               << "  Pendulums: " << config.simulation.pendulum_count << "\n"
@@ -45,6 +58,10 @@ int runSimulation(std::string const& config_path, std::string const& music_track
               << "  Frames: " << config.simulation.total_frames << "\n"
               << "  Video: " << video_duration << "s @ " << config.output.video_fps << " FPS\n"
               << "  Resolution: " << config.render.width << "x" << config.render.height << "\n"
+              << "  Physics quality: " << qualityName(config.simulation.physics_quality)
+              << " (max_dt=" << (config.simulation.max_dt * 1000) << "ms"
+              << ", substeps=" << config.simulation.substeps()
+              << ", dt=" << std::fixed << std::setprecision(2) << (config.simulation.dt() * 1000) << "ms)\n"
               << "  Output: " << config.output.directory << "/\n"
               << "  Renderer: GPU\n";
 
@@ -55,7 +72,7 @@ int runSimulation(std::string const& config_path, std::string const& music_track
 
     // Run simulation
     Simulation sim(config);
-    auto results = sim.run();
+    auto results = sim.run(nullptr, config_path);
 
     if (results.frames_completed == 0) {
         std::cerr << "Simulation failed\n";

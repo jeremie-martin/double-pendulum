@@ -43,7 +43,9 @@ public:
 
     // Run simulation with GPU rendering
     // Returns simulation results including boom_frame and output paths
-    SimulationResults run(ProgressCallback progress = nullptr);
+    // If config_path is provided, the config file will be copied to the output directory
+    SimulationResults run(ProgressCallback progress = nullptr,
+                          std::string const& config_path = "");
 
 private:
     Config config_;
