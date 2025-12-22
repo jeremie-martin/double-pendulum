@@ -17,6 +17,9 @@ class FFmpegCommand:
     output_path: Path
     video_filters: list[str] = field(default_factory=list)
     options: dict[str, str] = field(default_factory=dict)
+    # For filter_complex (more advanced graphs)
+    filter_complex: Optional[str] = None
+    filter_complex_output: str = "[v]"  # Output label for filter_complex
 
     def add_filter(self, filter_str: str) -> "FFmpegCommand":
         """Add a raw video filter string."""
@@ -101,6 +104,73 @@ class FFmpegCommand:
         """Pad 1:1 video (1080x1080) to 9:16 (1080x1920) for YouTube Shorts."""
         return self.add_pad(1080, 1920, "(ow-iw)/2", "(oh-ih)/2", bg_color)
 
+    def add_subtitles(self, ass_path: Path, force_style: Optional[str] = None) -> "FFmpegCommand":
+        """Add ASS subtitles using libass.
+
+        Args:
+            ass_path: Path to .ass subtitle file
+            force_style: Optional style overrides (e.g., "FontSize=80,OutlineColour=&H40000000")
+        """
+        # Escape path for FFmpeg filter
+        escaped_path = str(ass_path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+
+        if force_style:
+            self.video_filters.append(f"subtitles='{escaped_path}':force_style='{force_style}'")
+        else:
+            self.video_filters.append(f"subtitles='{escaped_path}'")
+        return self
+
+    def set_blurred_background(
+        self,
+        blur_strength: int = 50,
+        brightness: float = 0.3,
+        target_width: int = 1080,
+        target_height: int = 1920,
+    ) -> "FFmpegCommand":
+        """Use blurred/scaled version of video as background for vertical format.
+
+        Creates a filter_complex that:
+        1. Scales + blurs video to fill vertical frame (background)
+        2. Overlays original video centered on top
+
+        Args:
+            blur_strength: Gaussian blur sigma (higher = more blur)
+            brightness: Background brightness multiplier (0.3 = 30%)
+            target_width: Output width
+            target_height: Output height
+        """
+        # filter_complex graph:
+        # [0:v] -> split into [bg] and [fg]
+        # [bg] -> scale to fill, blur, darken
+        # [fg] -> scale to fit centered
+        # [bg][fg] -> overlay
+
+        # Calculate scale to fill (cover) the target
+        # For 1080x1080 -> 1080x1920, we scale up to 1920x1920, then crop to 1080x1920
+        self.filter_complex = (
+            f"[0:v]split[bg][fg];"
+            # Background: scale to cover, blur, darken
+            f"[bg]scale={target_height}:{target_height}:force_original_aspect_ratio=increase,"
+            f"crop={target_width}:{target_height},"
+            f"boxblur={blur_strength}:{blur_strength},"
+            f"eq=brightness={brightness - 1.0}[bg_out];"
+            # Foreground: keep original size, center it
+            f"[fg]scale={target_width}:-1:force_original_aspect_ratio=decrease[fg_scaled];"
+            # Overlay foreground on background
+            f"[bg_out][fg_scaled]overlay=(W-w)/2:(H-h)/2[v]"
+        )
+        self.filter_complex_output = "[v]"
+        return self
+
+    def set_movflags(self, flags: str = "faststart") -> "FFmpegCommand":
+        """Set movflags for MP4 output.
+
+        Args:
+            flags: Movflags value (e.g., "faststart" for web optimization)
+        """
+        self.options["movflags"] = f"+{flags}"
+        return self
+
     def add_zoompan(
         self,
         zoom_expr: str,
@@ -161,7 +231,23 @@ class FFmpegCommand:
         """Build the complete FFmpeg command as argument list."""
         cmd = ["ffmpeg", "-y", "-i", str(self.input_path)]
 
-        if self.video_filters:
+        # Use filter_complex if set, otherwise use simple -vf chain
+        if self.filter_complex:
+            # Append any additional video_filters to the filter_complex output
+            if self.video_filters:
+                # Chain additional filters after the filter_complex output
+                full_filter = (
+                    f"{self.filter_complex};"
+                    f"{self.filter_complex_output}{','.join(self.video_filters)}[vout]"
+                )
+                cmd.extend(["-filter_complex", full_filter])
+                cmd.extend(["-map", "[vout]"])
+            else:
+                cmd.extend(["-filter_complex", self.filter_complex])
+                cmd.extend(["-map", self.filter_complex_output])
+            # Map audio if present
+            cmd.extend(["-map", "0:a?"])
+        elif self.video_filters:
             cmd.extend(["-vf", ",".join(self.video_filters)])
 
         for key, value in self.options.items():

@@ -1,0 +1,149 @@
+# Text Pools for Video Captions
+#
+# Each pool contains multiple text variations that can be randomly selected.
+# Use {count} for formatted pendulum count (e.g., "1M", "500K")
+# Use {boom_time} for boom timestamp (e.g., "8.4s")
+#
+# Organized by category:
+# - hooks: First 0-2 seconds, grab attention
+# - build: Between hook and boom, create tension
+# - payoff: At/after boom, the climax
+
+# =============================================================================
+# HOOKS - First 0-2 seconds
+# Goal: Grab attention, make viewer want to keep watching
+# =============================================================================
+
+[hooks.science]
+texts = [
+    "Same starting position.",
+    "{count} pendulums.",
+    "Nearly identical conditions.",
+    "Identical initial angles.",
+]
+
+[hooks.question]
+texts = [
+    "What happens when...",
+    "Can you predict this?",
+    "Watch closely.",
+    "Spot the moment.",
+]
+
+[hooks.wait]
+texts = [
+    "Wait for it...",
+    "Keep watching...",
+    "Don't blink.",
+    "Watch until the end.",
+]
+
+[hooks.challenge]
+texts = [
+    "Spot when chaos begins.",
+    "Can you see it coming?",
+    "Find the exact moment.",
+]
+
+[hooks.promise]
+texts = [
+    "This is about to get wild.",
+    "Something beautiful is coming.",
+    "Watch what happens next.",
+]
+
+
+# =============================================================================
+# BUILD - Between hook and boom
+# Goal: Create tension, give context, build anticipation
+# =============================================================================
+
+[build.tension]
+texts = [
+    "Tiny differences...",
+    "0.00001° apart...",
+    "Almost the same...",
+    "So close...",
+]
+
+[build.count_tease]
+texts = [
+    "{count} pendulums diverge?",
+    "{count} start together.",
+    "{count} individual paths.",
+]
+
+[build.countdown]
+texts = [
+    "Boom at {boom_time}",
+    "3... 2... 1...",
+    "Any moment now...",
+]
+
+[build.science_explain]
+texts = [
+    "The butterfly effect.",
+    "Chaos theory in action.",
+    "Sensitive dependence.",
+]
+
+[build.ellipsis]
+texts = [
+    "...",
+    ". . .",
+]
+
+
+# =============================================================================
+# PAYOFF - At/after boom
+# Goal: Punctuate the climax, create satisfying moment
+# =============================================================================
+
+[payoff.single_word]
+texts = [
+    "CHAOS.",
+    "BOOM.",
+    "DIVERGE.",
+    "ENTROPY.",
+]
+
+[payoff.exclamation]
+texts = [
+    "THIS.",
+    "INSANE.",
+    "BEAUTIFUL.",
+    "CHAOS.",
+]
+
+[payoff.descriptive]
+texts = [
+    "The butterfly effect.",
+    "Chaos theory.",
+    "Complete divergence.",
+    "Total chaos.",
+]
+
+[payoff.reaction]
+texts = [
+    "Did you see it?",
+    "There it is.",
+    "That moment.",
+]
+
+
+# =============================================================================
+# END CARDS - Optional text at the end
+# Goal: Branding, call to action, context
+# =============================================================================
+
+[end.count_label]
+texts = [
+    "{count} Double Pendulums",
+    "{count} Pendulums",
+]
+
+[end.cta]
+texts = [
+    "Follow for more.",
+    "Like for more chaos.",
+]

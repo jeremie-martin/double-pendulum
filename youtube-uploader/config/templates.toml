@@ -1,0 +1,134 @@
+# Video Post-Processing Templates
+#
+# Each template defines:
+# - motion: slow zoom, boom punch, shake effects
+# - captions: text timing with pool references
+#
+# Text content comes from text_pools.toml and is randomly selected.
+
+# =============================================================================
+# TEMPLATE: viral_science
+# Educational with slow buildup to chaos
+# =============================================================================
+
+[template.viral_science]
+description = "Educational hook, tension build, CHAOS payoff"
+
+[template.viral_science.motion]
+slow_zoom = { start = 1.0, end = 1.08 }
+boom_punch = { factor = 1.25, ramp_in = 0.3, hold = 0.4, ramp_out = 0.4 }
+shake = { frames = 4, intensity = 8 }
+
+[[template.viral_science.captions]]
+pool = "hooks.science"
+position = "hook"
+start = 0
+end = 2.5
+effects = { fade_in = 200 }
+
+[[template.viral_science.captions]]
+pool = "build.tension"
+position = "main"
+start = 2.5
+end = "boom-0.3"
+effects = { fade_in = 200 }
+
+[[template.viral_science.captions]]
+pool = "payoff.single_word"
+position = "center"
+start = "boom-0.1"
+end = "boom+2"
+effects = { pop_in = true }
+
+
+# =============================================================================
+# TEMPLATE: dramatic_minimal
+# Minimal text, strong motion, text synced exactly to boom
+# =============================================================================
+
+[template.dramatic_minimal]
+description = "Minimal text, strong motion"
+
+[template.dramatic_minimal.motion]
+slow_zoom = { start = 1.0, end = 1.12 }
+boom_punch = { factor = 1.3, ramp_in = 0.4, hold = 0.5, ramp_out = 0.5 }
+shake = { frames = 3, intensity = 6 }
+
+[[template.dramatic_minimal.captions]]
+pool = "payoff.single_word"
+position = "center"
+start = "boom-0.1"
+end = "boom+2"
+effects = { pop_in = true }
+
+
+# =============================================================================
+# TEMPLATE: hype_mrbeast
+# High energy, question hook, exclamation payoff
+# =============================================================================
+
+[template.hype_mrbeast]
+description = "High energy MrBeast style"
+
+[template.hype_mrbeast.motion]
+slow_zoom = { start = 1.0, end = 1.15 }
+boom_punch = { factor = 1.35, ramp_in = 0.25, hold = 0.4, ramp_out = 0.3 }
+shake = { frames = 4, intensity = 10 }
+
+[[template.hype_mrbeast.captions]]
+pool = "hooks.question"
+position = "hook"
+start = 0
+end = 1.5
+effects = { fade_in = 100 }
+
+[[template.hype_mrbeast.captions]]
+pool = "build.count_tease"
+position = "main"
+start = 1.5
+end = "boom-0.5"
+effects = { pop_in = true }
+
+[[template.hype_mrbeast.captions]]
+pool = "payoff.exclamation"
+position = "center"
+start = "boom-0.1"
+end = "boom+2"
+effects = { pop_in = true }
+
+
+# =============================================================================
+# TEMPLATE: wait_for_it
+# Classic "wait for it" hook with minimal buildup
+# =============================================================================
+
+[template.wait_for_it]
+description = "Classic wait for it hook"
+
+[template.wait_for_it.motion]
+slow_zoom = { start = 1.0, end = 1.06 }
+boom_punch = { factor = 1.2, ramp_in = 0.3, hold = 0.4, ramp_out = 0.4 }
+shake = { frames = 3, intensity = 5 }
+
+[[template.wait_for_it.captions]]
+pool = "hooks.wait"
+position = "main"
+start = 0
+end = "boom-0.5"
+effects = { fade_in = 300, fade_out = 200 }
+
+
+# =============================================================================
+# TEMPLATE: silent
+# No text, motion only - for testing or music-focused videos
+# =============================================================================
+
+[template.silent]
+description = "Motion only, no text"
+
+[template.silent.motion]
+slow_zoom = { start = 1.0, end = 1.1 }
+boom_punch = { factor = 1.25, ramp_in = 0.4, hold = 0.5, ramp_out = 0.4 }
+shake = { frames = 4, intensity = 6 }
+
+# No captions for silent template

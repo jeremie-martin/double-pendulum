@@ -1,17 +1,53 @@
 """Video post-processing module for pendulum simulation videos."""
 
 from .ffmpeg import FFmpegCommand
+from .motion import (
+    BoomPunchConfig,
+    MotionConfig,
+    ShakeConfig,
+    SlowZoomConfig,
+    apply_motion_effects,
+)
+from .pipeline import ProcessingConfig, ProcessingPipeline, ProcessingResult
+from .subtitles_ass import (
+    ASSGenerator,
+    CaptionPreset,
+    generate_ass_from_resolved,
+)
+from .templates import (
+    ResolvedCaption,
+    TemplateConfig,
+    TemplateLibrary,
+    TextPoolLibrary,
+    load_template_system,
+    resolve_template,
+)
 from .thumbnails import extract_thumbnails
-from .overlays import apply_captions, resolve_timing
-from .effects import add_zoom_effect
-from .pipeline import ProcessingPipeline, ProcessingConfig
 
 __all__ = [
+    # FFmpeg
     "FFmpegCommand",
+    # Thumbnails
     "extract_thumbnails",
-    "apply_captions",
-    "resolve_timing",
-    "add_zoom_effect",
+    # Motion effects
+    "apply_motion_effects",
+    "MotionConfig",
+    "SlowZoomConfig",
+    "BoomPunchConfig",
+    "ShakeConfig",
+    # Pipeline
     "ProcessingPipeline",
     "ProcessingConfig",
+    "ProcessingResult",
+    # Subtitles
+    "ASSGenerator",
+    "CaptionPreset",
+    "generate_ass_from_resolved",
+    # Templates
+    "TemplateLibrary",
+    "TextPoolLibrary",
+    "TemplateConfig",
+    "ResolvedCaption",
+    "load_template_system",
+    "resolve_template",
 ]

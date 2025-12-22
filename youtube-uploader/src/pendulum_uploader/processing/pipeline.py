@@ -7,46 +7,31 @@ from pathlib import Path
 from typing import Optional
 
 from ..models import VideoMetadata
-from .effects import add_zoom_effect
 from .ffmpeg import FFmpegCommand, get_video_dimensions
-from .overlays import apply_captions
+from .motion import apply_motion_effects
+from .subtitles_ass import generate_ass_from_resolved, CaptionPreset
+from .templates import (
+    TemplateLibrary,
+    TextPoolLibrary,
+    resolve_template,
+    load_template_system,
+)
 from .thumbnails import extract_thumbnails
-
-
-def get_default_font() -> Optional[Path]:
-    """Get the path to the bundled default font.
-
-    Returns:
-        Path to Inter-Bold.ttf if it exists, None otherwise
-    """
-    # Look for bundled font relative to this module
-    module_dir = Path(__file__).parent.parent.parent.parent
-    font_path = module_dir / "assets" / "fonts" / "Inter-Bold.ttf"
-
-    if font_path.exists():
-        return font_path
-
-    # Also check alternate location
-    alt_path = Path(__file__).parent.parent.parent / "assets" / "fonts" / "Inter-Bold.ttf"
-    if alt_path.exists():
-        return alt_path
-
-    return None
 
 
 @dataclass
 class ProcessingConfig:
     """Configuration for video processing pipeline."""
 
-    # Caption/overlay settings
-    style: str = "wait_for_it"
+    # Template selection
+    template: str = "viral_science"  # Template name from templates.toml
+    seed: Optional[int] = None  # Random seed for reproducible text selection
 
     # Format settings
     shorts: bool = False  # Pad to 9:16 for YouTube Shorts
-
-    # Effect settings
-    zoom: bool = False
-    zoom_factor: float = 1.3
+    blurred_background: bool = False  # Use blurred video as background
+    blur_strength: int = 50  # Blur sigma for background
+    background_brightness: float = 0.3  # Background brightness (0-1)
 
     # Thumbnail settings
     extract_thumbnails: bool = True
@@ -54,10 +39,6 @@ class ProcessingConfig:
     # Quality settings
     crf_quality: int = 18  # Lower = better (18 = visually lossless)
     preset: str = "slow"  # Slower = better compression
-
-    # Font settings
-    font_path: Optional[Path] = None
-    fontsize: int = 48
 
 
 @dataclass
@@ -69,7 +50,9 @@ class ProcessingResult:
     video_path: Optional[Path] = None
     thumbnails: list[Path] = field(default_factory=list)
     error: Optional[str] = None
-    ffmpeg_command: Optional[str] = None  # For dry-run/debugging
+    ffmpeg_command: Optional[str] = None
+    template_used: Optional[str] = None
+    captions_text: Optional[list[str]] = None  # For preview
 
 
 class ProcessingPipeline:
@@ -97,9 +80,8 @@ class ProcessingPipeline:
         if not self.input_video.exists():
             raise FileNotFoundError(f"video.mp4 not found in {video_dir}")
 
-        # Resolve font path
-        if self.config.font_path is None:
-            self.config.font_path = get_default_font()
+        # Load template system
+        self.template_lib, self.text_pools = load_template_system()
 
     def run(
         self,
@@ -108,6 +90,11 @@ class ProcessingPipeline:
         force: bool = False,
     ) -> ProcessingResult:
         """Execute the full processing pipeline.
+
+        Pipeline order:
+        1. Motion effects (slow zoom + boom punch + shake)
+        2. Background/padding for Shorts
+        3. ASS subtitles from resolved template
 
         Args:
             output_dir: Output directory (default: video_dir/processed/)
@@ -120,7 +107,6 @@ class ProcessingPipeline:
         # Set up output directory
         output_dir = output_dir or (self.video_dir / "processed")
 
-        # Check for existing output (skip check for dry-run)
         if output_dir.exists() and not force and not dry_run:
             return ProcessingResult(
                 success=False,
@@ -133,49 +119,89 @@ class ProcessingPipeline:
 
         output_video = output_dir / "video.mp4"
 
+        # Load template
+        template_name = self.config.template
+        if template_name == "random":
+            template = self.template_lib.pick_random(seed=self.config.seed)
+            template_name = template.name
+        else:
+            template = self.template_lib.get(template_name)
+
         # Build the FFmpeg command
         cmd = FFmpegCommand(self.input_video, output_video)
 
-        # Get video dimensions
+        # Get video dimensions and metadata
         try:
             width, height = get_video_dimensions(self.input_video)
         except Exception:
             width, height = self.metadata.config.width, self.metadata.config.height
 
-        # Apply zoom effect (must come before text overlays and padding)
-        if self.config.zoom and self.metadata.boom_seconds is not None:
-            add_zoom_effect(
-                cmd,
-                boom_seconds=self.metadata.boom_seconds,
-                zoom_factor=self.config.zoom_factor,
+        boom_seconds = self.metadata.boom_seconds or 10.0
+        video_duration = self.metadata.video_duration
+        fps = self.metadata.config.video_fps
+
+        # Determine output dimensions
+        if self.config.shorts:
+            out_width, out_height = 1080, 1920
+        else:
+            out_width, out_height = width, height
+
+        # Step 1: Apply motion effects from template
+        if template.motion and boom_seconds:
+            apply_motion_effects(
+                cmd=cmd,
+                motion=template.motion,
+                boom_seconds=boom_seconds,
+                video_duration=video_duration,
                 width=width,
                 height=height,
+                fps=fps,
             )
 
-        # Apply text overlays
-        if self.config.style != "minimal":
-            apply_captions(
-                cmd,
-                style_name=self.config.style,
-                boom_seconds=self.metadata.boom_seconds,
-                video_duration=self.metadata.video_duration,
-                pendulum_count=self.metadata.config.pendulum_count,
-                shorts_mode=self.config.shorts,
-                fontfile=self.config.font_path,
-                fontsize=self.config.fontsize,
-            )
-
-        # Apply Shorts padding (must be last, after all other effects)
+        # Step 2: Apply background/padding for Shorts
         if self.config.shorts:
-            cmd.add_shorts_padding()
+            if self.config.blurred_background:
+                cmd.set_blurred_background(
+                    blur_strength=self.config.blur_strength,
+                    brightness=self.config.background_brightness,
+                    target_width=out_width,
+                    target_height=out_height,
+                )
+            else:
+                cmd.add_shorts_padding()
+
+        # Step 3: Resolve template and generate ASS subtitles
+        resolved_captions = resolve_template(
+            template=template,
+            text_pools=self.text_pools,
+            boom_seconds=boom_seconds,
+            video_duration=video_duration,
+            pendulum_count=self.metadata.config.pendulum_count,
+            seed=self.config.seed,
+        )
+
+        captions_text = [cap.text for cap in resolved_captions]
+
+        ass_path: Optional[Path] = None
+        if resolved_captions:
+            ass_path = output_dir / "captions.ass"
+            if not dry_run:
+                generate_ass_from_resolved(
+                    output_path=ass_path,
+                    captions=resolved_captions,
+                    video_width=out_width,
+                    video_height=out_height,
+                )
+            if ass_path and (dry_run or ass_path.exists()):
+                cmd.add_subtitles(ass_path)
 
         # Set output quality
         cmd.set_codec("libx264")
         cmd.set_pixel_format("yuv420p")
         cmd.set_quality(crf=self.config.crf_quality, preset=self.config.preset)
-        cmd.copy_audio()  # Preserve audio if present
+        cmd.set_movflags("faststart")
+        cmd.copy_audio()
 
-        # Store command for dry run
         ffmpeg_command = cmd.build_string()
 
         if dry_run:
@@ -183,6 +209,8 @@ class ProcessingPipeline:
                 success=True,
                 output_dir=output_dir,
                 ffmpeg_command=ffmpeg_command,
+                template_used=template_name,
+                captions_text=captions_text,
             )
 
         # Execute FFmpeg
@@ -194,6 +222,7 @@ class ProcessingPipeline:
                 output_dir=output_dir,
                 error=f"FFmpeg failed: {e}",
                 ffmpeg_command=ffmpeg_command,
+                template_used=template_name,
             )
 
         # Extract thumbnails
@@ -201,14 +230,13 @@ class ProcessingPipeline:
         if self.config.extract_thumbnails:
             try:
                 thumbnails = extract_thumbnails(
-                    self.input_video,  # Use original for best quality
+                    self.input_video,
                     output_dir,
                     boom_seconds=self.metadata.boom_seconds,
                     best_frame_seconds=self.metadata.best_frame_seconds,
                     video_duration=self.metadata.video_duration,
                 )
             except Exception as e:
-                # Don't fail pipeline on thumbnail errors
                 print(f"Warning: Thumbnail extraction failed: {e}")
 
         return ProcessingResult(
@@ -217,30 +245,42 @@ class ProcessingPipeline:
             video_path=output_video,
             thumbnails=thumbnails,
             ffmpeg_command=ffmpeg_command,
+            template_used=template_name,
+            captions_text=captions_text,
         )
 
     def preview(self) -> dict:
-        """Preview what processing would do without executing.
+        """Preview what processing would do without executing."""
+        template = self.template_lib.get(self.config.template)
 
-        Returns:
-            Dict with processing details
-        """
+        resolved_captions = resolve_template(
+            template=template,
+            text_pools=self.text_pools,
+            boom_seconds=self.metadata.boom_seconds or 10.0,
+            video_duration=self.metadata.video_duration,
+            pendulum_count=self.metadata.config.pendulum_count,
+            seed=self.config.seed,
+        )
+
         return {
             "input_video": str(self.input_video),
             "boom_seconds": self.metadata.boom_seconds,
             "video_duration": self.metadata.video_duration,
             "pendulum_count": self.metadata.config.pendulum_count,
+            "template": self.config.template,
+            "template_description": template.description,
+            "motion": {
+                "slow_zoom": template.motion.slow_zoom is not None,
+                "boom_punch": template.motion.boom_punch is not None,
+                "shake": template.motion.shake is not None,
+            } if template.motion else None,
+            "captions": [
+                {"text": cap.text, "start_ms": cap.start_ms, "end_ms": cap.end_ms}
+                for cap in resolved_captions
+            ],
             "config": {
-                "style": self.config.style,
                 "shorts": self.config.shorts,
-                "zoom": self.config.zoom,
-                "zoom_factor": self.config.zoom_factor,
-                "extract_thumbnails": self.config.extract_thumbnails,
+                "blurred_background": self.config.blurred_background,
                 "crf_quality": self.config.crf_quality,
-                "font_path": str(self.config.font_path) if self.config.font_path else None,
-            },
-            "score": {
-                "peak_causticness": self.metadata.score.peak_causticness if self.metadata.score else None,
-                "best_frame": self.metadata.score.best_frame if self.metadata.score else None,
             },
         }

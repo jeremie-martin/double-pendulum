@@ -12,17 +12,30 @@ from rich.table import Table
 
 from .models import VideoMetadata
 from .templates import (
-    CAPTION_STYLES,
     generate_all_titles,
     generate_description,
     generate_tags,
     generate_title,
 )
 from .uploader import CATEGORY_MUSIC, YouTubeUploader
-from .processing import ProcessingConfig, ProcessingPipeline
+from .processing import (
+    ProcessingConfig,
+    ProcessingPipeline,
+    TemplateLibrary,
+    load_template_system,
+)
 from .processing.thumbnails import extract_thumbnails
 
 console = Console()
+
+
+def get_template_names() -> list[str]:
+    """Get available template names, or empty list if config not found."""
+    try:
+        lib, _ = load_template_system()
+        return lib.list_templates()
+    except FileNotFoundError:
+        return []
 
 
 @click.group()
@@ -305,6 +318,54 @@ def preview(video_dir: Path):
     console.print(f"  {', '.join(tags)}")
 
 
+@main.command(name="list-templates")
+def list_templates():
+    """List all available processing templates.
+
+    Templates define motion effects (zoom, punch, shake) and caption timing.
+    """
+    try:
+        lib, pools = load_template_system()
+    except FileNotFoundError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise SystemExit(1)
+
+    console.print()
+    console.print("[bold]Available Templates:[/bold]")
+    console.print()
+
+    table = Table()
+    table.add_column("Name", style="cyan")
+    table.add_column("Description")
+    table.add_column("Motion", style="green")
+    table.add_column("Captions", style="yellow")
+
+    for name in lib.list_templates():
+        template = lib.get(name)
+
+        # Describe motion
+        motion_parts = []
+        if template.motion:
+            if template.motion.slow_zoom:
+                motion_parts.append("zoom")
+            if template.motion.boom_punch:
+                motion_parts.append("punch")
+            if template.motion.shake:
+                motion_parts.append("shake")
+        motion_str = ", ".join(motion_parts) if motion_parts else "none"
+
+        # Count captions
+        caption_count = len(template.captions)
+
+        table.add_row(name, template.description, motion_str, str(caption_count))
+
+    console.print(table)
+
+    console.print()
+    console.print("[bold]Available Text Pools:[/bold]")
+    console.print(f"  {', '.join(pools.list_pools())}")
+
+
 @main.command()
 @click.argument("video_dir", type=click.Path(exists=True, path_type=Path))
 @click.option(
@@ -315,11 +376,17 @@ def preview(video_dir: Path):
     help="Output directory (default: video_dir/processed/)",
 )
 @click.option(
-    "--style",
-    "-s",
-    type=click.Choice(list(CAPTION_STYLES.keys()) + ["random"]),
-    default="wait_for_it",
-    help="Caption style for text overlays",
+    "--template",
+    "-t",
+    type=str,
+    default="viral_science",
+    help="Template name (use 'random' for random selection, 'list-templates' to see options)",
+)
+@click.option(
+    "--seed",
+    type=int,
+    default=None,
+    help="Random seed for reproducible text selection",
 )
 @click.option(
     "--shorts",
@@ -327,26 +394,14 @@ def preview(video_dir: Path):
     help="Format for YouTube Shorts (pad to 9:16)",
 )
 @click.option(
-    "--zoom",
+    "--blur-bg",
     is_flag=True,
-    help="Add zoom punch-in effect around boom moment",
-)
-@click.option(
-    "--zoom-factor",
-    type=float,
-    default=1.3,
-    help="Maximum zoom level (1.3 = 30% zoom in)",
+    help="Use blurred video as background instead of black bars (Shorts only)",
 )
 @click.option(
     "--no-thumbnail",
     is_flag=True,
     help="Skip thumbnail extraction",
-)
-@click.option(
-    "--font",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="Custom font file for text overlays",
 )
 @click.option(
     "--quality",
@@ -367,41 +422,45 @@ def preview(video_dir: Path):
 def process(
     video_dir: Path,
     output: Path | None,
-    style: str,
+    template: str,
+    seed: int | None,
     shorts: bool,
-    zoom: bool,
-    zoom_factor: float,
+    blur_bg: bool,
     no_thumbnail: bool,
-    font: Path | None,
     quality: int,
     force: bool,
     dry_run: bool,
 ):
-    """Process video with text overlays, effects, and Shorts formatting.
+    """Process video with motion effects and text overlays.
 
-    Applies caption overlays, optional zoom effect, and can reformat
-    for YouTube Shorts (9:16 aspect ratio with padding).
+    Templates define motion effects (slow zoom, boom punch, shake) and
+    caption timing with randomly selected text from pools.
 
     Examples:
 
-        # Basic processing with default style
+        # Basic processing with default template
         pendulum-upload process /path/to/video_0000
 
-        # Full Shorts treatment
-        pendulum-upload process /path/to/video_0000 --shorts --zoom --style science
+        # Full Shorts treatment with blurred background
+        pendulum-upload process /path/to/video_0000 --shorts --blur-bg -t hype_mrbeast
+
+        # Use dramatic minimal template (motion only, no text)
+        pendulum-upload process /path/to/video_0000 -t dramatic_minimal
+
+        # Random template selection
+        pendulum-upload process /path/to/video_0000 -t random
 
         # Preview FFmpeg command
         pendulum-upload process /path/to/video_0000 --dry-run
     """
     # Build processing config
     config = ProcessingConfig(
-        style=style,
+        template=template,
+        seed=seed,
         shorts=shorts,
-        zoom=zoom,
-        zoom_factor=zoom_factor,
+        blurred_background=blur_bg,
         extract_thumbnails=not no_thumbnail,
         crf_quality=quality,
-        font_path=font,
     )
 
     # Initialize pipeline
@@ -415,17 +474,18 @@ def process(
     console.print()
     console.print("[bold]Processing Configuration:[/bold]")
     console.print(f"  Input: {video_dir}")
-    console.print(f"  Style: {style}")
+    console.print(f"  Template: {template}")
+    if seed is not None:
+        console.print(f"  Seed: {seed}")
     console.print(f"  Shorts mode: {'Yes' if shorts else 'No'}")
-    console.print(f"  Zoom effect: {'Yes' if zoom else 'No'}")
-    if zoom:
-        console.print(f"  Zoom factor: {zoom_factor}x")
+    if shorts:
+        console.print(f"  Blurred BG: {'Yes' if blur_bg else 'No'}")
     console.print(f"  Quality (CRF): {quality}")
 
     if pipeline.metadata.boom_seconds:
         console.print(f"  Boom at: {pipeline.metadata.boom_seconds:.2f}s")
     else:
-        console.print("  [yellow]Warning: No boom detected, timed effects may be skipped[/yellow]")
+        console.print("  [yellow]Warning: No boom detected, motion effects may be skipped[/yellow]")
 
     if pipeline.metadata.score:
         console.print(f"  Peak causticness: {pipeline.metadata.score.peak_causticness:.4f}")
@@ -447,11 +507,18 @@ def process(
         console.print("[bold]FFmpeg Command (dry run):[/bold]")
         console.print()
         console.print(Panel(result.ffmpeg_command or "", title="FFmpeg"))
+        console.print()
+        console.print(f"[bold]Template used:[/bold] {result.template_used}")
+        if result.captions_text:
+            console.print("[bold]Captions:[/bold]")
+            for text in result.captions_text:
+                console.print(f"  - {text}")
         return
 
     if result.success:
         console.print("[green]Processing complete![/green]")
         console.print(f"  Output: {result.output_dir}")
+        console.print(f"  Template: {result.template_used}")
         if result.video_path:
             size_mb = result.video_path.stat().st_size / 1024 / 1024
             console.print(f"  Video: {result.video_path.name} ({size_mb:.1f} MB)")
@@ -459,6 +526,10 @@ def process(
             console.print(f"  Thumbnails: {len(result.thumbnails)} extracted")
             for thumb in result.thumbnails:
                 console.print(f"    - {thumb.name}")
+        if result.captions_text:
+            console.print("  Captions:")
+            for text in result.captions_text:
+                console.print(f"    - {text}")
     else:
         console.print(f"[red]Processing failed:[/red] {result.error}")
         if result.ffmpeg_command:
@@ -557,11 +628,11 @@ def thumbnail(video_dir: Path, output: Path | None, timestamps: str):
 @main.command(name="batch-process")
 @click.argument("batch_dir", type=click.Path(exists=True, path_type=Path))
 @click.option(
-    "--style",
-    "-s",
-    type=click.Choice(list(CAPTION_STYLES.keys()) + ["random"]),
+    "--template",
+    "-t",
+    type=str,
     default="random",
-    help="Caption style (random = different style per video)",
+    help="Template name ('random' = different template per video)",
 )
 @click.option(
     "--shorts",
@@ -569,9 +640,9 @@ def thumbnail(video_dir: Path, output: Path | None, timestamps: str):
     help="Format for YouTube Shorts (pad to 9:16)",
 )
 @click.option(
-    "--zoom",
+    "--blur-bg",
     is_flag=True,
-    help="Add zoom punch-in effect around boom moment",
+    help="Use blurred video as background instead of black bars",
 )
 @click.option(
     "--limit",
@@ -592,9 +663,9 @@ def thumbnail(video_dir: Path, output: Path | None, timestamps: str):
 )
 def batch_process(
     batch_dir: Path,
-    style: str,
+    template: str,
     shorts: bool,
-    zoom: bool,
+    blur_bg: bool,
     limit: int | None,
     force: bool,
     dry_run: bool,
@@ -606,11 +677,14 @@ def batch_process(
 
     Examples:
 
-        # Process entire batch for Shorts
-        pendulum-upload batch-process /path/to/batch_output --shorts --zoom
+        # Process entire batch for Shorts with blurred background
+        pendulum-upload batch-process /path/to/batch_output --shorts --blur-bg
 
-        # Process first 5 videos with random styles
-        pendulum-upload batch-process /path/to/batch_output --limit 5 --style random
+        # Process first 5 videos with random templates
+        pendulum-upload batch-process /path/to/batch_output --limit 5 -t random
+
+        # Use specific template for all
+        pendulum-upload batch-process /path/to/batch_output -t hype_mrbeast
     """
     # Find all video directories
     video_dirs = []
@@ -628,19 +702,21 @@ def batch_process(
         return
 
     console.print(f"Found [bold]{len(video_dirs)}[/bold] videos to process")
-    console.print(f"  Style: {style}")
+    console.print(f"  Template: {template}")
     console.print(f"  Shorts: {'Yes' if shorts else 'No'}")
-    console.print(f"  Zoom: {'Yes' if zoom else 'No'}")
+    console.print(f"  Blurred BG: {'Yes' if blur_bg else 'No'}")
     console.print()
 
     results = []
     for i, video_dir in enumerate(video_dirs, 1):
         console.print(f"[bold]Video {i}/{len(video_dirs)}:[/bold] {video_dir.name}")
 
+        # Use video index as seed for reproducible random selection
         config = ProcessingConfig(
-            style=style,
+            template=template,
+            seed=i if template == "random" else None,
             shorts=shorts,
-            zoom=zoom,
+            blurred_background=blur_bg,
             extract_thumbnails=True,
         )
 
@@ -650,8 +726,8 @@ def batch_process(
 
             if result.success:
                 status = "DRY RUN" if dry_run else "OK"
-                console.print(f"  [green]{status}[/green]")
-                results.append((video_dir.name, True, str(result.output_dir)))
+                console.print(f"  [green]{status}[/green] (template: {result.template_used})")
+                results.append((video_dir.name, True, result.template_used or template))
             else:
                 console.print(f"  [red]FAILED:[/red] {result.error}")
                 results.append((video_dir.name, False, result.error or "Unknown error"))
@@ -665,7 +741,7 @@ def batch_process(
     table = Table(title="Processing Summary")
     table.add_column("Video", style="cyan")
     table.add_column("Status", style="green")
-    table.add_column("Output/Error")
+    table.add_column("Template/Error")
 
     for name, success, info in results:
         if success:
