@@ -1,14 +1,18 @@
-#include "simulation.h"
-#include "music_manager.h"
 #include "batch_generator.h"
+#include "music_manager.h"
+#include "simulation.h"
+
+#include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <string>
-#include <cstring>
 
 void printUsage(char const* program) {
     std::cout << "Double Pendulum Simulation\n\n"
               << "Usage:\n"
               << "  " << program << " [config.toml]           Run simulation\n"
+              << "  " << program << " [config.toml] --music <track-id|random>\n"
+              << "                                      Run simulation with music\n"
               << "  " << program << " --batch <batch.toml>    Run batch generation\n"
               << "  " << program << " --batch <batch.toml> --resume\n"
               << "                                      Resume batch generation\n"
@@ -18,19 +22,22 @@ void printUsage(char const* program) {
               << "  " << program << " -h, --help              Show this help\n\n"
               << "Examples:\n"
               << "  " << program << " config/default.toml\n"
+              << "  " << program << " config/default.toml --music random\n"
+              << "  " << program << " config/default.toml --music petrunko\n"
               << "  " << program << " --batch config/batch.toml\n"
               << "  " << program << " --batch config/batch.toml --resume\n"
               << "  " << program << " --add-music output/run_xxx/video.mp4 petrunko 32 60\n"
               << "  " << program << " --list-tracks\n";
 }
 
-int runSimulation(std::string const& config_path) {
+int runSimulation(std::string const& config_path, std::string const& music_track = "") {
     // Load configuration
     std::cout << "Loading config from: " << config_path << "\n";
     Config config = Config::load(config_path);
 
     // Calculate video duration
-    double video_duration = static_cast<double>(config.simulation.total_frames) / config.output.video_fps;
+    double video_duration =
+        static_cast<double>(config.simulation.total_frames) / config.output.video_fps;
 
     // Print config summary
     std::cout << "\nSimulation parameters:\n"
@@ -39,11 +46,57 @@ int runSimulation(std::string const& config_path) {
               << "  Frames: " << config.simulation.total_frames << "\n"
               << "  Video: " << video_duration << "s @ " << config.output.video_fps << " FPS\n"
               << "  Resolution: " << config.render.width << "x" << config.render.height << "\n"
-              << "  Output: " << config.output.directory << "/\n\n";
+              << "  Output: " << config.output.directory << "/\n";
+
+    if (!music_track.empty()) {
+        std::cout << "  Music: " << music_track << "\n";
+    }
+    std::cout << "\n";
 
     // Run simulation
     Simulation sim(config);
-    sim.run();
+    auto results = sim.run();
+
+    // Add music if requested and we have a video with boom_frame
+    if (!music_track.empty() && !results.video_path.empty() && results.boom_frame) {
+        MusicManager music;
+        if (!music.load("music")) {
+            std::cerr << "Failed to load music database\n";
+            return 1;
+        }
+
+        std::optional<MusicTrack> track;
+        if (music_track == "random") {
+            if (music.trackCount() > 0) {
+                track = music.randomTrack();
+            }
+        } else {
+            track = music.getTrack(music_track);
+        }
+
+        if (!track) {
+            std::cerr << "Track not found: " << music_track << "\n";
+            std::cerr << "Use --list-tracks to see available tracks\n";
+            return 1;
+        }
+
+        std::filesystem::path video_path = results.video_path;
+        std::filesystem::path output_path =
+            video_path.parent_path() / (video_path.stem().string() + "_with_music.mp4");
+
+        std::cout << "\nAdding music: " << track->title << "\n";
+        if (MusicManager::muxWithAudio(video_path, track->filepath, output_path,
+                                       *results.boom_frame, track->drop_time_ms,
+                                       config.output.video_fps)) {
+            // Replace original with muxed version
+            std::filesystem::remove(video_path);
+            std::filesystem::rename(output_path, video_path);
+            std::cout << "Music added successfully!\n";
+        } else {
+            std::cerr << "Failed to add music\n";
+            return 1;
+        }
+    }
 
     return 0;
 }
@@ -60,15 +113,14 @@ int listTracks() {
         std::cout << "  " << track.id << "\n"
                   << "    Title: " << track.title << "\n"
                   << "    File: " << track.filepath << "\n"
-                  << "    Drop: " << track.drop_time_ms << "ms ("
-                  << track.dropTimeSeconds() << "s)\n\n";
+                  << "    Drop: " << track.drop_time_ms << "ms (" << track.dropTimeSeconds()
+                  << "s)\n\n";
     }
 
     return 0;
 }
 
-int addMusic(std::string const& video_path, std::string const& track_id,
-             int boom_frame, int fps) {
+int addMusic(std::string const& video_path, std::string const& track_id, int boom_frame, int fps) {
     MusicManager music;
     if (!music.load("music")) {
         std::cerr << "Failed to load music database\n";
@@ -84,17 +136,11 @@ int addMusic(std::string const& video_path, std::string const& track_id,
 
     // Generate output path
     std::filesystem::path video(video_path);
-    std::filesystem::path output = video.parent_path() /
-        (video.stem().string() + "_with_music" + video.extension().string());
+    std::filesystem::path output =
+        video.parent_path() / (video.stem().string() + "_with_music" + video.extension().string());
 
-    bool success = MusicManager::muxWithAudio(
-        video_path,
-        track->filepath,
-        output,
-        boom_frame,
-        track->drop_time_ms,
-        fps
-    );
+    bool success = MusicManager::muxWithAudio(video_path, track->filepath, output, boom_frame,
+                                              track->drop_time_ms, fps);
 
     return success ? 0 : 1;
 }
@@ -155,5 +201,14 @@ int main(int argc, char* argv[]) {
     }
 
     // Otherwise, treat argument as config path
-    return runSimulation(arg);
+    // Check for --music option
+    std::string music_track;
+    for (int i = 2; i < argc; ++i) {
+        if (std::string(argv[i]) == "--music" && i + 1 < argc) {
+            music_track = argv[i + 1];
+            break;
+        }
+    }
+
+    return runSimulation(arg, music_track);
 }

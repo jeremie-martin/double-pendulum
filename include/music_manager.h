@@ -12,7 +12,7 @@ struct MusicTrack {
     std::string id;
     std::string title;
     fs::path filepath;
-    int drop_time_ms;  // Time of the "drop" in milliseconds
+    int drop_time_ms; // Time of the "drop" in milliseconds
 
     // Convert drop time to seconds
     double dropTimeSeconds() const { return drop_time_ms / 1000.0; }
@@ -38,14 +38,9 @@ public:
 
     // Mux video with audio, aligning boom frame with music drop
     // Returns true on success
-    static bool muxWithAudio(
-        fs::path const& video_path,
-        fs::path const& audio_path,
-        fs::path const& output_path,
-        int boom_frame,
-        int drop_time_ms,
-        int video_fps
-    );
+    static bool muxWithAudio(fs::path const& video_path, fs::path const& audio_path,
+                             fs::path const& output_path, int boom_frame, int drop_time_ms,
+                             int video_fps);
 
 private:
     std::vector<MusicTrack> tracks_;

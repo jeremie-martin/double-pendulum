@@ -1,12 +1,13 @@
 #include "batch_generator.h"
+
 #include "simulation.h"
 
-#include <toml.hpp>
 #include <chrono>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <toml.hpp>
 
 BatchConfig BatchConfig::load(std::string const& path) {
     BatchConfig config;
@@ -77,7 +78,8 @@ BatchConfig BatchConfig::load(std::string const& path) {
 
 void BatchProgress::save(std::filesystem::path const& path) const {
     std::ofstream out(path);
-    if (!out) return;
+    if (!out)
+        return;
 
     out << "{\n";
     out << "  \"total\": " << total << ",\n";
@@ -85,13 +87,15 @@ void BatchProgress::save(std::filesystem::path const& path) const {
     out << "  \"failed\": " << failed << ",\n";
     out << "  \"completed_ids\": [";
     for (size_t i = 0; i < completed_ids.size(); ++i) {
-        if (i > 0) out << ", ";
+        if (i > 0)
+            out << ", ";
         out << "\"" << completed_ids[i] << "\"";
     }
     out << "],\n";
     out << "  \"failed_ids\": [";
     for (size_t i = 0; i < failed_ids.size(); ++i) {
-        if (i > 0) out << ", ";
+        if (i > 0)
+            out << ", ";
         out << "\"" << failed_ids[i] << "\"";
     }
     out << "]\n";
@@ -102,11 +106,11 @@ BatchProgress BatchProgress::load(std::filesystem::path const& path) {
     BatchProgress progress;
 
     std::ifstream in(path);
-    if (!in) return progress;
+    if (!in)
+        return progress;
 
     // Simple JSON parsing (just extract numbers and strings)
-    std::string content((std::istreambuf_iterator<char>(in)),
-                         std::istreambuf_iterator<char>());
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 
     // Parse total
     auto pos = content.find("\"total\":");
@@ -139,7 +143,8 @@ BatchProgress BatchProgress::load(std::filesystem::path const& path) {
                 if (j != std::string::npos) {
                     progress.completed_ids.push_back(arr.substr(i + 1, j - i - 1));
                     i = j + 1;
-                } else break;
+                } else
+                    break;
             }
         }
     }
@@ -148,8 +153,7 @@ BatchProgress BatchProgress::load(std::filesystem::path const& path) {
 }
 
 BatchGenerator::BatchGenerator(BatchConfig const& config)
-    : config_(config),
-      rng_(std::random_device{}()) {}
+    : config_(config), rng_(std::random_device{}()) {}
 
 void BatchGenerator::setupBatchDirectory() {
     // Create timestamp-based batch directory
@@ -158,8 +162,7 @@ void BatchGenerator::setupBatchDirectory() {
     std::tm tm = *std::localtime(&time);
 
     std::ostringstream dir_name;
-    dir_name << config_.output_directory << "/batch_"
-             << std::put_time(&tm, "%Y%m%d_%H%M%S");
+    dir_name << config_.output_directory << "/batch_" << std::put_time(&tm, "%Y%m%d_%H%M%S");
 
     batch_dir_ = dir_name.str();
     std::filesystem::create_directories(batch_dir_);
@@ -277,13 +280,25 @@ bool BatchGenerator::generateOne(int index) {
 
         // Run simulation
         Simulation sim(config);
-        sim.run([](int current, int total) {
+        auto results = sim.run([](int current, int total) {
             std::cout << "\rFrame " << current << "/" << total << std::flush;
         });
 
-        // Get boom frame from metadata (need to read it back)
-        std::string metadata_path = config.output.directory + "/run_*/metadata.json";
-        // For now, skip music muxing - can be done separately
+        // Mux with music if we have tracks and a boom frame
+        if (auto track = pickMusicTrack(); track && results.boom_frame) {
+            std::filesystem::path video_path = results.video_path;
+            std::filesystem::path output_path =
+                video_path.parent_path() / (video_path.stem().string() + "_with_music.mp4");
+
+            std::cout << "\nAdding music: " << track->title << "\n";
+            if (MusicManager::muxWithAudio(video_path, track->filepath, output_path,
+                                           *results.boom_frame, track->drop_time_ms,
+                                           config.output.video_fps)) {
+                // Replace original with muxed version
+                std::filesystem::remove(video_path);
+                std::filesystem::rename(output_path, video_path);
+            }
+        }
 
         std::string video_id = "video_" + std::to_string(index);
         progress_.completed_ids.push_back(video_id);
@@ -302,12 +317,12 @@ Config BatchGenerator::generateRandomConfig() {
     Config config = config_.base_config;
 
     // Randomize angles within ranges
-    std::uniform_real_distribution<double> angle1_dist(
-        config_.angle1_range.min, config_.angle1_range.max);
-    std::uniform_real_distribution<double> angle2_dist(
-        config_.angle2_range.min, config_.angle2_range.max);
-    std::uniform_real_distribution<double> variation_dist(
-        config_.variation_range.min, config_.variation_range.max);
+    std::uniform_real_distribution<double> angle1_dist(config_.angle1_range.min,
+                                                       config_.angle1_range.max);
+    std::uniform_real_distribution<double> angle2_dist(config_.angle2_range.min,
+                                                       config_.angle2_range.max);
+    std::uniform_real_distribution<double> variation_dist(config_.variation_range.min,
+                                                          config_.variation_range.max);
 
     config.physics.initial_angle1 = deg2rad(angle1_dist(rng_));
     config.physics.initial_angle2 = deg2rad(angle2_dist(rng_));

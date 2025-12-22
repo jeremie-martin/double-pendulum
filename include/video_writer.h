@@ -1,9 +1,10 @@
 #pragma once
 
 #include "config.h"
-#include <string>
-#include <cstdio>
+
 #include <cstdint>
+#include <cstdio>
+#include <string>
 
 class VideoWriter {
 public:

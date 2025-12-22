@@ -1,50 +1,19 @@
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-data/
-obj/
+# Build
 build/
+obj/
+*.o
+*.a
+
+# Output
 output/
-
-pendulum
-pendulum-gui
-
+batch_output/
+data/
 *.mp4
 *.webm
-*.mp3
-*.aac
 *.png
-*.wav
+
+# Music files (keep database.json, ignore actual audio)
+music/tracks/
 
 # Config overrides
 *.toml.local
@@ -53,17 +22,17 @@ pendulum-gui
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
-compile_commands.json
 Makefile
 
 # IDE/Editor
 .cache/
 .vscode/
 .idea/
+compile_commands.json
 
 # ImGui
 imgui.ini
 
-# Old output directories
+# Legacy
 fds/
 test/

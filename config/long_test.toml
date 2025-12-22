@@ -11,9 +11,9 @@ initial_angle2_deg = 200.0
 [simulation]
 pendulum_count = 10000       # Reduced for quick test
 angle_variation_deg = 0.1
-duration_seconds = 20.0      # Just 20 second of physics
-total_frames = 300           # 300 frames output (5s at 60 FPS)
-substeps_per_frame = 20
+duration_seconds = 15.0      # Just 20 second of physics
+total_frames = 1800           # 300 frames output (5s at 60 FPS)
+substeps_per_frame = 40
 
 [render]
 width = 1080
@@ -30,7 +30,7 @@ start = 0.0
 end = 1.0
 
 [detection]
-boom_threshold = 1.0
+boom_threshold = 2.0
 white_threshold = 500
 
 [output]
@@ -38,3 +38,4 @@ format = "video"
 directory = "output/long_test"
 filename_prefix = "frame"
 video_fps = 60              # Lower FPS for test videos
+video_crf = 20

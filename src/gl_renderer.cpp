@@ -1,7 +1,8 @@
 #include "gl_renderer.h"
+
 #include <GL/glew.h>
-#include <cmath>
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 
 // Vertex shader - simple passthrough
@@ -120,7 +121,8 @@ bool GLRenderer::createFramebuffer() {
     // Create display texture (8-bit for ImGui)
     glGenTextures(1, &display_texture_);
     glBindTexture(GL_TEXTURE_2D, display_texture_);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width_, height_, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width_, height_, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                 nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
@@ -193,7 +195,8 @@ void GLRenderer::deleteFramebuffer() {
 }
 
 void GLRenderer::resize(int width, int height) {
-    if (width == width_ && height == height_) return;
+    if (width == width_ && height == height_)
+        return;
 
     width_ = width;
     height_ = height;
@@ -211,15 +214,14 @@ void GLRenderer::clear() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void GLRenderer::drawLine(float x0, float y0, float x1, float y1,
-                          float r, float g, float b, float intensity) {
+void GLRenderer::drawLine(float x0, float y0, float x1, float y1, float r, float g, float b,
+                          float intensity) {
     // Rasterize line with anti-aliasing
-    auto pixels = rasterizeLine(
-        static_cast<int>(x0), static_cast<int>(y0),
-        static_cast<int>(x1), static_cast<int>(y1)
-    );
+    auto pixels = rasterizeLine(static_cast<int>(x0), static_cast<int>(y0), static_cast<int>(x1),
+                                static_cast<int>(y1));
 
-    if (pixels.empty()) return;
+    if (pixels.empty())
+        return;
 
     // Build vertex data: each pixel becomes a point
     std::vector<float> vertices;
@@ -243,16 +245,16 @@ void GLRenderer::drawLine(float x0, float y0, float x1, float y1,
     glViewport(0, 0, width_, height_);
 
     glEnable(GL_BLEND);
-    glBlendFunc(GL_ONE, GL_ONE);  // Additive blending
+    glBlendFunc(GL_ONE, GL_ONE); // Additive blending
 
     glUseProgram(shader_program_);
-    glUniform2f(glGetUniformLocation(shader_program_, "uResolution"),
-                static_cast<float>(width_), static_cast<float>(height_));
+    glUniform2f(glGetUniformLocation(shader_program_, "uResolution"), static_cast<float>(width_),
+                static_cast<float>(height_));
 
     glBindVertexArray(vao_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float),
-                 vertices.data(), GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(),
+                 GL_DYNAMIC_DRAW);
 
     glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(pixels.size()));
 
@@ -276,7 +278,8 @@ void GLRenderer::readPixels(std::vector<uint8_t>& out, float gamma) {
         max_val = std::max(max_val, float_buffer_[i + 2]);
     }
 
-    if (max_val < 0.001f) max_val = 1.0f;
+    if (max_val < 0.001f)
+        max_val = 1.0f;
 
     // Normalize and apply gamma
     float inv_gamma = 1.0f / gamma;
@@ -308,7 +311,8 @@ void GLRenderer::updateDisplayTexture(float exposure, float contrast, float gamm
         max_val = std::max(max_val, float_buffer_[i + 2]); // B
     }
 
-    if (max_val < 1e-6f) max_val = 1.0f;
+    if (max_val < 1e-6f)
+        max_val = 1.0f;
 
     // Precompute exposure multiplier and inverse gamma
     float exposure_mult = std::pow(2.0f, exposure);
@@ -350,8 +354,8 @@ void GLRenderer::updateDisplayTexture(float exposure, float contrast, float gamm
 
     // Upload to display texture
     glBindTexture(GL_TEXTURE_2D, display_texture_);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width_, height_,
-                    GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width_, height_, GL_RGBA, GL_UNSIGNED_BYTE,
+                    rgba.data());
 }
 
 // Xiaolin Wu anti-aliased line rasterization with intensity normalization
@@ -414,14 +418,18 @@ std::vector<LinePixel> rasterizeLine(int x0, int y0, int x1, int y1) {
     // Main loop
     if (steep) {
         for (int x = xpxl1 + 1; x < xpxl2; ++x) {
-            pixels.push_back({static_cast<int>(ipart(intery)), x, rfpart(intery) * intensity_scale});
-            pixels.push_back({static_cast<int>(ipart(intery)) + 1, x, fpart(intery) * intensity_scale});
+            pixels.push_back(
+                {static_cast<int>(ipart(intery)), x, rfpart(intery) * intensity_scale});
+            pixels.push_back(
+                {static_cast<int>(ipart(intery)) + 1, x, fpart(intery) * intensity_scale});
             intery += gradient;
         }
     } else {
         for (int x = xpxl1 + 1; x < xpxl2; ++x) {
-            pixels.push_back({x, static_cast<int>(ipart(intery)), rfpart(intery) * intensity_scale});
-            pixels.push_back({x, static_cast<int>(ipart(intery)) + 1, fpart(intery) * intensity_scale});
+            pixels.push_back(
+                {x, static_cast<int>(ipart(intery)), rfpart(intery) * intensity_scale});
+            pixels.push_back(
+                {x, static_cast<int>(ipart(intery)) + 1, fpart(intery) * intensity_scale});
             intery += gradient;
         }
     }

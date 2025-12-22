@@ -1,30 +1,37 @@
 #include "config.h"
-#include <toml.hpp>
-#include <iostream>
+
 #include <filesystem>
+#include <iostream>
+#include <toml.hpp>
 
 namespace {
 
 ColorScheme parseColorScheme(std::string const& str) {
-    if (str == "spectrum") return ColorScheme::Spectrum;
-    if (str == "rainbow") return ColorScheme::Rainbow;
-    if (str == "heat") return ColorScheme::Heat;
-    if (str == "cool") return ColorScheme::Cool;
-    if (str == "monochrome") return ColorScheme::Monochrome;
+    if (str == "spectrum")
+        return ColorScheme::Spectrum;
+    if (str == "rainbow")
+        return ColorScheme::Rainbow;
+    if (str == "heat")
+        return ColorScheme::Heat;
+    if (str == "cool")
+        return ColorScheme::Cool;
+    if (str == "monochrome")
+        return ColorScheme::Monochrome;
     std::cerr << "Unknown color scheme: " << str << ", using spectrum\n";
     return ColorScheme::Spectrum;
 }
 
 OutputFormat parseOutputFormat(std::string const& str) {
-    if (str == "png") return OutputFormat::PNG;
-    if (str == "video") return OutputFormat::Video;
+    if (str == "png")
+        return OutputFormat::PNG;
+    if (str == "video")
+        return OutputFormat::Video;
     std::cerr << "Unknown output format: " << str << ", using png\n";
     return OutputFormat::PNG;
 }
 
 // Safe value extraction helpers
-template<typename T>
-T get_or(toml::table const& tbl, std::string_view key, T default_val) {
+template <typename T> T get_or(toml::table const& tbl, std::string_view key, T default_val) {
     if (auto node = tbl.get(key)) {
         if (auto val = node->value<T>()) {
             return *val;
@@ -109,7 +116,8 @@ Config Config::load(std::string const& path) {
             config.detection.boom_confirmation = get_or(*detect, "boom_confirmation", 10);
             config.detection.white_threshold = get_or(*detect, "white_threshold", 700.0);
             config.detection.white_confirmation = get_or(*detect, "white_confirmation", 10);
-            config.detection.early_stop_after_white = get_or(*detect, "early_stop_after_white", false);
+            config.detection.early_stop_after_white =
+                get_or(*detect, "early_stop_after_white", false);
         }
 
         // Output

@@ -4,8 +4,12 @@
 #include <string>
 
 // Conversion utilities
-inline double deg2rad(double degrees) { return degrees * M_PI / 180.0; }
-inline double rad2deg(double radians) { return radians * 180.0 / M_PI; }
+inline double deg2rad(double degrees) {
+    return degrees * M_PI / 180.0;
+}
+inline double rad2deg(double radians) {
+    return radians * 180.0 / M_PI;
+}
 
 struct PhysicsParams {
     double gravity = 9.81;
@@ -13,17 +17,17 @@ struct PhysicsParams {
     double length2 = 1.0;
     double mass1 = 1.0;
     double mass2 = 1.0;
-    double initial_angle1 = deg2rad(-32.2);  // radians
-    double initial_angle2 = deg2rad(-32.0);  // radians
+    double initial_angle1 = deg2rad(-32.2); // radians
+    double initial_angle2 = deg2rad(-32.0); // radians
     double initial_velocity1 = 0.0;
     double initial_velocity2 = 0.0;
 };
 
 struct SimulationParams {
     int pendulum_count = 100000;
-    double angle_variation = deg2rad(0.1);  // radians
-    double duration_seconds = 11.0;          // physical simulation time
-    int total_frames = 660;                  // number of frames to output
+    double angle_variation = deg2rad(0.1); // radians
+    double duration_seconds = 11.0;        // physical simulation time
+    int total_frames = 660;                // number of frames to output
     int substeps_per_frame = 20;
 
     // Physics timestep: duration / (frames * substeps)
@@ -33,7 +37,7 @@ struct SimulationParams {
 struct RenderParams {
     int width = 2160;
     int height = 2160;
-    int thread_count = 0;  // 0 = auto
+    int thread_count = 0; // 0 = auto
 };
 
 struct PostProcessParams {
@@ -46,38 +50,29 @@ struct PostProcessParams {
     double gamma = 2.2;
 };
 
-enum class ColorScheme {
-    Spectrum,
-    Rainbow,
-    Heat,
-    Cool,
-    Monochrome
-};
+enum class ColorScheme { Spectrum, Rainbow, Heat, Cool, Monochrome };
 
 struct ColorParams {
     ColorScheme scheme = ColorScheme::Spectrum;
-    double start = 0.0;  // Range start [0, 1]
-    double end = 1.0;    // Range end [0, 1]
+    double start = 0.0; // Range start [0, 1]
+    double end = 1.0;   // Range end [0, 1]
 };
 
 // Thresholds for detecting events from variance data
 struct DetectionParams {
     // "Boom" threshold: when variance exceeds this, chaos has begun
-    double boom_threshold = 0.1;      // radians^2
-    int boom_confirmation = 10;       // Consecutive frames above threshold
+    double boom_threshold = 0.1; // radians^2
+    int boom_confirmation = 10;  // Consecutive frames above threshold
 
     // "White" threshold: when variance exceeds this, full chaos/noise
-    double white_threshold = 700.0;   // radians^2
-    int white_confirmation = 10;      // Consecutive frames above threshold
+    double white_threshold = 700.0; // radians^2
+    int white_confirmation = 10;    // Consecutive frames above threshold
 
     // Early stopping
     bool early_stop_after_white = false;
 };
 
-enum class OutputFormat {
-    PNG,
-    Video
-};
+enum class OutputFormat { PNG, Video };
 
 struct OutputParams {
     OutputFormat format = OutputFormat::PNG;
@@ -85,7 +80,7 @@ struct OutputParams {
     std::string filename_prefix = "frame";
     std::string video_codec = "libx264";
     int video_crf = 23;
-    int video_fps = 60;  // Only affects video encoding, not simulation
+    int video_fps = 60; // Only affects video encoding, not simulation
 };
 
 struct Config {

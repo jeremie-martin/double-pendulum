@@ -4,20 +4,18 @@
 #include <vector>
 
 struct PendulumState {
-    double x1, y1, x2, y2;  // Cartesian positions
-    double th1, th2;         // Angles (for boom detection)
+    double x1, y1, x2, y2; // Cartesian positions
+    double th1, th2;       // Angles (for boom detection)
 };
 
 class Pendulum {
 public:
     Pendulum()
-        : G(9.81), L1(1.0), L2(1.0), M1(1.0), M2(1.0),
-          th1(0.0), th2(0.0), w1(0.0), w2(0.0) {}
+        : G(9.81), L1(1.0), L2(1.0), M1(1.0), M2(1.0), th1(0.0), th2(0.0), w1(0.0), w2(0.0) {}
 
-    Pendulum(double G, double L1, double L2, double M1, double M2,
-             double th1, double th2, double w1, double w2)
-        : G(G), L1(L1), L2(L2), M1(M1), M2(M2),
-          th1(th1), th2(th2), w1(w1), w2(w2) {}
+    Pendulum(double G, double L1, double L2, double M1, double M2, double th1, double th2,
+             double w1, double w2)
+        : G(G), L1(L1), L2(L2), M1(M1), M2(M2), th1(th1), th2(th2), w1(w1), w2(w2) {}
 
     // RK4 integration step - more accurate than Euler
     PendulumState step(double dt) {
@@ -65,9 +63,7 @@ public:
     }
 
     // Get current state without stepping
-    PendulumState currentState() const {
-        return computeState();
-    }
+    PendulumState currentState() const { return computeState(); }
 
     // Accessors
     double getTheta1() const { return th1; }
@@ -80,8 +76,8 @@ private:
     double th1, th2, w1, w2;
 
     // Compute angular accelerations using Lagrangian mechanics
-    std::pair<double, double> accelerations(double theta1, double theta2,
-                                             double omega1, double omega2) const {
+    std::pair<double, double> accelerations(double theta1, double theta2, double omega1,
+                                            double omega2) const {
         // Angular acceleration of first pendulum
         double num1 = -G * (2 * M1 + M2) * std::sin(theta1);
         double num2 = -M2 * G * std::sin(theta1 - 2 * theta2);

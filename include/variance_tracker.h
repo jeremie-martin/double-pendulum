@@ -1,9 +1,9 @@
 #pragma once
 
-#include <vector>
-#include <cmath>
 #include <algorithm>
+#include <cmath>
 #include <numeric>
+#include <vector>
 
 // Simple variance tracker - computes and stores variance history
 // All detection logic (boom, white, thresholds) is external
@@ -64,11 +64,8 @@ namespace VarianceUtils {
 
 // Check if variance has been above threshold for N consecutive frames
 // Returns the frame where threshold was first crossed, or -1 if not met
-inline int checkThresholdCrossing(
-    std::vector<double> const& history,
-    double threshold,
-    int confirmation_frames
-) {
+inline int checkThresholdCrossing(std::vector<double> const& history, double threshold,
+                                  int confirmation_frames) {
     if (history.size() < static_cast<size_t>(confirmation_frames)) {
         return -1;
     }

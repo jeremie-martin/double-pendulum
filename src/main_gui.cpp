@@ -7,21 +7,19 @@
 
 #include <GL/glew.h>
 #include <SDL2/SDL.h>
-#include <imgui.h>
-#include <imgui_impl_opengl3.h>
-#include <imgui_impl_sdl2.h>
-
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <imgui.h>
+#include <imgui_impl_opengl3.h>
+#include <imgui_impl_sdl2.h>
 #include <iostream>
 #include <mutex>
 #include <thread>
 #include <vector>
 
 // Preview parameters (lower resolution for real-time)
-struct PreviewParams
-{
+struct PreviewParams {
     int width = 540;
     int height = 540;
     int pendulum_count = 10000;
@@ -29,8 +27,7 @@ struct PreviewParams
 };
 
 // Export state (thread-safe)
-struct ExportState
-{
+struct ExportState {
     std::atomic<bool> active{false};
     std::atomic<bool> cancel_requested{false};
     std::atomic<int> current_frame{0};
@@ -52,8 +49,7 @@ struct ExportState
 };
 
 // Application state
-struct AppState
-{
+struct AppState {
     Config config;
     PreviewParams preview;
 
@@ -65,15 +61,15 @@ struct AppState
 
     // Frame history for timeline scrubbing
     std::vector<std::vector<PendulumState>> frame_history;
-    int max_history_frames = 1000;  // Limit memory usage
+    int max_history_frames = 1000; // Limit memory usage
 
     // Control
     bool running = false;
     bool paused = false;
-    bool needs_redraw = false;  // For re-rendering when paused
+    bool needs_redraw = false; // For re-rendering when paused
     int current_frame = 0;
-    int display_frame = 0;      // Frame being displayed (for timeline scrubbing)
-    bool scrubbing = false;     // True when user is dragging timeline
+    int display_frame = 0;  // Frame being displayed (for timeline scrubbing)
+    bool scrubbing = false; // True when user is dragging timeline
 
     // Detection results
     std::optional<int> boom_frame;
@@ -107,16 +103,10 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
         double th1 = center_angle - variation / 2 + t * variation;
 
         state.pendulums[i] = Pendulum(
-            state.config.physics.gravity,
-            state.config.physics.length1,
-            state.config.physics.length2,
-            state.config.physics.mass1,
-            state.config.physics.mass2,
-            th1,
-            state.config.physics.initial_angle2,
-            state.config.physics.initial_velocity1,
-            state.config.physics.initial_velocity2
-        );
+            state.config.physics.gravity, state.config.physics.length1,
+            state.config.physics.length2, state.config.physics.mass1, state.config.physics.mass2,
+            th1, state.config.physics.initial_angle2, state.config.physics.initial_velocity1,
+            state.config.physics.initial_velocity2);
 
         state.colors[i] = color_gen.getColorForIndex(i, n);
     }
@@ -138,8 +128,10 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
 }
 
 // Render a given set of states
-void renderStates(AppState& state, GLRenderer& renderer, std::vector<PendulumState> const& states_to_render) {
-    if (!state.running || states_to_render.empty()) return;
+void renderStates(AppState& state, GLRenderer& renderer,
+                  std::vector<PendulumState> const& states_to_render) {
+    if (!state.running || states_to_render.empty())
+        return;
 
     auto render_start = std::chrono::high_resolution_clock::now();
 
@@ -165,13 +157,13 @@ void renderStates(AppState& state, GLRenderer& renderer, std::vector<PendulumSta
         renderer.drawLine(x1, y1, x2, y2, c.r / 255.0f, c.g / 255.0f, c.b / 255.0f);
     }
 
-    renderer.updateDisplayTexture(
-        static_cast<float>(state.config.post_process.exposure),
-        static_cast<float>(state.config.post_process.contrast),
-        static_cast<float>(state.config.post_process.gamma));
+    renderer.updateDisplayTexture(static_cast<float>(state.config.post_process.exposure),
+                                  static_cast<float>(state.config.post_process.contrast),
+                                  static_cast<float>(state.config.post_process.gamma));
 
     auto render_end = std::chrono::high_resolution_clock::now();
-    state.render_time_ms = std::chrono::duration<double, std::milli>(render_end - render_start).count();
+    state.render_time_ms =
+        std::chrono::duration<double, std::milli>(render_end - render_start).count();
 }
 
 // Render current state (without physics step)
@@ -194,7 +186,8 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     auto start = std::chrono::high_resolution_clock::now();
 
     int n = state.pendulums.size();
-    double dt = state.config.simulation.duration_seconds / (state.config.simulation.total_frames * state.preview.substeps);
+    double dt = state.config.simulation.duration_seconds /
+                (state.config.simulation.total_frames * state.preview.substeps);
 
     // Physics step
     for (int s = 0; s < state.preview.substeps; ++s) {
@@ -213,11 +206,9 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
 
     // Check for boom
     if (!state.boom_frame.has_value()) {
-        int boom = VarianceUtils::checkThresholdCrossing(
-            state.variance_tracker.getHistory(),
-            state.config.detection.boom_threshold,
-            state.config.detection.boom_confirmation
-        );
+        int boom = VarianceUtils::checkThresholdCrossing(state.variance_tracker.getHistory(),
+                                                         state.config.detection.boom_threshold,
+                                                         state.config.detection.boom_confirmation);
         if (boom >= 0) {
             state.boom_frame = boom;
             state.boom_variance = state.variance_tracker.getVarianceAt(boom);
@@ -227,10 +218,8 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     // Check for white
     if (state.boom_frame.has_value() && !state.white_frame.has_value()) {
         int white = VarianceUtils::checkThresholdCrossing(
-            state.variance_tracker.getHistory(),
-            state.config.detection.white_threshold,
-            state.config.detection.white_confirmation
-        );
+            state.variance_tracker.getHistory(), state.config.detection.white_threshold,
+            state.config.detection.white_confirmation);
         if (white >= 0) {
             state.white_frame = white;
             state.white_variance = state.variance_tracker.getVarianceAt(white);
@@ -261,7 +250,8 @@ void drawVarianceGraph(AppState const& state, ImVec2 size) {
     ImVec2 pos = ImGui::GetCursorScreenPos();
 
     // Background
-    draw_list->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), IM_COL32(30, 30, 30, 255));
+    draw_list->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y),
+                             IM_COL32(30, 30, 30, 255));
 
     // Find max variance for scaling
     double max_var = 1.0;
@@ -283,29 +273,34 @@ void drawVarianceGraph(AppState const& state, ImVec2 size) {
 
     // Draw boom threshold line
     float boom_y = pos.y + size.y - (state.config.detection.boom_threshold / max_var) * size.y;
-    draw_list->AddLine(ImVec2(pos.x, boom_y), ImVec2(pos.x + size.x, boom_y), IM_COL32(255, 200, 50, 100));
+    draw_list->AddLine(ImVec2(pos.x, boom_y), ImVec2(pos.x + size.x, boom_y),
+                       IM_COL32(255, 200, 50, 100));
 
     // Draw white threshold line
     float white_y = pos.y + size.y - (state.config.detection.white_threshold / max_var) * size.y;
-    draw_list->AddLine(ImVec2(pos.x, white_y), ImVec2(pos.x + size.x, white_y), IM_COL32(255, 255, 255, 100));
+    draw_list->AddLine(ImVec2(pos.x, white_y), ImVec2(pos.x + size.x, white_y),
+                       IM_COL32(255, 255, 255, 100));
 
     // Draw boom marker
     if (state.boom_frame.has_value()) {
         float x = pos.x + *state.boom_frame * x_scale;
-        draw_list->AddLine(ImVec2(x, pos.y), ImVec2(x, pos.y + size.y), IM_COL32(255, 200, 50, 255));
+        draw_list->AddLine(ImVec2(x, pos.y), ImVec2(x, pos.y + size.y),
+                           IM_COL32(255, 200, 50, 255));
     }
 
     // Draw white marker
     if (state.white_frame.has_value()) {
         float x = pos.x + *state.white_frame * x_scale;
-        draw_list->AddLine(ImVec2(x, pos.y), ImVec2(x, pos.y + size.y), IM_COL32(255, 255, 255, 255));
+        draw_list->AddLine(ImVec2(x, pos.y), ImVec2(x, pos.y + size.y),
+                           IM_COL32(255, 255, 255, 255));
     }
 
     ImGui::Dummy(size);
 }
 
 void startExport(AppState& state) {
-    if (state.export_state.active) return;
+    if (state.export_state.active)
+        return;
 
     // Join previous thread if exists
     if (state.export_state.export_thread.joinable()) {
@@ -364,18 +359,21 @@ void drawExportPanel(AppState& state) {
         if (ImGui::CollapsingHeader("Export Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::SliderInt("Width", &state.config.render.width, 540, 4320);
             ImGui::SliderInt("Height", &state.config.render.height, 540, 4320);
-            ImGui::SliderInt("Pendulum Count", &state.config.simulation.pendulum_count, 1000, 500000);
+            ImGui::SliderInt("Pendulum Count", &state.config.simulation.pendulum_count, 1000,
+                             500000);
             ImGui::SliderInt("Total Frames", &state.config.simulation.total_frames, 60, 3600);
             ImGui::SliderInt("Video FPS", &state.config.output.video_fps, 24, 120);
 
             // Calculate and display video duration
-            double video_duration = static_cast<double>(state.config.simulation.total_frames) / state.config.output.video_fps;
+            double video_duration = static_cast<double>(state.config.simulation.total_frames) /
+                                    state.config.output.video_fps;
             ImGui::Text("Video duration: %.2f seconds", video_duration);
 
             const char* formats[] = {"PNG Sequence", "Video (MP4)"};
             int format_idx = state.config.output.format == OutputFormat::PNG ? 0 : 1;
             if (ImGui::Combo("Format", &format_idx, formats, 2)) {
-                state.config.output.format = format_idx == 0 ? OutputFormat::PNG : OutputFormat::Video;
+                state.config.output.format =
+                    format_idx == 0 ? OutputFormat::PNG : OutputFormat::Video;
             }
         }
 
@@ -388,7 +386,8 @@ void drawExportPanel(AppState& state) {
         if (!state.export_state.result_message.empty()) {
             ImGui::TextWrapped("%s", state.export_state.result_message.c_str());
             if (!state.export_state.output_path.empty()) {
-                ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Output: %s", state.export_state.output_path.c_str());
+                ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Output: %s",
+                                   state.export_state.output_path.c_str());
             }
         }
     }
@@ -442,7 +441,8 @@ void drawTimeline(AppState& state, GLRenderer& renderer) {
         state.scrubbing = false;
         state.display_frame = state.current_frame;
         if (!state.frame_history.empty()) {
-            renderFrameFromHistory(state, renderer, std::min(state.display_frame, history_size - 1));
+            renderFrameFromHistory(state, renderer,
+                                   std::min(state.display_frame, history_size - 1));
         }
     }
 
@@ -460,17 +460,20 @@ void drawTimeline(AppState& state, GLRenderer& renderer) {
     // Frame info
     ImGui::Text("Displaying: %d / %d", state.display_frame, history_size - 1);
     if (history_size >= state.max_history_frames) {
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "History limit reached (%d frames)", state.max_history_frames);
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "History limit reached (%d frames)",
+                           state.max_history_frames);
     }
 
     // Show boom/white markers on timeline
     if (state.boom_frame.has_value() && *state.boom_frame < history_size) {
         float boom_pos = static_cast<float>(*state.boom_frame) / max_frame;
-        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Boom at frame %d (%.1f%%)", *state.boom_frame, boom_pos * 100);
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Boom at frame %d (%.1f%%)",
+                           *state.boom_frame, boom_pos * 100);
     }
     if (state.white_frame.has_value() && *state.white_frame < history_size) {
         float white_pos = static_cast<float>(*state.white_frame) / max_frame;
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "White at frame %d (%.1f%%)", *state.white_frame, white_pos * 100);
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "White at frame %d (%.1f%%)",
+                           *state.white_frame, white_pos * 100);
     }
 }
 
@@ -494,13 +497,8 @@ int main(int argc, char* argv[]) {
 
     // Create window
     SDL_Window* window = SDL_CreateWindow(
-        "Double Pendulum - GUI",
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
-        1280,
-        720,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI
-    );
+        "Double Pendulum - GUI", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
 
     if (!window) {
         std::cerr << "Window creation error: " << SDL_GetError() << "\n";
@@ -541,7 +539,8 @@ int main(int argc, char* argv[]) {
         if (SDL_GetDisplayDPI(0, &ddpi, &hdpi, &vdpi) == 0) {
             // Standard DPI is 96 on Linux, 72 on macOS
             dpi_scale = ddpi / 96.0f;
-            if (dpi_scale < 1.0f) dpi_scale = 1.0f;
+            if (dpi_scale < 1.0f)
+                dpi_scale = 1.0f;
         }
     }
 
@@ -596,7 +595,8 @@ int main(int argc, char* argv[]) {
             ImGui_ImplSDL2_ProcessEvent(&event);
             if (event.type == SDL_QUIT)
                 done = true;
-            if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE && event.window.windowID == SDL_GetWindowID(window)) {
+            if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE &&
+                event.window.windowID == SDL_GetWindowID(window)) {
                 done = true;
             }
         }
@@ -630,8 +630,7 @@ int main(int argc, char* argv[]) {
             if (ImGui::Button("Start Simulation")) {
                 initSimulation(state, renderer);
             }
-        }
-        else {
+        } else {
             if (ImGui::Button(state.paused ? "Resume" : "Pause")) {
                 state.paused = !state.paused;
             }
@@ -658,10 +657,12 @@ int main(int argc, char* argv[]) {
         ImGui::Text("Variance: %.4f", state.variance_tracker.getCurrentVariance());
 
         if (state.boom_frame.has_value()) {
-            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Boom: frame %d (var=%.4f)", *state.boom_frame, state.boom_variance);
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Boom: frame %d (var=%.4f)",
+                               *state.boom_frame, state.boom_variance);
         }
         if (state.white_frame.has_value()) {
-            ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "White: frame %d (var=%.4f)", *state.white_frame, state.white_variance);
+            ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "White: frame %d (var=%.4f)",
+                               *state.white_frame, state.white_variance);
         }
 
         ImGui::Separator();
@@ -831,9 +832,11 @@ int main(int argc, char* argv[]) {
 
         // Preview window
         ImGui::Begin("Preview");
-        ImVec2 preview_size(static_cast<float>(renderer.width()), static_cast<float>(renderer.height()));
+        ImVec2 preview_size(static_cast<float>(renderer.width()),
+                            static_cast<float>(renderer.height()));
         // Flip UV vertically: OpenGL texture origin is bottom-left, ImGui expects top-left
-        ImGui::Image(static_cast<ImTextureID>(static_cast<uintptr_t>(renderer.getTextureID())), preview_size, ImVec2(0, 1), ImVec2(1, 0));
+        ImGui::Image(static_cast<ImTextureID>(static_cast<uintptr_t>(renderer.getTextureID())),
+                     preview_size, ImVec2(0, 1), ImVec2(1, 0));
         ImGui::End();
 
         // Variance graph

@@ -17,12 +17,9 @@ public:
     int width, height;
     std::vector<float> data;
 
-    Image(int w, int h)
-        : width(w), height(h), data(w * h * 3, 0.0f) {}
+    Image(int w, int h) : width(w), height(h), data(w * h * 3, 0.0f) {}
 
-    void clear() {
-        std::fill(data.begin(), data.end(), 0.0f);
-    }
+    void clear() { std::fill(data.begin(), data.end(), 0.0f); }
 
     Color get_pixel(int x, int y) const {
         if (x < 0 || x >= width || y < 0 || y >= height)
@@ -112,14 +109,18 @@ public:
         // Main loop
         if (steep) {
             for (int x = xpxl1 + 1; x < xpxl2; ++x) {
-                add_pixel(static_cast<int>(ipart(intery)), x, color, rfpart(intery) * intensity_scale);
-                add_pixel(static_cast<int>(ipart(intery)) + 1, x, color, fpart(intery) * intensity_scale);
+                add_pixel(static_cast<int>(ipart(intery)), x, color,
+                          rfpart(intery) * intensity_scale);
+                add_pixel(static_cast<int>(ipart(intery)) + 1, x, color,
+                          fpart(intery) * intensity_scale);
                 intery += gradient;
             }
         } else {
             for (int x = xpxl1 + 1; x < xpxl2; ++x) {
-                add_pixel(x, static_cast<int>(ipart(intery)), color, rfpart(intery) * intensity_scale);
-                add_pixel(x, static_cast<int>(ipart(intery)) + 1, color, fpart(intery) * intensity_scale);
+                add_pixel(x, static_cast<int>(ipart(intery)), color,
+                          rfpart(intery) * intensity_scale);
+                add_pixel(x, static_cast<int>(ipart(intery)) + 1, color,
+                          fpart(intery) * intensity_scale);
                 intery += gradient;
             }
         }
@@ -146,8 +147,7 @@ public:
 class Renderer {
 public:
     Renderer(int width, int height)
-        : width_(width), height_(height),
-          centerX_(width / 2), centerY_(height / 2),
+        : width_(width), height_(height), centerX_(width / 2), centerY_(height / 2),
           scale_(width / 5.0) {}
 
     // Render a single pendulum state to the image

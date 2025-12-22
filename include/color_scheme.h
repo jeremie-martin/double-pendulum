@@ -1,7 +1,8 @@
 #pragma once
 
-#include "renderer.h"
 #include "config.h"
+#include "renderer.h"
+
 #include <cmath>
 
 // Visible light spectrum wavelength to RGB conversion
@@ -62,17 +63,29 @@ inline Color hsvToRGB(float h, float s, float v) {
 
     float r, g, b;
     if (h < 60) {
-        r = c; g = x; b = 0;
+        r = c;
+        g = x;
+        b = 0;
     } else if (h < 120) {
-        r = x; g = c; b = 0;
+        r = x;
+        g = c;
+        b = 0;
     } else if (h < 180) {
-        r = 0; g = c; b = x;
+        r = 0;
+        g = c;
+        b = x;
     } else if (h < 240) {
-        r = 0; g = x; b = c;
+        r = 0;
+        g = x;
+        b = c;
     } else if (h < 300) {
-        r = x; g = 0; b = c;
+        r = x;
+        g = 0;
+        b = c;
     } else {
-        r = c; g = 0; b = x;
+        r = c;
+        g = 0;
+        b = x;
     }
 
     return {r + m, g + m, b + m};
@@ -82,9 +95,7 @@ inline Color hsvToRGB(float h, float s, float v) {
 class ColorSchemeGenerator {
 public:
     ColorSchemeGenerator(ColorParams const& params)
-        : scheme_(params.scheme),
-          start_(params.start),
-          end_(params.end) {}
+        : scheme_(params.scheme), start_(params.start), end_(params.end) {}
 
     // Update parameters (for live preview)
     void setParams(ColorParams const& params) {
@@ -100,18 +111,18 @@ public:
         float mapped_t = start_ + t * (end_ - start_);
 
         switch (scheme_) {
-            case ColorScheme::Spectrum:
-                return getSpectrumColor(mapped_t);
-            case ColorScheme::Rainbow:
-                return getRainbowColor(mapped_t);
-            case ColorScheme::Heat:
-                return getHeatColor(mapped_t);
-            case ColorScheme::Cool:
-                return getCoolColor(mapped_t);
-            case ColorScheme::Monochrome:
-                return getMonochromeColor(mapped_t);
-            default:
-                return getSpectrumColor(mapped_t);
+        case ColorScheme::Spectrum:
+            return getSpectrumColor(mapped_t);
+        case ColorScheme::Rainbow:
+            return getRainbowColor(mapped_t);
+        case ColorScheme::Heat:
+            return getHeatColor(mapped_t);
+        case ColorScheme::Cool:
+            return getCoolColor(mapped_t);
+        case ColorScheme::Monochrome:
+            return getMonochromeColor(mapped_t);
+        default:
+            return getSpectrumColor(mapped_t);
         }
     }
 

@@ -1,38 +1,45 @@
 #include "music_manager.h"
+
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <sstream>
-#include <cstdlib>
 
 // Simple JSON parsing for our specific format
 namespace {
 
 std::string trim(std::string const& s) {
     auto start = s.find_first_not_of(" \t\n\r\"");
-    if (start == std::string::npos) return "";
+    if (start == std::string::npos)
+        return "";
     auto end = s.find_last_not_of(" \t\n\r\"");
     return s.substr(start, end - start + 1);
 }
 
 std::string extractValue(std::string const& line, std::string const& key) {
     auto pos = line.find("\"" + key + "\"");
-    if (pos == std::string::npos) return "";
+    if (pos == std::string::npos)
+        return "";
 
     auto colon = line.find(':', pos);
-    if (colon == std::string::npos) return "";
+    if (colon == std::string::npos)
+        return "";
 
     auto value_start = line.find_first_not_of(" \t", colon + 1);
-    if (value_start == std::string::npos) return "";
+    if (value_start == std::string::npos)
+        return "";
 
     // Check if it's a number or string
     if (line[value_start] == '"') {
         auto value_end = line.find('"', value_start + 1);
-        if (value_end == std::string::npos) return "";
+        if (value_end == std::string::npos)
+            return "";
         return line.substr(value_start + 1, value_end - value_start - 1);
     } else {
         // Number - find end (comma or end of line)
         auto value_end = line.find_first_of(",\n\r}", value_start);
-        if (value_end == std::string::npos) value_end = line.length();
+        if (value_end == std::string::npos)
+            value_end = line.length();
         return trim(line.substr(value_start, value_end - value_start));
     }
 }
@@ -64,7 +71,8 @@ bool MusicManager::load(fs::path const& music_dir) {
     size_t pos = 0;
     while ((pos = content.find('{', pos)) != std::string::npos) {
         auto end = content.find('}', pos);
-        if (end == std::string::npos) break;
+        if (end == std::string::npos)
+            break;
 
         std::string track_block = content.substr(pos, end - pos + 1);
 
@@ -111,14 +119,9 @@ MusicTrack const& MusicManager::randomTrack() {
     return tracks_[dist(rng_)];
 }
 
-bool MusicManager::muxWithAudio(
-    fs::path const& video_path,
-    fs::path const& audio_path,
-    fs::path const& output_path,
-    int boom_frame,
-    int drop_time_ms,
-    int video_fps
-) {
+bool MusicManager::muxWithAudio(fs::path const& video_path, fs::path const& audio_path,
+                                fs::path const& output_path, int boom_frame, int drop_time_ms,
+                                int video_fps) {
     if (!fs::exists(video_path)) {
         std::cerr << "Video file not found: " << video_path << "\n";
         return false;

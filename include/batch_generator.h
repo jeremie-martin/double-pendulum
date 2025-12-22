@@ -30,7 +30,7 @@ struct BatchConfig {
     // Music settings
     std::string music_database = "music";
     bool random_music = true;
-    std::string fixed_track_id;  // If random_music is false
+    std::string fixed_track_id; // If random_music is false
 
     static BatchConfig load(std::string const& path);
 };

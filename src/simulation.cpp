@@ -1,15 +1,15 @@
 #include "simulation.h"
 
-#include <thread>
 #include <atomic>
-#include <iostream>
-#include <iomanip>
-#include <sstream>
-#include <filesystem>
-#include <memory>
 #include <chrono>
-#include <fstream>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <memory>
+#include <sstream>
+#include <thread>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -18,10 +18,8 @@ using Clock = std::chrono::high_resolution_clock;
 using Duration = std::chrono::duration<double>;
 
 Simulation::Simulation(Config const& config)
-    : config_(config),
-      renderer_(config.render.width, config.render.height),
-      color_gen_(config.color),
-      post_processor_(config.post_process) {}
+    : config_(config), renderer_(config.render.width, config.render.height),
+      color_gen_(config.color), post_processor_(config.post_process) {}
 
 std::string Simulation::createRunDirectory() {
     // Generate timestamp-based directory name
@@ -30,8 +28,7 @@ std::string Simulation::createRunDirectory() {
     std::tm tm = *std::localtime(&time);
 
     std::ostringstream dir_name;
-    dir_name << config_.output.directory << "/run_"
-             << std::put_time(&tm, "%Y%m%d_%H%M%S");
+    dir_name << config_.output.directory << "/run_" << std::put_time(&tm, "%Y%m%d_%H%M%S");
 
     std::string path = dir_name.str();
     std::filesystem::create_directories(path);
@@ -47,17 +44,15 @@ std::string Simulation::createRunDirectory() {
 void Simulation::saveConfigCopy(std::string const& original_path) {
     // Copy the original config file if it exists
     if (std::filesystem::exists(original_path)) {
-        std::filesystem::copy_file(
-            original_path,
-            run_directory_ + "/config.toml",
-            std::filesystem::copy_options::overwrite_existing
-        );
+        std::filesystem::copy_file(original_path, run_directory_ + "/config.toml",
+                                   std::filesystem::copy_options::overwrite_existing);
     }
 }
 
 void Simulation::saveMetadata(SimulationResults const& results) {
     std::ofstream out(run_directory_ + "/metadata.json");
-    if (!out) return;
+    if (!out)
+        return;
 
     // Get current time as ISO string
     auto now = std::chrono::system_clock::now();
@@ -106,7 +101,8 @@ void Simulation::saveMetadata(SimulationResults const& results) {
 
 void Simulation::saveVarianceCSV(std::vector<double> const& variance) {
     std::ofstream out(run_directory_ + "/variance.csv");
-    if (!out) return;
+    if (!out)
+        return;
 
     out << "frame,variance\n";
     out << std::fixed << std::setprecision(6);
@@ -115,7 +111,7 @@ void Simulation::saveVarianceCSV(std::vector<double> const& variance) {
     }
 }
 
-void Simulation::run(ProgressCallback progress) {
+SimulationResults Simulation::run(ProgressCallback progress) {
     int const pendulum_count = config_.simulation.pendulum_count;
     int const total_frames = config_.simulation.total_frames;
     int const substeps = config_.simulation.substeps_per_frame;
@@ -153,11 +149,11 @@ void Simulation::run(ProgressCallback progress) {
     std::unique_ptr<VideoWriter> video_writer;
     if (config_.output.format == OutputFormat::Video) {
         std::string video_path = run_directory_ + "/video.mp4";
-        video_writer = std::make_unique<VideoWriter>(
-            width, height, config_.output.video_fps, config_.output);
+        video_writer =
+            std::make_unique<VideoWriter>(width, height, config_.output.video_fps, config_.output);
         if (!video_writer->open(video_path)) {
             std::cerr << "Failed to open video writer\n";
-            return;
+            return SimulationResults{};
         }
     }
 
@@ -183,17 +179,14 @@ void Simulation::run(ProgressCallback progress) {
         std::vector<double> angles;
         angles.reserve(pendulum_count);
         for (auto const& state : states) {
-            angles.push_back(state.th2);  // Track second pendulum angle
+            angles.push_back(state.th2); // Track second pendulum angle
         }
         variance_tracker_.update(angles);
 
         // Check for boom detection (external logic)
         if (!results.boom_frame.has_value()) {
             int boom = VarianceUtils::checkThresholdCrossing(
-                variance_tracker_.getHistory(),
-                detect.boom_threshold,
-                detect.boom_confirmation
-            );
+                variance_tracker_.getHistory(), detect.boom_threshold, detect.boom_confirmation);
             if (boom >= 0) {
                 results.boom_frame = boom;
                 results.boom_variance = variance_tracker_.getVarianceAt(boom);
@@ -203,10 +196,7 @@ void Simulation::run(ProgressCallback progress) {
         // Check for white detection (only after boom)
         if (results.boom_frame.has_value() && !results.white_frame.has_value()) {
             int white = VarianceUtils::checkThresholdCrossing(
-                variance_tracker_.getHistory(),
-                detect.white_threshold,
-                detect.white_confirmation
-            );
+                variance_tracker_.getHistory(), detect.white_threshold, detect.white_confirmation);
             if (white >= 0) {
                 results.white_frame = white;
                 results.white_variance = variance_tracker_.getVarianceAt(white);
@@ -245,8 +235,8 @@ void Simulation::run(ProgressCallback progress) {
         if (progress) {
             progress(frame + 1, total_frames);
         } else {
-            std::cout << "\rFrame " << std::setw(4) << (frame + 1)
-                      << "/" << total_frames << std::flush;
+            std::cout << "\rFrame " << std::setw(4) << (frame + 1) << "/" << total_frames
+                      << std::flush;
         }
     }
 
@@ -272,13 +262,15 @@ void Simulation::run(ProgressCallback progress) {
         saveVarianceCSV(results.variance_history);
     }
 
-    // Determine output path for display
-    std::string output_path;
+    // Store output paths in results
+    results.output_directory = run_directory_;
     if (config_.output.format == OutputFormat::Video) {
-        output_path = run_directory_ + "/video.mp4";
-    } else {
-        output_path = run_directory_ + "/frames/";
+        results.video_path = run_directory_ + "/video.mp4";
     }
+
+    // Determine output path for display
+    std::string output_path =
+        results.video_path.empty() ? run_directory_ + "/frames/" : results.video_path;
 
     // Print results
     std::cout << "\n\n";
@@ -289,21 +281,27 @@ void Simulation::run(ProgressCallback progress) {
     }
 
     // Calculate video duration
-    double video_duration = static_cast<double>(results.frames_completed) / config_.output.video_fps;
+    double video_duration =
+        static_cast<double>(results.frames_completed) / config_.output.video_fps;
 
     std::cout << std::fixed << std::setprecision(2);
     std::cout << "Frames:      " << results.frames_completed << "/" << total_frames;
-    if (early_stopped) std::cout << " (early stop)";
+    if (early_stopped)
+        std::cout << " (early stop)";
     std::cout << "\n";
-    std::cout << "Video:       " << video_duration << "s @ " << config_.output.video_fps << " FPS\n";
+    std::cout << "Video:       " << video_duration << "s @ " << config_.output.video_fps
+              << " FPS\n";
     std::cout << "Pendulums:   " << pendulum_count << "\n";
     std::cout << "Total time:  " << results.timing.total_seconds << "s\n";
     std::cout << "  Physics:   " << std::setw(5) << results.timing.physics_seconds << "s ("
-              << std::setw(4) << (results.timing.physics_seconds / results.timing.total_seconds * 100) << "%)\n";
+              << std::setw(4)
+              << (results.timing.physics_seconds / results.timing.total_seconds * 100) << "%)\n";
     std::cout << "  Render:    " << std::setw(5) << results.timing.render_seconds << "s ("
-              << std::setw(4) << (results.timing.render_seconds / results.timing.total_seconds * 100) << "%)\n";
+              << std::setw(4)
+              << (results.timing.render_seconds / results.timing.total_seconds * 100) << "%)\n";
     std::cout << "  I/O:       " << std::setw(5) << results.timing.io_seconds << "s ("
-              << std::setw(4) << (results.timing.io_seconds / results.timing.total_seconds * 100) << "%)\n";
+              << std::setw(4) << (results.timing.io_seconds / results.timing.total_seconds * 100)
+              << "%)\n";
 
     std::cout << std::setprecision(4);
     if (results.boom_frame) {
@@ -316,6 +314,8 @@ void Simulation::run(ProgressCallback progress) {
     }
 
     std::cout << "\nOutput: " << output_path << "\n";
+
+    return results;
 }
 
 void Simulation::initializePendulums(std::vector<Pendulum>& pendulums) {
@@ -329,21 +329,13 @@ void Simulation::initializePendulums(std::vector<Pendulum>& pendulums) {
         double th1 = center_angle - variation / 2 + t * variation;
 
         pendulums[i] = Pendulum(
-            config_.physics.gravity,
-            config_.physics.length1,
-            config_.physics.length2,
-            config_.physics.mass1,
-            config_.physics.mass2,
-            th1,
-            config_.physics.initial_angle2,
-            config_.physics.initial_velocity1,
-            config_.physics.initial_velocity2
-        );
+            config_.physics.gravity, config_.physics.length1, config_.physics.length2,
+            config_.physics.mass1, config_.physics.mass2, th1, config_.physics.initial_angle2,
+            config_.physics.initial_velocity1, config_.physics.initial_velocity2);
     }
 }
 
-void Simulation::stepPendulums(std::vector<Pendulum>& pendulums,
-                               std::vector<PendulumState>& states,
+void Simulation::stepPendulums(std::vector<Pendulum>& pendulums, std::vector<PendulumState>& states,
                                int substeps, double dt, int thread_count) {
     int const n = pendulums.size();
     int const chunk_size = n / thread_count;
@@ -371,9 +363,8 @@ void Simulation::stepPendulums(std::vector<Pendulum>& pendulums,
 
 void Simulation::savePNG(std::vector<uint8_t> const& data, int width, int height, int frame) {
     std::ostringstream path;
-    path << run_directory_ << "/frames/"
-         << config_.output.filename_prefix
-         << std::setfill('0') << std::setw(4) << frame << ".png";
+    path << run_directory_ << "/frames/" << config_.output.filename_prefix << std::setfill('0')
+         << std::setw(4) << frame << ".png";
 
     stbi_write_png(path.str().c_str(), width, height, 3, data.data(), width * 3);
 }

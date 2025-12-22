@@ -1,7 +1,8 @@
 #pragma once
 
-#include "renderer.h"
 #include "config.h"
+#include "renderer.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -24,7 +25,8 @@ namespace PostProcess {
 //   contrast: Contrast multiplier centered at 0.5 (1.0 = no change, >1 = more contrast)
 //   gamma: Display gamma (2.2 for sRGB, 1.0 for linear)
 inline void apply(float* data, size_t size, float exposure, float contrast, float gamma) {
-    if (size == 0) return;
+    if (size == 0)
+        return;
 
     // Step 1: Find max value for normalization
     float max_val = 0.0f;
@@ -73,8 +75,10 @@ inline void applyToImage(Image& image, float exposure, float contrast, float gam
 }
 
 // Apply to RGBA float buffer (4 channels, skip alpha)
-inline void applyToRGBA(float* data, size_t pixel_count, float exposure, float contrast, float gamma) {
-    if (pixel_count == 0) return;
+inline void applyToRGBA(float* data, size_t pixel_count, float exposure, float contrast,
+                        float gamma) {
+    if (pixel_count == 0)
+        return;
 
     // Step 1: Find max value across RGB channels
     float max_val = 0.0f;
@@ -133,29 +137,22 @@ inline void rgbaFloatToBytes(float const* src, uint8_t* dst, size_t pixel_count)
 
 } // namespace PostProcess
 
-
 // Legacy wrapper class for compatibility with existing code
 class PostProcessor {
 public:
     PostProcessor(PostProcessParams const& params)
-        : exposure_(params.exposure),
-          contrast_(params.contrast),
-          gamma_(params.gamma) {}
+        : exposure_(params.exposure), contrast_(params.contrast), gamma_(params.gamma) {}
 
     // Apply all post-processing to the image
     void apply(Image& image) const {
-        PostProcess::applyToImage(image,
-            static_cast<float>(exposure_),
-            static_cast<float>(contrast_),
-            static_cast<float>(gamma_));
+        PostProcess::applyToImage(image, static_cast<float>(exposure_),
+                                  static_cast<float>(contrast_), static_cast<float>(gamma_));
     }
 
     // Apply with custom parameters (for preview/GUI adjustment)
     void apply(Image& image, double exposure, double contrast, double gamma) const {
-        PostProcess::applyToImage(image,
-            static_cast<float>(exposure),
-            static_cast<float>(contrast),
-            static_cast<float>(gamma));
+        PostProcess::applyToImage(image, static_cast<float>(exposure), static_cast<float>(contrast),
+                                  static_cast<float>(gamma));
     }
 
     double exposure() const { return exposure_; }

@@ -1,16 +1,16 @@
 #pragma once
 
+#include "color_scheme.h"
 #include "config.h"
 #include "pendulum.h"
-#include "renderer.h"
-#include "color_scheme.h"
 #include "post_process.h"
+#include "renderer.h"
 #include "variance_tracker.h"
 #include "video_writer.h"
 
-#include <vector>
 #include <functional>
 #include <optional>
+#include <vector>
 
 // Progress callback: (current_frame, total_frames)
 using ProgressCallback = std::function<void(int, int)>;
@@ -32,6 +32,8 @@ struct SimulationResults {
     double white_variance = 0.0;
     TimingStats timing;
     std::vector<double> variance_history;
+    std::string output_directory; // Where video/frames were saved
+    std::string video_path;       // Full path to video (if format is video)
 };
 
 class Simulation {
@@ -39,7 +41,8 @@ public:
     explicit Simulation(Config const& config);
 
     // Run simulation with streaming mode (memory efficient)
-    void run(ProgressCallback progress = nullptr);
+    // Returns simulation results including boom_frame and output paths
+    SimulationResults run(ProgressCallback progress = nullptr);
 
 private:
     Config config_;
@@ -51,8 +54,7 @@ private:
 
     void initializePendulums(std::vector<Pendulum>& pendulums);
 
-    void stepPendulums(std::vector<Pendulum>& pendulums,
-                       std::vector<PendulumState>& states,
+    void stepPendulums(std::vector<Pendulum>& pendulums, std::vector<PendulumState>& states,
                        int substeps, double dt, int thread_count);
 
     void savePNG(std::vector<uint8_t> const& data, int width, int height, int frame);
