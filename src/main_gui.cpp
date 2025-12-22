@@ -28,11 +28,7 @@ struct PreviewParams {
 };
 
 // Graph metric selection
-enum class GraphMetric {
-    Variance,
-    Brightness,
-    Energy
-};
+enum class GraphMetric { Variance, Brightness, Energy };
 
 // Export state (thread-safe)
 struct ExportState {
@@ -324,11 +320,15 @@ void drawMetricGraph(AppState const& state, ImVec2 size) {
 
     // Draw threshold lines only for variance
     if (state.selected_metric == GraphMetric::Variance) {
-        float boom_y = pos.y + size.y - static_cast<float>((state.config.detection.boom_threshold / max_val) * size.y);
+        float boom_y =
+            pos.y + size.y -
+            static_cast<float>((state.config.detection.boom_threshold / max_val) * size.y);
         draw_list->AddLine(ImVec2(pos.x, boom_y), ImVec2(pos.x + size.x, boom_y),
                            IM_COL32(255, 200, 50, 100));
 
-        float white_y = pos.y + size.y - static_cast<float>((state.config.detection.white_threshold / max_val) * size.y);
+        float white_y =
+            pos.y + size.y -
+            static_cast<float>((state.config.detection.white_threshold / max_val) * size.y);
         draw_list->AddLine(ImVec2(pos.x, white_y), ImVec2(pos.x + size.x, white_y),
                            IM_COL32(255, 255, 255, 100));
     }
@@ -671,7 +671,7 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
         }
 
         auto exposure = static_cast<float>(state.config.post_process.exposure);
-        if (ImGui::SliderFloat("Exposure", &exposure, -3.0f, 6.0f, "%.2f stops")) {
+        if (ImGui::SliderFloat("Exposure", &exposure, -3.0f, 10.0f, "%.2f stops")) {
             state.config.post_process.exposure = exposure;
             pp_changed = true;
         }
@@ -816,7 +816,7 @@ int main(int argc, char* argv[]) {
     // OpenGL settings
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);

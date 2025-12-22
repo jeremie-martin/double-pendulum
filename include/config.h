@@ -131,6 +131,7 @@ struct OutputParams {
     std::string video_codec = "libx264";
     int video_crf = 23;
     int video_fps = 60; // Only affects video encoding, not simulation
+    bool skip_run_subdirectory = false; // If true, output directly to directory (for batch mode)
 };
 
 // Analysis mode parameters for extended statistics

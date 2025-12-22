@@ -346,10 +346,7 @@ void BatchGenerator::run() {
         }
     }
 
-    std::cout << "\n=== Batch Complete ===\n";
-    std::cout << "Completed: " << progress_.completed << "/" << progress_.total << "\n";
-    std::cout << "Failed: " << progress_.failed << "\n";
-    std::cout << "Output: " << batch_dir_ << "\n";
+    printSummary();
 }
 
 void BatchGenerator::resume() {
@@ -408,21 +405,23 @@ void BatchGenerator::resume() {
         saveProgress();
     }
 
-    std::cout << "\n=== Batch Complete ===\n";
-    std::cout << "Completed: " << progress_.completed << "/" << progress_.total << "\n";
-    std::cout << "Failed: " << progress_.failed << "\n";
+    printSummary();
 }
 
 bool BatchGenerator::generateOne(int index) {
+    auto start_time = std::chrono::steady_clock::now();
+    std::ostringstream name_stream;
+    name_stream << "video_" << std::setfill('0') << std::setw(4) << index;
+    std::string video_name = name_stream.str();
+
     try {
         // Generate random config
         Config config = generateRandomConfig();
 
-        // Set output directory for this video
-        std::ostringstream video_dir;
-        video_dir << batch_dir_.string() << "/video_" << std::setfill('0') << std::setw(4) << index;
-        config.output.directory = video_dir.str();
+        // Set output directory for this video (skip run_ subdirectory)
+        config.output.directory = batch_dir_.string() + "/" + video_name;
         config.output.format = OutputFormat::Video;
+        config.output.skip_run_subdirectory = true;
 
         std::cout << "Initial angles: " << rad2deg(config.physics.initial_angle1) << ", "
                   << rad2deg(config.physics.initial_angle2) << " deg\n";
@@ -434,6 +433,7 @@ bool BatchGenerator::generateOne(int index) {
         });
 
         // Mux with music if we have tracks and a boom frame
+        std::string final_video_path = results.video_path;
         if (auto track = pickMusicTrack(); track && results.boom_frame) {
             std::filesystem::path video_path = results.video_path;
             std::filesystem::path output_path =
@@ -449,15 +449,28 @@ bool BatchGenerator::generateOne(int index) {
             }
         }
 
-        std::string video_id = "video_" + std::to_string(index);
-        progress_.completed_ids.push_back(video_id);
+        auto end_time = std::chrono::steady_clock::now();
+        double duration = std::chrono::duration<double>(end_time - start_time).count();
+
+        // Track result and create symlink
+        RunResult result{video_name, final_video_path, true, results.boom_frame, duration};
+        progress_.results.push_back(result);
+        progress_.completed_ids.push_back(video_name);
+
+        // Create symlink to video in batch root
+        createVideoSymlink(final_video_path, video_name + ".mp4");
 
         return true;
 
     } catch (std::exception const& e) {
         std::cerr << "Error generating video " << index << ": " << e.what() << "\n";
-        std::string video_id = "video_" + std::to_string(index);
-        progress_.failed_ids.push_back(video_id);
+
+        auto end_time = std::chrono::steady_clock::now();
+        double duration = std::chrono::duration<double>(end_time - start_time).count();
+
+        RunResult result{video_name, "", false, std::nullopt, duration};
+        progress_.results.push_back(result);
+        progress_.failed_ids.push_back(video_name);
         return false;
     }
 }
@@ -508,14 +521,17 @@ std::string BatchGenerator::generateGridFolderName(std::map<std::string, std::st
 }
 
 bool BatchGenerator::generateOneGrid(int index, std::map<std::string, std::string> const& params) {
+    auto start_time = std::chrono::steady_clock::now();
+    std::string folder_name = generateGridFolderName(params);
+
     try {
         // Generate config from grid params
         Config config = generateGridConfig(params);
 
-        // Generate descriptive folder name
-        std::string folder_name = generateGridFolderName(params);
+        // Set output directory (skip run_ subdirectory)
         config.output.directory = batch_dir_.string() + "/" + folder_name;
         config.output.format = OutputFormat::Video;
+        config.output.skip_run_subdirectory = true;
 
         std::cout << "Parameters:";
         for (auto const& [key, value] : params) {
@@ -531,6 +547,7 @@ bool BatchGenerator::generateOneGrid(int index, std::map<std::string, std::strin
         });
 
         // Mux with music if we have tracks and a boom frame
+        std::string final_video_path = results.video_path;
         if (auto track = pickMusicTrack(); track && results.boom_frame) {
             std::filesystem::path video_path = results.video_path;
             std::filesystem::path output_path =
@@ -546,12 +563,27 @@ bool BatchGenerator::generateOneGrid(int index, std::map<std::string, std::strin
             }
         }
 
+        auto end_time = std::chrono::steady_clock::now();
+        double duration = std::chrono::duration<double>(end_time - start_time).count();
+
+        // Track result and create symlink
+        RunResult result{folder_name, final_video_path, true, results.boom_frame, duration};
+        progress_.results.push_back(result);
         progress_.completed_ids.push_back(folder_name);
+
+        // Create symlink to video in batch root
+        createVideoSymlink(final_video_path, folder_name + ".mp4");
+
         return true;
 
     } catch (std::exception const& e) {
         std::cerr << "Error generating combination " << index << ": " << e.what() << "\n";
-        std::string folder_name = generateGridFolderName(params);
+
+        auto end_time = std::chrono::steady_clock::now();
+        double duration = std::chrono::duration<double>(end_time - start_time).count();
+
+        RunResult result{folder_name, "", false, std::nullopt, duration};
+        progress_.results.push_back(result);
         progress_.failed_ids.push_back(folder_name);
         return false;
     }
@@ -584,4 +616,90 @@ bool BatchGenerator::loadProgress() {
 
     progress_ = BatchProgress::load(progress_path);
     return true;
+}
+
+void BatchGenerator::createVideoSymlink(std::string const& video_path, std::string const& link_name) {
+    if (video_path.empty()) return;
+
+    std::filesystem::path target(video_path);
+    if (!std::filesystem::exists(target)) return;
+
+    std::filesystem::path link_path = batch_dir_ / link_name;
+
+    // Remove existing symlink if present
+    if (std::filesystem::exists(link_path) || std::filesystem::is_symlink(link_path)) {
+        std::filesystem::remove(link_path);
+    }
+
+    // Create relative symlink
+    std::filesystem::path relative_target = std::filesystem::relative(target, batch_dir_);
+    std::error_code ec;
+    std::filesystem::create_symlink(relative_target, link_path, ec);
+    if (ec) {
+        std::cerr << "Warning: Could not create symlink: " << ec.message() << "\n";
+    }
+}
+
+void BatchGenerator::printSummary() const {
+    std::cout << "\n";
+    std::cout << "╔══════════════════════════════════════════════════════════════════════╗\n";
+    std::cout << "║                          BATCH COMPLETE                              ║\n";
+    std::cout << "╠══════════════════════════════════════════════════════════════════════╣\n";
+
+    // Calculate totals
+    double total_time = 0.0;
+    for (auto const& r : progress_.results) {
+        total_time += r.duration_seconds;
+    }
+
+    std::cout << "║  Total: " << std::setw(4) << progress_.total
+              << "    Completed: " << std::setw(4) << progress_.completed
+              << "    Failed: " << std::setw(4) << progress_.failed;
+    int padding = 17;
+    for (int i = 0; i < padding; ++i) std::cout << " ";
+    std::cout << "║\n";
+
+    std::cout << "║  Total time: " << std::fixed << std::setprecision(1) << total_time << "s";
+    if (progress_.completed > 0) {
+        std::cout << "    Avg: " << std::setprecision(1) << (total_time / progress_.completed) << "s/run";
+    }
+    std::cout << std::string(70 - 14 - std::to_string(static_cast<int>(total_time)).length() - 20, ' ') << "║\n";
+
+    std::cout << "╠══════════════════════════════════════════════════════════════════════╣\n";
+    std::cout << "║  Name                                      Status   Boom    Time    ║\n";
+    std::cout << "╠══════════════════════════════════════════════════════════════════════╣\n";
+
+    for (auto const& r : progress_.results) {
+        std::cout << "║  ";
+
+        // Name (truncate if too long)
+        std::string name = r.name;
+        if (name.length() > 40) {
+            name = name.substr(0, 37) + "...";
+        }
+        std::cout << std::left << std::setw(40) << name << "  ";
+
+        // Status
+        if (r.success) {
+            std::cout << "\033[32m" << std::setw(6) << "OK" << "\033[0m" << "   ";
+        } else {
+            std::cout << "\033[31m" << std::setw(6) << "FAIL" << "\033[0m" << "   ";
+        }
+
+        // Boom frame
+        if (r.boom_frame) {
+            std::cout << std::right << std::setw(5) << *r.boom_frame;
+        } else {
+            std::cout << std::setw(5) << "-";
+        }
+        std::cout << "   ";
+
+        // Duration
+        std::cout << std::fixed << std::setprecision(1) << std::setw(5) << r.duration_seconds << "s";
+        std::cout << "  ║\n";
+    }
+
+    std::cout << "╠══════════════════════════════════════════════════════════════════════╣\n";
+    std::cout << "║  Output: " << std::left << std::setw(60) << batch_dir_.string().substr(0, 60) << "║\n";
+    std::cout << "╚══════════════════════════════════════════════════════════════════════╝\n";
 }

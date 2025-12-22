@@ -49,15 +49,22 @@ Simulation::~Simulation() {
 }
 
 std::string Simulation::createRunDirectory() {
-    // Generate timestamp-based directory name
-    auto now = std::chrono::system_clock::now();
-    auto time = std::chrono::system_clock::to_time_t(now);
-    std::tm tm = *std::localtime(&time);
+    std::string path;
 
-    std::ostringstream dir_name;
-    dir_name << config_.output.directory << "/run_" << std::put_time(&tm, "%Y%m%d_%H%M%S");
+    if (config_.output.skip_run_subdirectory) {
+        // Use output directory directly (for batch mode)
+        path = config_.output.directory;
+    } else {
+        // Generate timestamp-based directory name
+        auto now = std::chrono::system_clock::now();
+        auto time = std::chrono::system_clock::to_time_t(now);
+        std::tm tm = *std::localtime(&time);
 
-    std::string path = dir_name.str();
+        std::ostringstream dir_name;
+        dir_name << config_.output.directory << "/run_" << std::put_time(&tm, "%Y%m%d_%H%M%S");
+        path = dir_name.str();
+    }
+
     std::filesystem::create_directories(path);
 
     // Create frames subdirectory for PNG output

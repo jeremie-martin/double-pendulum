@@ -61,6 +61,15 @@ struct BatchConfig {
     static BatchConfig load(std::string const& path);
 };
 
+// Result of a single run (for summary)
+struct RunResult {
+    std::string name;           // Folder name or video_XXXX
+    std::string video_path;     // Path to video file
+    bool success = false;
+    std::optional<int> boom_frame;
+    double duration_seconds = 0.0;
+};
+
 // Progress tracking for batch operations
 struct BatchProgress {
     int total = 0;
@@ -68,6 +77,7 @@ struct BatchProgress {
     int failed = 0;
     std::vector<std::string> completed_ids;
     std::vector<std::string> failed_ids;
+    std::vector<RunResult> results;  // Detailed results for summary
 
     void save(std::filesystem::path const& path) const;
     static BatchProgress load(std::filesystem::path const& path);
@@ -120,4 +130,10 @@ private:
 
     // Load existing progress for resume
     bool loadProgress();
+
+    // Create symlink to video in batch root folder
+    void createVideoSymlink(std::string const& video_path, std::string const& link_name);
+
+    // Print batch completion summary
+    void printSummary() const;
 };
