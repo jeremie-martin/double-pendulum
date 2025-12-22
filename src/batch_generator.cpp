@@ -125,38 +125,36 @@ BatchConfig BatchConfig::load(std::string const& path) {
             }
         }
 
-        // Color presets
-        if (auto presets_arr = tbl["color_presets"].as_array()) {
-            for (auto const& item : *presets_arr) {
-                if (auto preset_tbl = item.as_table()) {
-                    ColorParams preset;
+        // Load preset library if specified
+        if (auto batch = tbl["batch"].as_table()) {
+            if (auto presets_path = batch->get("presets")) {
+                std::string path = presets_path->value<std::string>().value_or("");
+                if (!path.empty()) {
+                    config.presets = PresetLibrary::load(path);
+                }
+            }
+        }
 
-                    // Parse scheme
-                    if (auto scheme_node = preset_tbl->get("scheme")) {
-                        std::string scheme_str =
-                            scheme_node->value<std::string>().value_or("spectrum");
-                        if (scheme_str == "rainbow") {
-                            preset.scheme = ColorScheme::Rainbow;
-                        } else if (scheme_str == "heat") {
-                            preset.scheme = ColorScheme::Heat;
-                        } else if (scheme_str == "cool") {
-                            preset.scheme = ColorScheme::Cool;
-                        } else if (scheme_str == "monochrome") {
-                            preset.scheme = ColorScheme::Monochrome;
-                        } else {
-                            preset.scheme = ColorScheme::Spectrum;
+        // Randomization settings (which presets to randomly select from)
+        if (auto randomize = tbl["randomize"].as_table()) {
+            // Color preset names
+            if (auto color_arr = randomize->get("color_presets")) {
+                if (auto arr = color_arr->as_array()) {
+                    for (auto const& item : *arr) {
+                        if (auto name = item.value<std::string>()) {
+                            config.color_preset_names.push_back(*name);
                         }
                     }
-
-                    // Parse start/end
-                    if (auto start_node = preset_tbl->get("start")) {
-                        preset.start = start_node->value<double>().value_or(0.0);
+                }
+            }
+            // Post-process preset names
+            if (auto pp_arr = randomize->get("post_process_presets")) {
+                if (auto arr = pp_arr->as_array()) {
+                    for (auto const& item : *arr) {
+                        if (auto name = item.value<std::string>()) {
+                            config.post_process_preset_names.push_back(*name);
+                        }
                     }
-                    if (auto end_node = preset_tbl->get("end")) {
-                        preset.end = end_node->value<double>().value_or(1.0);
-                    }
-
-                    config.color_presets.push_back(preset);
                 }
             }
         }
@@ -501,11 +499,26 @@ Config BatchGenerator::generateRandomConfig() {
         config.physics.initial_velocity2 = vel2_dist(rng_);
     }
 
-    // Select random color preset if available
-    if (!config_.color_presets.empty()) {
-        std::uniform_int_distribution<size_t> preset_dist(0, config_.color_presets.size() - 1);
-        size_t preset_idx = preset_dist(rng_);
-        config.color = config_.color_presets[preset_idx];
+    // Select random color preset from library if available
+    if (!config_.color_preset_names.empty()) {
+        std::uniform_int_distribution<size_t> dist(0, config_.color_preset_names.size() - 1);
+        std::string const& name = config_.color_preset_names[dist(rng_)];
+        if (auto preset = config_.presets.getColor(name)) {
+            config.color = *preset;
+        } else {
+            std::cerr << "Warning: Color preset '" << name << "' not found in library\n";
+        }
+    }
+
+    // Select random post-process preset from library if available
+    if (!config_.post_process_preset_names.empty()) {
+        std::uniform_int_distribution<size_t> dist(0, config_.post_process_preset_names.size() - 1);
+        std::string const& name = config_.post_process_preset_names[dist(rng_)];
+        if (auto preset = config_.presets.getPostProcess(name)) {
+            config.post_process = *preset;
+        } else {
+            std::cerr << "Warning: Post-process preset '" << name << "' not found in library\n";
+        }
     }
 
     return config;

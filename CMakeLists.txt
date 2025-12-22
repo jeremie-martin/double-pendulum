@@ -30,6 +30,7 @@ add_executable(pendulum
     src/video_writer.cpp
     src/music_manager.cpp
     src/batch_generator.cpp
+    src/preset_library.cpp
     src/headless_gl.cpp
     src/gl_renderer.cpp
 )

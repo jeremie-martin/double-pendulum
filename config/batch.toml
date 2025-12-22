@@ -3,8 +3,9 @@
 
 [batch]
 output_directory = "batch_output"
-count = 100                         # Number of videos to generate
-base_config = "config/batch_template.toml" # Base parameters for non-randomized values
+count = 100                              # Number of videos to generate
+base_config = "config/batch_template.toml"  # Base parameters for non-randomized values
+presets = "config/presets.toml"          # Preset library file
 
 [probe]
 enabled = true           # Enable probe-based filtering
@@ -35,24 +36,8 @@ database = "music"
 random_selection = true
 # track_id = "petrunko"  # Use this instead of random_selection for fixed track
 
-# Color presets - randomly selected during batch generation
-# These are curated combinations that produce good visuals
-[[color_presets]]
-scheme = "spectrum"
-start = 0.0
-end = 1.0
-
-[[color_presets]]
-scheme = "spectrum"
-start = 0.2
-end = 0.8
-
-[[color_presets]]
-scheme = "heat"
-start = 0.0
-end = 0.8
-
-[[color_presets]]
-scheme = "cool"
-start = 0.1
-end = 0.9
+# Randomization settings - which presets to randomly select from
+# Names must match presets defined in the preset library
+[randomize]
+color_presets = ["full_spectrum", "vibrant", "fire", "ice", "rainbow"]
+post_process_presets = ["default", "high_contrast", "cinematic", "vibrant"]

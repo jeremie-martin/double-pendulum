@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "music_manager.h"
+#include "preset_library.h"
 #include "probe_results.h"
 
 #include <filesystem>
@@ -126,8 +127,12 @@ struct BatchConfig {
     // Filter criteria for probe validation
     FilterCriteria filter;
 
-    // Color presets - randomly select from these instead of base_config.color
-    std::vector<ColorParams> color_presets;
+    // Preset library (loaded from separate file)
+    PresetLibrary presets;
+
+    // Names of presets to randomly select from (empty = use base_config)
+    std::vector<std::string> color_preset_names;
+    std::vector<std::string> post_process_preset_names;
 
     static BatchConfig load(std::string const& path);
 };
