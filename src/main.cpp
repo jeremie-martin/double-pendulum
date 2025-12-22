@@ -206,16 +206,12 @@ int main(int argc, char* argv[]) {
     }
 
     // Otherwise, treat argument as config path
-    // Check for options
+    // Check for --music option
     std::string music_track;
 
     for (int i = 2; i < argc; ++i) {
         if (std::string(argv[i]) == "--music" && i + 1 < argc) {
             music_track = argv[i + 1];
-        }
-        // Ignore --gpu for backwards compatibility (GPU is now always used)
-        if (std::string(argv[i]) == "--gpu") {
-            // Silently accepted for compatibility
         }
     }
 
