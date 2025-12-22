@@ -153,8 +153,8 @@ void renderStates(AppState& state, GLRenderer& renderer,
         float x2 = cx + s.x2 * scale;
         float y2 = cy + s.y2 * scale;
 
-        renderer.drawLine(x0, y0, x1, y1, c.r / 255.0f, c.g / 255.0f, c.b / 255.0f);
-        renderer.drawLine(x1, y1, x2, y2, c.r / 255.0f, c.g / 255.0f, c.b / 255.0f);
+        renderer.drawLine(x0, y0, x1, y1, c.r, c.g, c.b);
+        renderer.drawLine(x1, y1, x2, y2, c.r, c.g, c.b);
     }
 
     renderer.updateDisplayTexture(
