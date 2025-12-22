@@ -2,9 +2,9 @@
 
 #include "color_scheme.h"
 #include "config.h"
+#include "gl_renderer.h"
+#include "headless_gl.h"
 #include "pendulum.h"
-#include "post_process.h"
-#include "renderer.h"
 #include "variance_tracker.h"
 #include "video_writer.h"
 
@@ -39,16 +39,17 @@ struct SimulationResults {
 class Simulation {
 public:
     explicit Simulation(Config const& config);
+    ~Simulation();
 
-    // Run simulation with streaming mode (memory efficient)
+    // Run simulation with GPU rendering
     // Returns simulation results including boom_frame and output paths
     SimulationResults run(ProgressCallback progress = nullptr);
 
 private:
     Config config_;
-    Renderer renderer_;
+    HeadlessGL gl_;
+    GLRenderer renderer_;
     ColorSchemeGenerator color_gen_;
-    PostProcessor post_processor_;
     VarianceTracker variance_tracker_;
     std::string run_directory_;
 

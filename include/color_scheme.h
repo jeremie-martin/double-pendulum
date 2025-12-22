@@ -1,7 +1,7 @@
 #pragma once
 
+#include "color.h"
 #include "config.h"
-#include "renderer.h"
 
 #include <cmath>
 

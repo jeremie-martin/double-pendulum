@@ -1,5 +1,5 @@
-# Comparison test config: CPU vs GPU rendering
-# Short simulation with enough pendulums to see differences
+# High resolution test config
+# Large-scale simulation for quality testing
 
 [physics]
 gravity = 9.81
@@ -24,7 +24,7 @@ thread_count = 0           # Auto-detect
 
 [post_process]
 tone_map = "none"
-exposure = 6.0
+exposure = 7.0
 contrast = 1.0
 gamma = 1.6
 

@@ -8,18 +8,45 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <png.h>
 #include <sstream>
 #include <thread>
-
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
 
 using Clock = std::chrono::high_resolution_clock;
 using Duration = std::chrono::duration<double>;
 
-Simulation::Simulation(Config const& config)
-    : config_(config), renderer_(config.render.width, config.render.height),
-      color_gen_(config.color), post_processor_(config.post_process) {}
+namespace {
+void savePNGFile(char const* path, uint8_t const* data, int width, int height) {
+    FILE* fp = fopen(path, "wb");
+    if (!fp)
+        return;
+
+    png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+    png_infop info = png_create_info_struct(png);
+
+    png_init_io(png, fp);
+    png_set_IHDR(png, info, width, height, 8, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE,
+                 PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+    png_write_info(png, info);
+
+    std::vector<png_bytep> rows(height);
+    for (int y = 0; y < height; ++y) {
+        rows[y] = const_cast<png_bytep>(data + y * width * 3);
+    }
+    png_write_image(png, rows.data());
+    png_write_end(png, nullptr);
+
+    png_destroy_write_struct(&png, &info);
+    fclose(fp);
+}
+} // namespace
+
+Simulation::Simulation(Config const& config) : config_(config), color_gen_(config.color) {}
+
+Simulation::~Simulation() {
+    renderer_.shutdown();
+    gl_.shutdown();
+}
 
 std::string Simulation::createRunDirectory() {
     // Generate timestamp-based directory name
@@ -119,6 +146,18 @@ SimulationResults Simulation::run(ProgressCallback progress) {
     int const width = config_.render.width;
     int const height = config_.render.height;
 
+    // Initialize headless OpenGL context
+    if (!gl_.init()) {
+        std::cerr << "Failed to initialize headless OpenGL\n";
+        return SimulationResults{};
+    }
+
+    // Initialize GPU renderer
+    if (!renderer_.init(width, height)) {
+        std::cerr << "Failed to initialize GL renderer\n";
+        return SimulationResults{};
+    }
+
     // Create run directory with timestamp
     run_directory_ = createRunDirectory();
     std::cout << "Output directory: " << run_directory_ << "\n";
@@ -159,8 +198,12 @@ SimulationResults Simulation::run(ProgressCallback progress) {
 
     // Allocate buffers
     std::vector<PendulumState> states(pendulum_count);
-    Image image(width, height);
     std::vector<uint8_t> rgb_buffer(width * height * 3);
+
+    // Coordinate transform
+    float centerX = static_cast<float>(width) / 2.0f;
+    float centerY = static_cast<float>(height) / 2.0f;
+    float scale = static_cast<float>(width) / 5.0f;
 
     SimulationResults results;
 
@@ -183,7 +226,7 @@ SimulationResults Simulation::run(ProgressCallback progress) {
         }
         variance_tracker_.update(angles);
 
-        // Check for boom detection (external logic)
+        // Check for boom detection
         if (!results.boom_frame.has_value()) {
             int boom = VarianceUtils::checkThresholdCrossing(
                 variance_tracker_.getHistory(), detect.boom_threshold, detect.boom_confirmation);
@@ -210,14 +253,31 @@ SimulationResults Simulation::run(ProgressCallback progress) {
             }
         }
 
-        // Render timing
+        // Render timing (GPU)
         auto render_start = Clock::now();
-        image.clear();
+        renderer_.clear();
+
         for (int i = 0; i < pendulum_count; ++i) {
-            renderer_.render_pendulum(image, states[i], colors[i]);
+            auto const& state = states[i];
+            auto const& color = colors[i];
+
+            float x0 = centerX;
+            float y0 = centerY;
+            float x1 = centerX + static_cast<float>(state.x1 * scale);
+            float y1 = centerY + static_cast<float>(state.y1 * scale);
+            float x2 = centerX + static_cast<float>(state.x2 * scale);
+            float y2 = centerY + static_cast<float>(state.y2 * scale);
+
+            renderer_.drawLine(x0, y0, x1, y1, color.r, color.g, color.b);
+            renderer_.drawLine(x1, y1, x2, y2, color.r, color.g, color.b);
         }
-        post_processor_.apply(image);
-        image.to_rgb8(rgb_buffer);
+
+        // Read pixels with full post-processing pipeline
+        renderer_.readPixels(rgb_buffer, static_cast<float>(config_.post_process.exposure),
+                             static_cast<float>(config_.post_process.contrast),
+                             static_cast<float>(config_.post_process.gamma),
+                             config_.post_process.tone_map,
+                             static_cast<float>(config_.post_process.reinhard_white_point));
         render_time += Clock::now() - render_start;
 
         // I/O timing
@@ -272,6 +332,10 @@ SimulationResults Simulation::run(ProgressCallback progress) {
     std::string output_path =
         results.video_path.empty() ? run_directory_ + "/frames/" : results.video_path;
 
+    // Calculate video duration
+    double video_duration =
+        static_cast<double>(results.frames_completed) / config_.output.video_fps;
+
     // Print results
     std::cout << "\n\n";
     if (early_stopped) {
@@ -279,10 +343,6 @@ SimulationResults Simulation::run(ProgressCallback progress) {
     } else {
         std::cout << "=== Simulation Complete ===\n";
     }
-
-    // Calculate video duration
-    double video_duration =
-        static_cast<double>(results.frames_completed) / config_.output.video_fps;
 
     std::cout << std::fixed << std::setprecision(2);
     std::cout << "Frames:      " << results.frames_completed << "/" << total_frames;
@@ -366,5 +426,5 @@ void Simulation::savePNG(std::vector<uint8_t> const& data, int width, int height
     path << run_directory_ << "/frames/" << config_.output.filename_prefix << std::setfill('0')
          << std::setw(4) << frame << ".png";
 
-    stbi_write_png(path.str().c_str(), width, height, 3, data.data(), width * 3);
+    savePNGFile(path.str().c_str(), data.data(), width, height);
 }
