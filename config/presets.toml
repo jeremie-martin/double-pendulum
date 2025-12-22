@@ -72,57 +72,166 @@ end = 1.0
 
 [post_process.default]
 tone_map = "none"
-exposure = 0.0
+exposure = 6.0
 contrast = 1.0
-gamma = 2.2
+gamma = 1.6
 normalization = "per_frame"
 
+# Max-contrast / stronger caustics emphasis (contrast capped at 1.3)
 [post_process.high_contrast]
 tone_map = "none"
-exposure = 0.5
+exposure = 6.2
 contrast = 1.3
-gamma = 2.2
+gamma = 1.4
 normalization = "per_frame"
 
+# "Cinematic" reworked to allowed tone mapping (reinhard_extended)
+# Slightly softer than high_contrast, with a higher white point to reduce caustic emphasis.
 [post_process.cinematic]
-tone_map = "aces"
-exposure = 0.0
-contrast = 1.1
-gamma = 2.2
+tone_map = "reinhard_extended"
+reinhard_white_point = 0.95
+exposure = 6.0
+contrast = 1.10
+gamma = 1.7
 normalization = "per_frame"
 
+# Filmic: reinhard_extended with a mid-low white point (more caustics),
+# but with moderate contrast to avoid overly harsh punch.
 [post_process.filmic]
 tone_map = "reinhard_extended"
-reinhard_white_point = 2.0
-exposure = 0.3
-contrast = 1.0
-gamma = 2.2
+reinhard_white_point = 0.75
+exposure = 5.9
+contrast = 1.05
+gamma = 1.65
 normalization = "per_frame"
 
+# Vibrant: previously used reinhard; now mapped to reinhard_extended.
+# Lower white point + higher contrast for more caustics / sparkle, but within caps.
 [post_process.vibrant]
-tone_map = "reinhard"
-exposure = 0.5
-contrast = 1.2
-gamma = 2.0
+tone_map = "reinhard_extended"
+reinhard_white_point = 0.60
+exposure = 6.2
+contrast = 1.20
+gamma = 1.5
 normalization = "per_frame"
 
+# Soft: contrast cannot go below 1.0, so softness is achieved via higher gamma
+# and a high white point (reduces caustics emphasis).
 [post_process.soft]
-tone_map = "reinhard"
-exposure = -0.3
-contrast = 0.9
-gamma = 2.4
+tone_map = "reinhard_extended"
+reinhard_white_point = 1.00
+exposure = 5.8
+contrast = 1.00
+gamma = 2.0
 normalization = "per_frame"
 
+# Punchy: previously exceeded contrast cap and used ACES; now "none" with capped contrast.
+# Lower gamma + high contrast for caustics-forward punch.
 [post_process.punchy]
-tone_map = "aces"
-exposure = 0.8
-contrast = 1.4
-gamma = 2.0
+tone_map = "none"
+exposure = 6.5
+contrast = 1.30
+gamma = 1.3
 normalization = "per_frame"
 
 [post_process.logarithmic]
 tone_map = "logarithmic"
-exposure = 0.0
+exposure = 6.0
 contrast = 1.0
-gamma = 2.2
+gamma = 1.6
+normalization = "per_frame"
+
+# =============================================================================
+# Additional Post-Processing Presets (within your constraints)
+# - tone_map only: none | reinhard_extended | logarithmic
+# - default exposure baseline: 6.0
+# - gamma in [1.0, 2.2] (lower -> more caustics)
+# - contrast in [1.0, 1.3] (higher -> more caustics)
+# - reinhard_extended white point in [0.5, 1.0] (lower -> more caustics)
+# =============================================================================
+
+# Very caustics-forward: low gamma, max contrast, low white point
+[post_process.caustics_boost]
+tone_map = "reinhard_extended"
+reinhard_white_point = 0.55
+exposure = 6.3
+contrast = 1.30
+gamma = 1.15
+normalization = "per_frame"
+
+# Similar energy but without tone mapping (raw/punchy look)
+[post_process.caustics_raw]
+tone_map = "none"
+exposure = 6.4
+contrast = 1.30
+gamma = 1.20
+normalization = "per_frame"
+
+# Balanced “clarity”: crisp without going full caustics
+[post_process.crisp]
+tone_map = "reinhard_extended"
+reinhard_white_point = 0.80
+exposure = 6.1
+contrast = 1.15
+gamma = 1.55
+normalization = "per_frame"
+
+# “Pearlescent”: gentle roll-off, slightly lifted gamma, minimal contrast
+[post_process.pearlescent]
+tone_map = "reinhard_extended"
+reinhard_white_point = 1.00
+exposure = 5.9
+contrast = 1.00
+gamma = 1.95
+normalization = "per_frame"
+
+# “Underwater haze”: softer midtones but still physically plausible (contrast not < 1.0)
+[post_process.underwater_haze]
+tone_map = "logarithmic"
+exposure = 5.8
+contrast = 1.00
+gamma = 1.90
+normalization = "per_frame"
+
+# “Studio neutral”: stays close to your defaults, but slightly more separation
+[post_process.studio_neutral]
+tone_map = "none"
+exposure = 6.0
+contrast = 1.08
+gamma = 1.65
+normalization = "per_frame"
+
+# “Hot highlights”: accentuate speculars/caustics while keeping mids readable
+[post_process.hot_highlights]
+tone_map = "reinhard_extended"
+reinhard_white_point = 0.65
+exposure = 6.5
+contrast = 1.25
+gamma = 1.30
+normalization = "per_frame"
+
+# “Soft rolloff”: reduce highlight bite via higher white point + higher gamma
+[post_process.soft_rolloff]
+tone_map = "reinhard_extended"
+reinhard_white_point = 0.95
+exposure = 6.1
+contrast = 1.02
+gamma = 2.10
+normalization = "per_frame"
+
+# “Noir”: darker overall, higher contrast (still within cap), slightly higher gamma to avoid harshness
+[post_process.noir]
+tone_map = "none"
+exposure = 5.6
+contrast = 1.25
+gamma = 1.75
+normalization = "per_frame"
+
+# “Glassy”: clean, slightly bright, controlled highlights
+[post_process.glassy]
+tone_map = "reinhard_extended"
+reinhard_white_point = 0.90
+exposure = 6.3
+contrast = 1.10
+gamma = 1.60
 normalization = "per_frame"
