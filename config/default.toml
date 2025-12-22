@@ -25,10 +25,10 @@ height = 2160
 thread_count = 0               # 0 = auto-detect hardware concurrency
 
 [post_process]
-gamma = 1.05
-target_brightness = 0.5        # Target average brightness (0-1)
-contrast = 1.0
-auto_normalize = true
+# Standard post-processing pipeline: normalize -> exposure -> contrast -> gamma
+exposure = 0.0                 # Brightness in stops (0 = no change, +1 = 2x brighter)
+contrast = 1.0                 # Centered at 0.5 (1.0 = no change, >1 = more contrast)
+gamma = 2.2                    # Display gamma (2.2 = sRGB standard)
 
 [color]
 scheme = "spectrum"            # spectrum, rainbow, heat, cool, monochrome

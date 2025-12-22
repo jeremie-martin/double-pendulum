@@ -295,44 +295,53 @@ void GLRenderer::readPixels(std::vector<uint8_t>& out, float gamma) {
     }
 }
 
-void GLRenderer::updateDisplayTexture(float gamma, float brightness_target) {
-    // Read floating-point data
+void GLRenderer::updateDisplayTexture(float exposure, float contrast, float gamma) {
+    // Read floating-point data from GPU
     glBindTexture(GL_TEXTURE_2D, float_texture_);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, float_buffer_.data());
 
-    // Find max and average for normalization
+    // Find max value for normalization
     float max_val = 0.0f;
-    double sum = 0.0;
-    size_t count = 0;
-
     for (size_t i = 0; i < float_buffer_.size(); i += 4) {
-        float lum = 0.299f * float_buffer_[i] + 0.587f * float_buffer_[i+1] + 0.114f * float_buffer_[i+2];
-        max_val = std::max(max_val, lum);
-        sum += lum;
-        count++;
+        max_val = std::max(max_val, float_buffer_[i]);     // R
+        max_val = std::max(max_val, float_buffer_[i + 1]); // G
+        max_val = std::max(max_val, float_buffer_[i + 2]); // B
     }
 
-    float avg = static_cast<float>(sum / count);
-    if (max_val < 0.001f) max_val = 1.0f;
-    if (avg < 0.001f) avg = 0.001f;
+    if (max_val < 1e-6f) max_val = 1.0f;
 
-    // Scale to target brightness
-    float scale = brightness_target / avg;
-    scale = std::min(scale, 255.0f / max_val);  // Don't clip
+    // Precompute exposure multiplier and inverse gamma
+    float exposure_mult = std::pow(2.0f, exposure);
+    float inv_gamma = 1.0f / gamma;
 
-    // Create 8-bit buffer
+    // Create 8-bit buffer with standard post-processing pipeline
+    // (same as CPU: normalize -> exposure -> contrast -> clamp -> gamma)
     std::vector<uint8_t> rgba(width_ * height_ * 4);
 
-    float inv_gamma = 1.0f / gamma;
     for (int y = 0; y < height_; ++y) {
         for (int x = 0; x < width_; ++x) {
             size_t src_idx = (y * width_ + x) * 4;
             size_t dst_idx = (y * width_ + x) * 4;
 
             for (int c = 0; c < 3; ++c) {
-                float v = float_buffer_[src_idx + c] * scale / 255.0f;
-                v = std::pow(v, inv_gamma);
+                float v = float_buffer_[src_idx + c];
+
+                // 1. Normalize to [0,1]
+                v = v / max_val;
+
+                // 2. Apply exposure
+                v = v * exposure_mult;
+
+                // 3. Apply contrast (centered at 0.5)
+                v = (v - 0.5f) * contrast + 0.5f;
+
+                // 4. Clamp to [0,1]
                 v = std::max(0.0f, std::min(1.0f, v));
+
+                // 5. Apply gamma correction
+                v = std::pow(v, inv_gamma);
+
+                // 6. Scale to [0,255]
                 rgba[dst_idx + c] = static_cast<uint8_t>(v * 255.0f);
             }
             rgba[dst_idx + 3] = 255;

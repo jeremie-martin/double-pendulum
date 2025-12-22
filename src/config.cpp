@@ -90,10 +90,9 @@ Config Config::load(std::string const& path) {
 
         // Post-process
         if (auto pp = tbl["post_process"].as_table()) {
-            config.post_process.gamma = get_or(*pp, "gamma", 1.05);
-            config.post_process.target_brightness = get_or(*pp, "target_brightness", 0.5);
+            config.post_process.exposure = get_or(*pp, "exposure", 0.0);
             config.post_process.contrast = get_or(*pp, "contrast", 1.0);
-            config.post_process.auto_normalize = get_or(*pp, "auto_normalize", true);
+            config.post_process.gamma = get_or(*pp, "gamma", 2.2);
         }
 
         // Color

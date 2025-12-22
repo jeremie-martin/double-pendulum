@@ -32,8 +32,9 @@ public:
     // Get the texture ID for ImGui display
     GLuint getTextureID() const { return display_texture_; }
 
-    // Update display texture from float buffer (with normalization)
-    void updateDisplayTexture(float gamma = 1.0f, float brightness_target = 0.5f);
+    // Update display texture from float buffer (with standard post-processing)
+    // Uses same pipeline as CPU: normalize -> exposure -> contrast -> gamma
+    void updateDisplayTexture(float exposure = 0.0f, float contrast = 1.0f, float gamma = 2.2f);
 
     int width() const { return width_; }
     int height() const { return height_; }

@@ -165,7 +165,10 @@ void renderStates(AppState& state, GLRenderer& renderer, std::vector<PendulumSta
         renderer.drawLine(x1, y1, x2, y2, c.r / 255.0f, c.g / 255.0f, c.b / 255.0f);
     }
 
-    renderer.updateDisplayTexture(state.config.post_process.gamma, state.config.post_process.target_brightness);
+    renderer.updateDisplayTexture(
+        static_cast<float>(state.config.post_process.exposure),
+        static_cast<float>(state.config.post_process.contrast),
+        static_cast<float>(state.config.post_process.gamma));
 
     auto render_end = std::chrono::high_resolution_clock::now();
     state.render_time_ms = std::chrono::duration<double, std::milli>(render_end - render_start).count();
@@ -773,25 +776,32 @@ int main(int argc, char* argv[]) {
         }
 
         // Post-processing parameters (live update)
+        // Uses standard pipeline: normalize -> exposure -> contrast -> gamma
         if (ImGui::CollapsingHeader("Post-Processing", ImGuiTreeNodeFlags_DefaultOpen)) {
             bool pp_changed = false;
 
-            float gamma = static_cast<float>(state.config.post_process.gamma);
-            if (ImGui::SliderFloat("Gamma", &gamma, 0.5f, 2.5f)) {
-                state.config.post_process.gamma = gamma;
+            float exposure = static_cast<float>(state.config.post_process.exposure);
+            if (ImGui::SliderFloat("Exposure", &exposure, -3.0f, 3.0f, "%.2f stops")) {
+                state.config.post_process.exposure = exposure;
                 pp_changed = true;
             }
-
-            float brightness = static_cast<float>(state.config.post_process.target_brightness);
-            if (ImGui::SliderFloat("Brightness", &brightness, 0.1f, 1.0f)) {
-                state.config.post_process.target_brightness = brightness;
-                pp_changed = true;
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Brightness in stops (0 = no change, +1 = 2x brighter)");
             }
 
             float contrast = static_cast<float>(state.config.post_process.contrast);
             if (ImGui::SliderFloat("Contrast", &contrast, 0.5f, 2.0f)) {
                 state.config.post_process.contrast = contrast;
                 pp_changed = true;
+            }
+
+            float gamma = static_cast<float>(state.config.post_process.gamma);
+            if (ImGui::SliderFloat("Gamma", &gamma, 1.0f, 3.0f)) {
+                state.config.post_process.gamma = gamma;
+                pp_changed = true;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Display gamma (2.2 = sRGB standard)");
             }
 
             if (pp_changed && state.running) {

@@ -37,10 +37,13 @@ struct RenderParams {
 };
 
 struct PostProcessParams {
-    double gamma = 1.05;
-    double target_brightness = 0.5;
+    // Standard post-processing parameters:
+    // exposure: Brightness in stops (0 = no change, +1 = 2x brighter, -1 = 2x darker)
+    // contrast: Centered at 0.5 (1.0 = no change, >1 = more contrast)
+    // gamma: Display gamma (2.2 for sRGB, 1.0 for linear)
+    double exposure = 0.0;
     double contrast = 1.0;
-    bool auto_normalize = true;
+    double gamma = 2.2;
 };
 
 enum class ColorScheme {

@@ -20,9 +20,9 @@ width = 1080
 height = 1080
 
 [post_process]
-gamma = 1.6
-target_brightness = 0.5
+exposure = 4.0
 contrast = 1.0
+gamma = 2.2
 
 [color]
 scheme = "spectrum"
