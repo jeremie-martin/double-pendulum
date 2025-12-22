@@ -360,12 +360,12 @@ void GLRenderer::readPixels(std::vector<uint8_t>& out, float gamma) {
     if (max_val < 0.001f)
         max_val = 1.0f;
 
-    // Normalize and apply gamma
+    // Normalize and apply gamma (flip Y - OpenGL has Y=0 at bottom)
     float inv_gamma = 1.0f / gamma;
     for (int y = 0; y < height_; ++y) {
         for (int x = 0; x < width_; ++x) {
             size_t src_idx = (y * width_ + x) * 4;
-            size_t dst_idx = (y * width_ + x) * 3;
+            size_t dst_idx = ((height_ - 1 - y) * width_ + x) * 3; // Flip Y
 
             for (int c = 0; c < 3; ++c) {
                 float v = float_buffer_[src_idx + c] / max_val;

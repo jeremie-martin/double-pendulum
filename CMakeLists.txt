@@ -17,8 +17,11 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -DDEBUG")
 # Find packages
 find_package(Threads REQUIRED)
 
+# GPU rendering option (uses EGL for headless OpenGL)
+option(ENABLE_GPU "Enable GPU-accelerated rendering via EGL" OFF)
+
 # Main executable
-add_executable(pendulum
+set(PENDULUM_SOURCES
     src/main.cpp
     src/config.cpp
     src/simulation.cpp
@@ -26,6 +29,21 @@ add_executable(pendulum
     src/music_manager.cpp
     src/batch_generator.cpp
 )
+
+if(ENABLE_GPU)
+    find_package(OpenGL REQUIRED)
+    find_package(GLEW REQUIRED)
+    find_package(PNG REQUIRED)
+    # EGL is typically part of the OpenGL/Mesa package
+    find_library(EGL_LIBRARY EGL REQUIRED)
+
+    list(APPEND PENDULUM_SOURCES
+        src/headless_gl.cpp
+        src/gl_renderer.cpp
+    )
+endif()
+
+add_executable(pendulum ${PENDULUM_SOURCES})
 
 target_include_directories(pendulum PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -35,6 +53,16 @@ target_include_directories(pendulum PRIVATE
 target_link_libraries(pendulum PRIVATE
     Threads::Threads
 )
+
+if(ENABLE_GPU)
+    target_link_libraries(pendulum PRIVATE
+        OpenGL::GL
+        GLEW::GLEW
+        PNG::PNG
+        ${EGL_LIBRARY}
+    )
+    target_compile_definitions(pendulum PRIVATE ENABLE_GPU)
+endif()
 
 # Enable warnings
 target_compile_options(pendulum PRIVATE
