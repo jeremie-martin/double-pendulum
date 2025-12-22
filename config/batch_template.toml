@@ -1,4 +1,4 @@
-# Quick test config with fewer pendulums and frames
+#Quick test config with fewer pendulums and frames
 [physics]
 gravity = 9.81
 length1 = 1.0
@@ -9,11 +9,11 @@ initial_angle1_deg = 152
 initial_angle2_deg = 152.0
 
 [simulation]
-pendulum_count = 100000       # Reduced for quick test
+pendulum_count = 10000       # Reduced for quick test
 angle_variation_deg = 0.1
-duration_seconds = 18.0      # Just 20 second of physics
-total_frames = 1200           # 300 frames output (5s at 60 FPS)
-physics_quality = "high"
+duration_seconds = 20.0      # Just 20 second of physics
+total_frames = 800           # 300 frames output (5s at 60 FPS)
+physics_quality = "medium"
 
 [render]
 width = 1080
@@ -38,4 +38,7 @@ format = "video"
 directory = "output/long_test"
 filename_prefix = "frame"
 video_fps = 60              # Lower FPS for test videos
-video_crf = 20
+video_crf = 10              # Near-lossless for post-processing
+
+[analysis]
+enabled = true              # Enable metrics tracking for scoring

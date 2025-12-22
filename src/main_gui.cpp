@@ -28,7 +28,7 @@ struct PreviewParams {
 };
 
 // Graph metric selection
-enum class GraphMetric { Variance, Brightness, Energy, Spread };
+enum class GraphMetric { Variance, Brightness, Energy, Spread, ContrastStddev, ContrastRange };
 
 // Export state (thread-safe)
 struct ExportState {
@@ -170,6 +170,9 @@ void renderStates(AppState& state, GLRenderer& renderer,
         static_cast<float>(state.config.post_process.reinhard_white_point),
         state.config.post_process.normalization, static_cast<int>(states_to_render.size()));
 
+    // Compute brightness/contrast metrics from rendered frame
+    renderer.computeMetrics();
+
     auto render_end = std::chrono::high_resolution_clock::now();
     state.render_time_ms =
         std::chrono::duration<double, std::milli>(render_end - render_start).count();
@@ -220,12 +223,11 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
 
     // Update detection using shared utility
     VarianceUtils::ThresholdResults detection{state.boom_frame, state.boom_variance,
-                                               state.white_frame, state.white_variance};
-    VarianceUtils::updateDetection(detection, state.variance_tracker,
-                                   state.config.detection.boom_threshold,
-                                   state.config.detection.boom_confirmation,
-                                   state.config.detection.white_threshold,
-                                   state.config.detection.white_confirmation);
+                                              state.white_frame, state.white_variance};
+    VarianceUtils::updateDetection(
+        detection, state.variance_tracker, state.config.detection.boom_threshold,
+        state.config.detection.boom_confirmation, state.config.detection.white_threshold,
+        state.config.detection.white_confirmation);
     state.boom_frame = detection.boom_frame;
     state.boom_variance = detection.boom_variance;
     state.white_frame = detection.white_frame;
@@ -241,6 +243,11 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
 
     // Render
     renderFrame(state, renderer);
+
+    // Update analysis tracker with GPU stats after rendering
+    state.analysis_tracker.updateGPUStats(renderer.lastMax(), renderer.lastBrightness(),
+                                          renderer.lastContrastStddev(),
+                                          renderer.lastContrastRange());
 
     state.current_frame++;
     state.display_frame = state.current_frame;
@@ -298,6 +305,22 @@ void drawMetricGraph(AppState const& state, ImVec2 size) {
         metric_label = "Spread";
         max_val = 1.0; // Spread ratio is always 0-1
         break;
+    case GraphMetric::ContrastStddev:
+        for (auto const& a : analysis) {
+            data.push_back(a.contrast_stddev);
+        }
+        line_color = IM_COL32(200, 100, 200, 255);
+        metric_label = "Contrast (StdDev)";
+        max_val = 0.5; // Stddev typically 0-0.5 for normalized luminance
+        break;
+    case GraphMetric::ContrastRange:
+        for (auto const& a : analysis) {
+            data.push_back(a.contrast_range);
+        }
+        line_color = IM_COL32(100, 200, 200, 255);
+        metric_label = "Contrast (Range)";
+        max_val = 1.0; // p95-p5 range is 0-1
+        break;
     }
 
     // Pad data if analysis tracker has fewer entries
@@ -347,10 +370,20 @@ void drawMetricGraph(AppState const& state, ImVec2 size) {
                            IM_COL32(255, 255, 255, 255));
     }
 
+    // Draw current frame position indicator (cyan line)
+    if (state.display_frame >= 0 && state.display_frame < static_cast<int>(data_size)) {
+        float x = pos.x + state.display_frame * x_scale;
+        draw_list->AddLine(ImVec2(x, pos.y), ImVec2(x, pos.y + size.y), IM_COL32(0, 200, 255, 200));
+    }
+
     // Show current value and metric label
     if (!data.empty()) {
         char label[64];
-        snprintf(label, sizeof(label), "%s: %.4g (max: %.4g)", metric_label, data.back(), max_val);
+        double current_val =
+            (state.display_frame >= 0 && state.display_frame < static_cast<int>(data.size()))
+                ? data[state.display_frame]
+                : data.back();
+        snprintf(label, sizeof(label), "%s: %.4g (max: %.4g)", metric_label, current_val, max_val);
         draw_list->AddText(ImVec2(pos.x + 5, pos.y + 5), IM_COL32(255, 255, 255, 200), label);
     }
 
@@ -733,7 +766,8 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
     // Analysis metrics
     ImGui::Separator();
     ImGui::Text("Variance: %.4f", state.variance_tracker.getCurrentVariance());
-    ImGui::Text("Spread:   %.1f%% above", state.variance_tracker.getCurrentSpread().spread_ratio * 100);
+    ImGui::Text("Spread:   %.1f%% above",
+                state.variance_tracker.getCurrentSpread().spread_ratio * 100);
     auto const& current = state.analysis_tracker.getCurrent();
     ImGui::Text("Energy:   %.2f", current.total_energy);
 
@@ -1007,15 +1041,38 @@ int main(int argc, char* argv[]) {
         ImGui::Begin("Analysis");
 
         // Metric selector
-        char const* metric_names[] = {"Variance", "Brightness", "Energy", "Spread"};
+        char const* metric_names[] = {"Variance", "Brightness",        "Energy",
+                                      "Spread",   "Contrast (StdDev)", "Contrast (Range)"};
         int current_metric = static_cast<int>(state.selected_metric);
-        if (ImGui::Combo("Metric", &current_metric, metric_names, 4)) {
+        if (ImGui::Combo("Metric", &current_metric, metric_names, 6)) {
             state.selected_metric = static_cast<GraphMetric>(current_metric);
         }
 
         ImVec2 graph_size = ImGui::GetContentRegionAvail();
-        graph_size.y = std::max(100.0f, graph_size.y);
+        graph_size.y = std::max(100.0f, graph_size.y - 60.0f); // Leave room for score
         drawMetricGraph(state, graph_size);
+
+        // Display current and peak metrics
+        ImGui::Separator();
+        auto const& current = state.analysis_tracker.getCurrent();
+        ImGui::Text("Current: Brightness %.3f  Contrast %.3f", current.brightness,
+                    current.contrast_stddev);
+
+        // Calculate peak causticness from history
+        if (!state.analysis_tracker.getHistory().empty() && state.boom_frame) {
+            auto const& history = state.analysis_tracker.getHistory();
+            double peak_causticness = 0.0;
+            int best_frame = -1;
+            for (size_t i = *state.boom_frame; i < history.size(); ++i) {
+                double causticness = history[i].causticness();
+                if (causticness > peak_causticness) {
+                    peak_causticness = causticness;
+                    best_frame = static_cast<int>(i);
+                }
+            }
+            ImGui::Text("Peak Causticness: %.4f (frame %d)", peak_causticness, best_frame);
+        }
+
         ImGui::End();
 
         // Timeline

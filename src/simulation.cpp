@@ -18,6 +18,45 @@ using Clock = std::chrono::high_resolution_clock;
 using Duration = std::chrono::duration<double>;
 
 namespace {
+
+// Compute causticness score from per-frame metrics
+// Samples at 0.5s intervals after boom, favors high contrast with moderate brightness
+SimulationScore computeScore(std::vector<FrameAnalysis> const& analysis,
+                             std::optional<int> boom_frame, int fps) {
+    SimulationScore score;
+    if (!boom_frame || analysis.empty() || fps <= 0) {
+        return score;
+    }
+
+    // Sample at 0.0s, 0.5s, 1.0s, ..., 5.0s after boom
+    int frames_per_sample = fps / 2; // 0.5s intervals
+    int max_samples = 11;            // 0.0 to 5.0
+
+    for (int i = 0; i < max_samples; ++i) {
+        int frame = *boom_frame + i * frames_per_sample;
+        if (frame >= static_cast<int>(analysis.size()))
+            break;
+
+        double causticness = analysis[frame].causticness();
+
+        score.samples.push_back(causticness);
+        if (causticness > score.peak_causticness) {
+            score.peak_causticness = causticness;
+            score.best_frame = frame;
+        }
+    }
+
+    if (!score.samples.empty()) {
+        double sum = 0.0;
+        for (double s : score.samples) {
+            sum += s;
+        }
+        score.average_causticness = sum / score.samples.size();
+    }
+
+    return score;
+}
+
 void savePNGFile(char const* path, uint8_t const* data, int width, int height) {
     FILE* fp = fopen(path, "wb");
     if (!fp)
@@ -153,13 +192,33 @@ void Simulation::saveMetadata(SimulationResults const& results) {
     out << "    \"physics_seconds\": " << results.timing.physics_seconds << ",\n";
     out << "    \"render_seconds\": " << results.timing.render_seconds << ",\n";
     out << "    \"io_seconds\": " << results.timing.io_seconds << "\n";
-    out << "  }\n";
+    out << "  }";
+
+    // Add score section if computed
+    if (!results.score.samples.empty()) {
+        out << ",\n";
+        out << "  \"score\": {\n";
+        out << "    \"peak_causticness\": " << results.score.peak_causticness << ",\n";
+        out << "    \"average_causticness\": " << results.score.average_causticness << ",\n";
+        out << "    \"best_frame\": " << results.score.best_frame << ",\n";
+        out << "    \"samples\": [";
+        for (size_t i = 0; i < results.score.samples.size(); ++i) {
+            if (i > 0)
+                out << ", ";
+            out << results.score.samples[i];
+        }
+        out << "]\n";
+        out << "  }\n";
+    } else {
+        out << "\n";
+    }
+
     out << "}\n";
 }
 
 void Simulation::saveVarianceCSV(std::vector<double> const& variance,
-                                  std::vector<float> const& max_values,
-                                  std::vector<SpreadMetrics> const& spread) {
+                                 std::vector<float> const& max_values,
+                                 std::vector<SpreadMetrics> const& spread) {
     std::ofstream out(run_directory_ + "/variance.csv");
     if (!out)
         return;
@@ -185,12 +244,12 @@ void Simulation::saveAnalysisCSV(std::vector<FrameAnalysis> const& analysis) {
     if (!out)
         return;
 
-    out << "frame,variance,max_value,brightness,total_energy\n";
+    out << "frame,variance,max_value,brightness,contrast_stddev,contrast_range,total_energy\n";
     out << std::fixed << std::setprecision(6);
     for (size_t i = 0; i < analysis.size(); ++i) {
         auto const& a = analysis[i];
-        out << i << "," << a.variance << "," << a.max_value << ","
-            << a.brightness << "," << a.total_energy << "\n";
+        out << i << "," << a.variance << "," << a.max_value << "," << a.brightness << ","
+            << a.contrast_stddev << "," << a.contrast_range << "," << a.total_energy << "\n";
     }
 }
 
@@ -290,16 +349,16 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
 
         // Extended analysis (when enabled - includes energy computation)
         if (config_.analysis.enabled) {
-            analysis_tracker_.update(pendulums, 0.0f, 0.0f);  // GPU stats updated after render
+            analysis_tracker_.update(pendulums, 0.0f, 0.0f); // GPU stats updated after render
         }
 
         // Update detection results using shared utility
         bool had_white = results.white_frame.has_value();
         VarianceUtils::ThresholdResults detection{results.boom_frame, results.boom_variance,
-                                                   results.white_frame, results.white_variance};
-        VarianceUtils::updateDetection(detection, variance_tracker_,
-                                       detect.boom_threshold, detect.boom_confirmation,
-                                       detect.white_threshold, detect.white_confirmation);
+                                                  results.white_frame, results.white_variance};
+        VarianceUtils::updateDetection(detection, variance_tracker_, detect.boom_threshold,
+                                       detect.boom_confirmation, detect.white_threshold,
+                                       detect.white_confirmation);
         results.boom_frame = detection.boom_frame;
         results.boom_variance = detection.boom_variance;
         results.white_frame = detection.white_frame;
@@ -337,13 +396,14 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
                              static_cast<float>(config_.post_process.gamma),
                              config_.post_process.tone_map,
                              static_cast<float>(config_.post_process.reinhard_white_point),
-                             config_.post_process.normalization,
-                             pendulum_count);
+                             config_.post_process.normalization, pendulum_count);
         max_values.push_back(renderer_.lastMax());
 
-        // Update analysis with GPU stats (brightness)
+        // Update analysis with GPU stats (brightness, contrast)
         if (config_.analysis.enabled) {
-            analysis_tracker_.updateGPUStats(renderer_.lastMax(), renderer_.lastBrightness());
+            analysis_tracker_.updateGPUStats(renderer_.lastMax(), renderer_.lastBrightness(),
+                                             renderer_.lastContrastStddev(),
+                                             renderer_.lastContrastRange());
         }
 
         render_time += Clock::now() - render_start;
@@ -385,6 +445,12 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     results.variance_history = variance_tracker_.getHistory();
     results.spread_history = variance_tracker_.getSpreadHistory();
     results.final_spread_ratio = variance_tracker_.getFinalSpread().spread_ratio;
+
+    // Compute quality score from analysis metrics
+    if (config_.analysis.enabled && !analysis_tracker_.getHistory().empty()) {
+        results.score = computeScore(analysis_tracker_.getHistory(), results.boom_frame,
+                                     config_.output.video_fps);
+    }
 
     // Save metadata, config copy, and statistics
     saveMetadata(results);
@@ -428,8 +494,8 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     if (early_stopped)
         std::cout << " (early stop)";
     std::cout << "\n";
-    std::cout << "Video:       " << video_duration << "s @ " << config_.output.video_fps
-              << " FPS (" << simulation_speed << "x speed)\n";
+    std::cout << "Video:       " << video_duration << "s @ " << config_.output.video_fps << " FPS ("
+              << simulation_speed << "x speed)\n";
     std::cout << "Pendulums:   " << pendulum_count << "\n";
     std::cout << "Physics:     " << substeps << " substeps/frame, dt=" << (dt * 1000) << "ms\n";
     std::cout << "Total time:  " << results.timing.total_seconds << "s\n";
@@ -447,8 +513,8 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     if (results.boom_frame) {
         double boom_seconds = *results.boom_frame * frame_duration;
         std::cout << "Boom:        " << std::setprecision(2) << boom_seconds << "s (frame "
-                  << *results.boom_frame << ", var=" << std::setprecision(4) << results.boom_variance
-                  << ")\n";
+                  << *results.boom_frame << ", var=" << std::setprecision(4)
+                  << results.boom_variance << ")\n";
     }
     if (results.white_frame) {
         double white_seconds = *results.white_frame * frame_duration;

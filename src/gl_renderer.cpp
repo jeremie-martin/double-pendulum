@@ -1,4 +1,5 @@
 #include "gl_renderer.h"
+
 #include "post_process.h"
 
 #include <GL/glew.h>
@@ -332,7 +333,8 @@ bool GLRenderer::createFramebuffer() {
     // Create FBO for rendering to display texture (post-processing output)
     glGenFramebuffers(1, &display_fbo_);
     glBindFramebuffer(GL_FRAMEBUFFER, display_fbo_);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, display_texture_, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, display_texture_,
+                           0);
 
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
         std::cerr << "Display framebuffer not complete!\n";
@@ -589,33 +591,70 @@ void GLRenderer::readPixels(std::vector<uint8_t>& out, float exposure, float con
                             ToneMapOperator tone_map, float white_point,
                             NormalizationMode normalization, int pendulum_count) {
     // Process on GPU first
-    updateDisplayTexture(exposure, contrast, gamma, tone_map, white_point, normalization, pendulum_count);
+    updateDisplayTexture(exposure, contrast, gamma, tone_map, white_point, normalization,
+                         pendulum_count);
 
     // Read back 8-bit display texture (4x smaller transfer than float texture)
     std::vector<uint8_t> rgba(static_cast<size_t>(width_) * height_ * 4);
     glBindTexture(GL_TEXTURE_2D, display_texture_);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
 
-    // Convert RGBA to RGB (shader already flipped Y) and compute brightness
+    // Convert RGBA to RGB and compute metrics
     out.resize(static_cast<size_t>(width_) * height_ * 3);
+    for (int i = 0; i < width_ * height_; ++i) {
+        out[i * 3 + 0] = rgba[i * 4 + 0];
+        out[i * 3 + 1] = rgba[i * 4 + 1];
+        out[i * 3 + 2] = rgba[i * 4 + 2];
+    }
+
+    // Compute metrics from the RGBA data
+    computeMetricsFromRGBA(rgba.data(), width_ * height_);
+}
+
+void GLRenderer::computeMetrics() {
+    // Read back display texture and compute metrics
+    std::vector<uint8_t> rgba(static_cast<size_t>(width_) * height_ * 4);
+    glBindTexture(GL_TEXTURE_2D, display_texture_);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+
+    computeMetricsFromRGBA(rgba.data(), width_ * height_);
+}
+
+void GLRenderer::computeMetricsFromRGBA(uint8_t const* rgba, int pixel_count) {
     double brightness_sum = 0.0;
-    int const pixel_count = width_ * height_;
+    double brightness_sq_sum = 0.0;
+    std::vector<float> luminances;
+    luminances.reserve(pixel_count);
 
     for (int i = 0; i < pixel_count; ++i) {
         uint8_t r = rgba[i * 4 + 0];
         uint8_t g = rgba[i * 4 + 1];
         uint8_t b = rgba[i * 4 + 2];
 
-        out[i * 3 + 0] = r;
-        out[i * 3 + 1] = g;
-        out[i * 3 + 2] = b;
-
-        // Luminance using standard sRGB weights
-        brightness_sum += 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        // Luminance using standard sRGB weights (normalized to 0-1)
+        float lum = (0.2126f * r + 0.7152f * g + 0.0722f * b) / 255.0f;
+        brightness_sum += lum;
+        brightness_sq_sum += lum * lum;
+        luminances.push_back(lum);
     }
 
-    // Normalize to 0-1 range
-    last_brightness_ = static_cast<float>(brightness_sum / (pixel_count * 255.0));
+    // Mean brightness (0-1 range)
+    double mean = brightness_sum / pixel_count;
+    last_brightness_ = static_cast<float>(mean);
+
+    // Contrast metric 1: Standard deviation of luminance
+    double variance = (brightness_sq_sum / pixel_count) - (mean * mean);
+    last_contrast_stddev_ = static_cast<float>(std::sqrt(std::max(0.0, variance)));
+
+    // Contrast metric 2: Percentile spread (p95 - p5)
+    // Using nth_element for O(n) selection instead of full sort
+    size_t p5_idx = pixel_count / 20;
+    size_t p95_idx = pixel_count * 19 / 20;
+    std::nth_element(luminances.begin(), luminances.begin() + p5_idx, luminances.end());
+    float p5 = luminances[p5_idx];
+    std::nth_element(luminances.begin(), luminances.begin() + p95_idx, luminances.end());
+    float p95 = luminances[p95_idx];
+    last_contrast_range_ = p95 - p5;
 }
 
 bool GLRenderer::createComputeShader() {
@@ -625,7 +664,8 @@ bool GLRenderer::createComputeShader() {
     glGetIntegerv(GL_MINOR_VERSION, &minor);
 
     if (major < 4 || (major == 4 && minor < 3)) {
-        std::cout << "OpenGL " << major << "." << minor << " - compute shaders not available, using CPU fallback\n";
+        std::cout << "OpenGL " << major << "." << minor
+                  << " - compute shaders not available, using CPU fallback\n";
         has_compute_shaders_ = false;
         return false;
     }
@@ -672,13 +712,14 @@ bool GLRenderer::createComputeShader() {
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
     has_compute_shaders_ = true;
-    std::cout << "OpenGL " << major << "." << minor << " - compute shaders enabled for GPU max reduction\n";
+    std::cout << "OpenGL " << major << "." << minor
+              << " - compute shaders enabled for GPU max reduction\n";
     return true;
 }
 
 float GLRenderer::computeMaxGPU() {
     if (!has_compute_shaders_) {
-        return 0.0f;  // Will fall back to CPU
+        return 0.0f; // Will fall back to CPU
     }
 
     // Reset max value to 0

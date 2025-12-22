@@ -25,6 +25,14 @@ struct TimingStats {
     double io_seconds = 0.0;
 };
 
+// Scoring results for quality ranking
+struct SimulationScore {
+    double peak_causticness = 0.0;    // Maximum causticness value observed
+    double average_causticness = 0.0; // Average over sample points
+    int best_frame = -1;              // Frame with peak causticness
+    std::vector<double> samples;      // Causticness at 0.5s intervals after boom
+};
+
 // Simulation results
 struct SimulationResults {
     int frames_completed = 0;
@@ -38,6 +46,7 @@ struct SimulationResults {
     std::vector<SpreadMetrics> spread_history;
     std::string output_directory; // Where video/frames were saved
     std::string video_path;       // Full path to video (if format is video)
+    SimulationScore score;        // Quality score for ranking
 };
 
 class Simulation {
@@ -48,8 +57,7 @@ public:
     // Run simulation with GPU rendering
     // Returns simulation results including boom_frame and output paths
     // If config_path is provided, the config file will be copied to the output directory
-    SimulationResults run(ProgressCallback progress = nullptr,
-                          std::string const& config_path = "");
+    SimulationResults run(ProgressCallback progress = nullptr, std::string const& config_path = "");
 
     // Run probe simulation (physics only, no rendering)
     // Used for quick parameter evaluation before committing to full render
@@ -76,8 +84,7 @@ private:
     std::string createRunDirectory();
     void saveConfigCopy(std::string const& config_path);
     void saveMetadata(SimulationResults const& results);
-    void saveVarianceCSV(std::vector<double> const& variance,
-                         std::vector<float> const& max_values,
+    void saveVarianceCSV(std::vector<double> const& variance, std::vector<float> const& max_values,
                          std::vector<SpreadMetrics> const& spread);
     void saveAnalysisCSV(std::vector<FrameAnalysis> const& analysis);
 };

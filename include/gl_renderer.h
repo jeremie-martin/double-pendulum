@@ -60,6 +60,14 @@ public:
     // Get the last computed mean brightness (0-1 range, analysis mode)
     float lastBrightness() const { return last_brightness_; }
 
+    // Get the last computed contrast metrics (analysis mode)
+    float lastContrastStddev() const { return last_contrast_stddev_; }
+    float lastContrastRange() const { return last_contrast_range_; }
+
+    // Compute brightness/contrast metrics from current display texture
+    // Lightweight version for GUI preview (doesn't return pixel data)
+    void computeMetrics();
+
 private:
     int width_ = 0;
     int height_ = 0;
@@ -97,7 +105,7 @@ private:
 
     // Compute shader for GPU max reduction (GL 4.3+)
     GLuint max_compute_shader_ = 0;
-    GLuint max_ssbo_ = 0;  // Shader storage buffer for reduction result
+    GLuint max_ssbo_ = 0; // Shader storage buffer for reduction result
     bool has_compute_shaders_ = false;
 
     // Last computed/used max value (for diagnostics)
@@ -106,10 +114,17 @@ private:
     // Last computed mean brightness (0-1 range, analysis mode)
     float last_brightness_ = 0.0f;
 
+    // Last computed contrast metrics (analysis mode)
+    float last_contrast_stddev_ = 0.0f; // Standard deviation of luminance
+    float last_contrast_range_ = 0.0f;  // p95 - p5 luminance spread
+
     bool createFramebuffer();
     bool createComputeShader();
-    float computeMaxGPU();  // Returns max using compute shader
+    float computeMaxGPU(); // Returns max using compute shader
     bool createShaders();
     bool createPostProcessShader();
     void deleteFramebuffer();
+
+    // Helper to compute metrics from RGBA data (avoids code duplication)
+    void computeMetricsFromRGBA(uint8_t const* rgba, int pixel_count);
 };

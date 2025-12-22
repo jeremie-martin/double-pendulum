@@ -10,10 +10,19 @@
 
 // Per-frame analysis data
 struct FrameAnalysis {
-    double variance = 0.0;      // Angle2 variance (existing metric)
-    float max_value = 0.0f;     // Max accumulated pixel value (from GPU)
-    float brightness = 0.0f;    // Mean pixel intensity (from GPU)
-    double total_energy = 0.0;  // Sum of all pendulum energies
+    double variance = 0.0;        // Angle2 variance (existing metric)
+    float max_value = 0.0f;       // Max accumulated pixel value (from GPU)
+    float brightness = 0.0f;      // Mean pixel intensity (from GPU)
+    double total_energy = 0.0;    // Sum of all pendulum energies
+    float contrast_stddev = 0.0f; // Luminance standard deviation
+    float contrast_range = 0.0f;  // p95 - p5 luminance spread
+
+    // Causticness score: high contrast + moderate brightness (peaks around 0.4)
+    double causticness() const {
+        double bf = 1.0 - std::abs(brightness - 0.4) * 2.0;
+        bf = std::max(0.0, std::min(1.0, bf));
+        return contrast_stddev * bf;
+    }
 };
 
 // Extended tracker for analysis mode
@@ -60,12 +69,17 @@ public:
     }
 
     // Update GPU stats for the last frame
-    void updateGPUStats(float max_val, float brightness) {
+    void updateGPUStats(float max_val, float brightness, float contrast_stddev = 0.0f,
+                        float contrast_range = 0.0f) {
         if (!history_.empty()) {
             history_.back().max_value = max_val;
             history_.back().brightness = brightness;
+            history_.back().contrast_stddev = contrast_stddev;
+            history_.back().contrast_range = contrast_range;
             current_.max_value = max_val;
             current_.brightness = brightness;
+            current_.contrast_stddev = contrast_stddev;
+            current_.contrast_range = contrast_range;
         }
     }
 
@@ -92,23 +106,39 @@ public:
 
     // Get specific metric at frame
     double getVarianceAt(size_t frame) const {
-        if (frame < history_.size()) return history_[frame].variance;
+        if (frame < history_.size())
+            return history_[frame].variance;
         return 0.0;
     }
 
     float getMaxValueAt(size_t frame) const {
-        if (frame < history_.size()) return history_[frame].max_value;
+        if (frame < history_.size())
+            return history_[frame].max_value;
         return 0.0f;
     }
 
     float getBrightnessAt(size_t frame) const {
-        if (frame < history_.size()) return history_[frame].brightness;
+        if (frame < history_.size())
+            return history_[frame].brightness;
         return 0.0f;
     }
 
     double getEnergyAt(size_t frame) const {
-        if (frame < history_.size()) return history_[frame].total_energy;
+        if (frame < history_.size())
+            return history_[frame].total_energy;
         return 0.0;
+    }
+
+    float getContrastStddevAt(size_t frame) const {
+        if (frame < history_.size())
+            return history_[frame].contrast_stddev;
+        return 0.0f;
+    }
+
+    float getContrastRangeAt(size_t frame) const {
+        if (frame < history_.size())
+            return history_[frame].contrast_range;
+        return 0.0f;
     }
 
 private:
