@@ -161,7 +161,9 @@ void renderStates(AppState& state, GLRenderer& renderer,
         static_cast<float>(state.config.post_process.exposure),
         static_cast<float>(state.config.post_process.contrast),
         static_cast<float>(state.config.post_process.gamma), state.config.post_process.tone_map,
-        static_cast<float>(state.config.post_process.reinhard_white_point));
+        static_cast<float>(state.config.post_process.reinhard_white_point),
+        state.config.post_process.normalization,
+        static_cast<int>(states_to_render.size()));
 
     auto render_end = std::chrono::high_resolution_clock::now();
     state.render_time_ms =
@@ -573,6 +575,18 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
     // Post-processing parameters
     if (ImGui::CollapsingHeader("Post-Processing", ImGuiTreeNodeFlags_DefaultOpen)) {
         bool pp_changed = false;
+
+        // Normalization mode - this is the key setting for consistent results
+        const char* norm_names[] = {"Per-Frame (auto)", "By Count (consistent)"};
+        int current_norm = static_cast<int>(state.config.post_process.normalization);
+        if (ImGui::Combo("Normalization", &current_norm, norm_names, 2)) {
+            state.config.post_process.normalization = static_cast<NormalizationMode>(current_norm);
+            pp_changed = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Per-Frame: auto-adjusts brightness\n"
+                              "By Count: consistent brightness regardless of pendulum count");
+        }
 
         const char* tone_map_names[] = {"None (Linear)", "Reinhard", "Reinhard Extended",
                                         "ACES Filmic", "Logarithmic"};

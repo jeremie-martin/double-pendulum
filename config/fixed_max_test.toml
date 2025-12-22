@@ -1,4 +1,4 @@
-# Test config for fixed_max feature
+# Test config for normalization modes
 [physics]
 initial_angle1_deg = 152
 initial_angle2_deg = 152.0
@@ -18,9 +18,10 @@ height = 1080
 exposure = 4.0
 contrast = 1.0
 gamma = 2.2
-# Fixed max value - bypasses per-frame normalization
-# Use a value that works across the entire animation
-fixed_max = 60000.0
+# Normalization mode: "per_frame" or "by_count"
+# per_frame: each frame normalized to its own max (auto brightness)
+# by_count: divide by pendulum count (consistent across different counts)
+normalization = "by_count"
 
 [color]
 scheme = "spectrum"
@@ -33,6 +34,6 @@ white_threshold = 500
 
 [output]
 format = "video"
-directory = "output/fixed_max_test"
+directory = "output/normalization_test"
 video_fps = 60
 video_crf = 2

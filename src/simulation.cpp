@@ -303,7 +303,8 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
                              static_cast<float>(config_.post_process.gamma),
                              config_.post_process.tone_map,
                              static_cast<float>(config_.post_process.reinhard_white_point),
-                             static_cast<float>(config_.post_process.fixed_max));
+                             config_.post_process.normalization,
+                             pendulum_count);
         max_values.push_back(renderer_.lastMax());
         render_time += Clock::now() - render_start;
 

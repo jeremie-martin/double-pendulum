@@ -45,6 +45,15 @@ ToneMapOperator parseToneMapOperator(std::string const& str) {
     return ToneMapOperator::None;
 }
 
+NormalizationMode parseNormalizationMode(std::string const& str) {
+    if (str == "per_frame")
+        return NormalizationMode::PerFrame;
+    if (str == "by_count")
+        return NormalizationMode::ByCount;
+    std::cerr << "Unknown normalization mode: " << str << ", using per_frame\n";
+    return NormalizationMode::PerFrame;
+}
+
 PhysicsQuality parsePhysicsQuality(std::string const& str) {
     if (str == "low")
         return PhysicsQuality::Low;
@@ -142,7 +151,8 @@ Config Config::load(std::string const& path) {
             config.post_process.exposure = get_or(*pp, "exposure", 0.0);
             config.post_process.contrast = get_or(*pp, "contrast", 1.0);
             config.post_process.gamma = get_or(*pp, "gamma", 2.2);
-            config.post_process.fixed_max = get_or(*pp, "fixed_max", 0.0);
+            auto norm_str = get_string_or(*pp, "normalization", "per_frame");
+            config.post_process.normalization = parseNormalizationMode(norm_str);
         }
 
         // Color

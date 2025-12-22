@@ -74,6 +74,13 @@ struct RenderParams {
 
 enum class ToneMapOperator { None, Reinhard, ReinhardExtended, ACES, Logarithmic };
 
+// Normalization mode for HDR rendering
+// Controls how accumulated pixel values are normalized before exposure/tonemapping
+enum class NormalizationMode {
+    PerFrame,  // Normalize to per-frame max (default, auto-adjusts brightness)
+    ByCount    // Normalize by pendulum count (consistent across different counts)
+};
+
 struct PostProcessParams {
     // Tone mapping operator for HDR -> SDR conversion
     ToneMapOperator tone_map = ToneMapOperator::None;
@@ -87,12 +94,10 @@ struct PostProcessParams {
     double contrast = 1.0;
     double gamma = 2.2;
 
-    // Fixed normalization max value
-    // If > 0, use this value for normalization instead of computing per-frame max
-    // This ensures consistent brightness across animations regardless of pendulum count
-    // Useful for comparing runs or ensuring visual consistency
-    // Set to 0 (default) for automatic per-frame normalization
-    double fixed_max = 0.0;
+    // Normalization mode
+    // PerFrame: each frame normalized to its own max (brightness auto-adjusts)
+    // ByCount: divide by pendulum count (consistent results regardless of count)
+    NormalizationMode normalization = NormalizationMode::PerFrame;
 };
 
 enum class ColorScheme { Spectrum, Rainbow, Heat, Cool, Monochrome };

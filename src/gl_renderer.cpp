@@ -586,9 +586,10 @@ void GLRenderer::flush() {
 }
 
 void GLRenderer::readPixels(std::vector<uint8_t>& out, float exposure, float contrast, float gamma,
-                            ToneMapOperator tone_map, float white_point, float fixed_max) {
+                            ToneMapOperator tone_map, float white_point,
+                            NormalizationMode normalization, int pendulum_count) {
     // Process on GPU first
-    updateDisplayTexture(exposure, contrast, gamma, tone_map, white_point, fixed_max);
+    updateDisplayTexture(exposure, contrast, gamma, tone_map, white_point, normalization, pendulum_count);
 
     // Read back 8-bit display texture (4x smaller transfer than float texture)
     std::vector<uint8_t> rgba(static_cast<size_t>(width_) * height_ * 4);
@@ -699,54 +700,39 @@ float GLRenderer::computeMaxGPU() {
 
 void GLRenderer::updateDisplayTexture(float exposure, float contrast, float gamma,
                                       ToneMapOperator tone_map, float white_point,
-                                      float fixed_max) {
+                                      NormalizationMode normalization, int pendulum_count) {
     // Flush any pending lines first
     flush();
 
-    // Find max value for normalization
-    float max_val = 0.0f;
+    // Determine normalization divisor based on mode
+    float divisor = 1.0f;
 
-    if (fixed_max > 0.0f) {
-        // Use fixed max value (skips GPU/CPU max computation entirely)
-        max_val = fixed_max;
-    } else if (has_compute_shaders_) {
-        // Compute max on GPU
-        max_val = computeMaxGPU();
-
-#ifdef DEBUG_GPU_MAX
-        // Verify GPU result matches CPU
-        glBindTexture(GL_TEXTURE_2D, float_texture_);
-        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, float_buffer_.data());
-        float cpu_max = 0.0f;
-        for (size_t i = 0; i < float_buffer_.size(); i += 4) {
-            cpu_max = std::max(cpu_max, float_buffer_[i]);
-            cpu_max = std::max(cpu_max, float_buffer_[i + 1]);
-            cpu_max = std::max(cpu_max, float_buffer_[i + 2]);
-        }
-        float diff = std::abs(max_val - cpu_max);
-        if (diff > 1e-4f) {
-            std::cerr << "GPU/CPU max mismatch: GPU=" << max_val << " CPU=" << cpu_max
-                      << " diff=" << diff << "\n";
-        }
-#endif
+    if (normalization == NormalizationMode::ByCount) {
+        // Normalize by pendulum count - consistent regardless of count
+        divisor = static_cast<float>(pendulum_count);
     } else {
-        // CPU fallback: read float texture
-        glBindTexture(GL_TEXTURE_2D, float_texture_);
-        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, float_buffer_.data());
+        // PerFrame mode: normalize to per-frame max
+        if (has_compute_shaders_) {
+            divisor = computeMaxGPU();
+        } else {
+            // CPU fallback: read float texture
+            glBindTexture(GL_TEXTURE_2D, float_texture_);
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, float_buffer_.data());
 
-        for (size_t i = 0; i < float_buffer_.size(); i += 4) {
-            max_val = std::max(max_val, float_buffer_[i]);
-            max_val = std::max(max_val, float_buffer_[i + 1]);
-            max_val = std::max(max_val, float_buffer_[i + 2]);
+            for (size_t i = 0; i < float_buffer_.size(); i += 4) {
+                divisor = std::max(divisor, float_buffer_[i]);
+                divisor = std::max(divisor, float_buffer_[i + 1]);
+                divisor = std::max(divisor, float_buffer_[i + 2]);
+            }
         }
     }
 
-    if (max_val < 1e-6f) {
-        max_val = 1.0f;
+    if (divisor < 1e-6f) {
+        divisor = 1.0f;
     }
 
-    // Store last computed max for diagnostics
-    last_max_ = max_val;
+    // Store last computed divisor for diagnostics
+    last_max_ = divisor;
 
     // Precompute shader uniforms
     float exposure_mult = std::pow(2.0f, exposure);
@@ -760,8 +746,8 @@ void GLRenderer::updateDisplayTexture(float exposure, float contrast, float gamm
 
     glUseProgram(pp_shader_program_);
 
-    // Set uniforms
-    glUniform1f(glGetUniformLocation(pp_shader_program_, "uMaxVal"), max_val);
+    // Set uniforms (uMaxVal is now used as the divisor, which varies by normalization mode)
+    glUniform1f(glGetUniformLocation(pp_shader_program_, "uMaxVal"), divisor);
     glUniform1f(glGetUniformLocation(pp_shader_program_, "uExposureMult"), exposure_mult);
     glUniform1f(glGetUniformLocation(pp_shader_program_, "uContrast"), contrast);
     glUniform1f(glGetUniformLocation(pp_shader_program_, "uInvGamma"), inv_gamma);

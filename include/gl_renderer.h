@@ -32,20 +32,24 @@ public:
 
     // Read back the framebuffer to CPU (for saving/display)
     // Applies full post-processing pipeline: normalize -> exposure -> tone_map -> contrast -> gamma
-    // If fixed_max > 0, use that value for normalization instead of computing per-frame max
+    // normalization: PerFrame (divide by max) or ByCount (divide by pendulum_count)
     void readPixels(std::vector<uint8_t>& out, float exposure = 0.0f, float contrast = 1.0f,
                     float gamma = 2.2f, ToneMapOperator tone_map = ToneMapOperator::None,
-                    float white_point = 1.0f, float fixed_max = 0.0f);
+                    float white_point = 1.0f,
+                    NormalizationMode normalization = NormalizationMode::PerFrame,
+                    int pendulum_count = 1);
 
     // Get the texture ID for ImGui display
     GLuint getTextureID() const { return display_texture_; }
 
     // Update display texture from float buffer (with standard post-processing)
     // Uses same pipeline as CPU: normalize -> exposure -> tone_map -> contrast -> gamma
-    // If fixed_max > 0, use that value for normalization instead of computing per-frame max
+    // normalization: PerFrame (divide by max) or ByCount (divide by pendulum_count)
     void updateDisplayTexture(float exposure = 0.0f, float contrast = 1.0f, float gamma = 2.2f,
                               ToneMapOperator tone_map = ToneMapOperator::None,
-                              float white_point = 1.0f, float fixed_max = 0.0f);
+                              float white_point = 1.0f,
+                              NormalizationMode normalization = NormalizationMode::PerFrame,
+                              int pendulum_count = 1);
 
     int width() const { return width_; }
     int height() const { return height_; }
