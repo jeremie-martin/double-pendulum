@@ -443,14 +443,18 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
               << std::setw(4) << (results.timing.io_seconds / results.timing.total_seconds * 100)
               << "%)\n";
 
-    std::cout << std::setprecision(4);
+    double const frame_duration = config_.simulation.duration_seconds / total_frames;
     if (results.boom_frame) {
-        std::cout << "Boom:        frame " << *results.boom_frame
-                  << " (var=" << results.boom_variance << ")\n";
+        double boom_seconds = *results.boom_frame * frame_duration;
+        std::cout << "Boom:        " << std::setprecision(2) << boom_seconds << "s (frame "
+                  << *results.boom_frame << ", var=" << std::setprecision(4) << results.boom_variance
+                  << ")\n";
     }
     if (results.white_frame) {
-        std::cout << "White:       frame " << *results.white_frame
-                  << " (var=" << results.white_variance << ")\n";
+        double white_seconds = *results.white_frame * frame_duration;
+        std::cout << "White:       " << std::setprecision(2) << white_seconds << "s (frame "
+                  << *results.white_frame << ", var=" << std::setprecision(4)
+                  << results.white_variance << ")\n";
     }
     std::cout << "Spread:      " << std::setprecision(2) << (results.final_spread_ratio * 100)
               << "% above horizontal\n";

@@ -29,7 +29,11 @@ struct SpreadMetrics {
 };
 
 // Compute spread metrics from angle1 values
-// "Above horizontal" = angle1 in [-pi/2, pi/2] (pendulum pointing upward)
+// "Above horizontal" = |angle1| > pi/2 (pendulum tip higher than pivot)
+// angle1 is measured from vertical down, so:
+//   angle1 = 0      -> hanging straight down (below horizontal)
+//   angle1 = ±pi/2  -> horizontal
+//   angle1 = ±pi    -> pointing straight up (above horizontal)
 inline SpreadMetrics computeSpread(std::vector<double> const& angle1_values) {
     SpreadMetrics metrics;
     if (angle1_values.empty()) {
@@ -51,8 +55,8 @@ inline SpreadMetrics computeSpread(std::vector<double> const& angle1_values) {
         if (normalized < -PI)
             normalized += 2.0 * PI;
 
-        // Check if above horizontal (angle1 in [-pi/2, pi/2])
-        if (normalized >= -HALF_PI && normalized <= HALF_PI) {
+        // Check if above horizontal (|angle1| > pi/2)
+        if (std::abs(normalized) > HALF_PI) {
             above_count++;
         }
 
@@ -200,8 +204,8 @@ struct ThresholdResults {
 // Update threshold detection results given current state
 // This eliminates duplicate detection logic in simulation.cpp and main_gui.cpp
 inline void updateDetection(ThresholdResults& results, VarianceTracker const& tracker,
-                            double boom_threshold, int boom_confirmation,
-                            double white_threshold, int white_confirmation) {
+                            double boom_threshold, int boom_confirmation, double white_threshold,
+                            int white_confirmation) {
     auto const& history = tracker.getHistory();
 
     // Check for boom detection
