@@ -39,6 +39,7 @@ struct AppState
     // Control
     bool running = false;
     bool paused = false;
+    bool needs_redraw = false;  // For re-rendering when paused
     int current_frame = 0;
 
     // Detection results
@@ -92,6 +93,40 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
     state.paused = false;
 
     renderer.resize(state.preview.width, state.preview.height);
+}
+
+// Render current state (without physics step)
+void renderFrame(AppState& state, GLRenderer& renderer) {
+    if (!state.running || state.states.empty()) return;
+
+    auto render_start = std::chrono::high_resolution_clock::now();
+
+    renderer.clear();
+
+    int n = state.states.size();
+    float scale = state.preview.width / 5.0f;
+    float cx = state.preview.width / 2.0f;
+    float cy = state.preview.height / 2.0f;
+
+    for (int i = 0; i < n; ++i) {
+        auto const& s = state.states[i];
+        auto const& c = state.colors[i];
+
+        float x0 = cx;
+        float y0 = cy;
+        float x1 = cx + s.x1 * scale;
+        float y1 = cy + s.y1 * scale;
+        float x2 = cx + s.x2 * scale;
+        float y2 = cy + s.y2 * scale;
+
+        renderer.drawLine(x0, y0, x1, y1, c.r / 255.0f, c.g / 255.0f, c.b / 255.0f);
+        renderer.drawLine(x1, y1, x2, y2, c.r / 255.0f, c.g / 255.0f, c.b / 255.0f);
+    }
+
+    renderer.updateDisplayTexture(state.config.post_process.gamma, state.config.post_process.target_brightness);
+
+    auto render_end = std::chrono::high_resolution_clock::now();
+    state.render_time_ms = std::chrono::duration<double, std::milli>(render_end - render_start).count();
 }
 
 void stepSimulation(AppState& state, GLRenderer& renderer) {
@@ -148,33 +183,7 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     state.sim_time_ms = std::chrono::duration<double, std::milli>(sim_end - start).count();
 
     // Render
-    auto render_start = std::chrono::high_resolution_clock::now();
-
-    renderer.clear();
-
-    float scale = state.preview.width / 5.0f;
-    float cx = state.preview.width / 2.0f;
-    float cy = state.preview.height / 2.0f;
-
-    for (int i = 0; i < n; ++i) {
-        auto const& s = state.states[i];
-        auto const& c = state.colors[i];
-
-        float x0 = cx;
-        float y0 = cy;
-        float x1 = cx + s.x1 * scale;
-        float y1 = cy + s.y1 * scale;
-        float x2 = cx + s.x2 * scale;
-        float y2 = cy + s.y2 * scale;
-
-        renderer.drawLine(x0, y0, x1, y1, c.r / 255.0f, c.g / 255.0f, c.b / 255.0f);
-        renderer.drawLine(x1, y1, x2, y2, c.r / 255.0f, c.g / 255.0f, c.b / 255.0f);
-    }
-
-    renderer.updateDisplayTexture(state.config.post_process.gamma, state.config.post_process.target_brightness);
-
-    auto render_end = std::chrono::high_resolution_clock::now();
-    state.render_time_ms = std::chrono::duration<double, std::milli>(render_end - render_start).count();
+    renderFrame(state, renderer);
 
     state.current_frame++;
 }
@@ -369,6 +378,12 @@ int main(int argc, char* argv[]) {
             stepSimulation(state, renderer);
         }
 
+        // Re-render if needed (e.g., color/post-processing changed while paused)
+        if (state.needs_redraw) {
+            renderFrame(state, renderer);
+            state.needs_redraw = false;
+        }
+
         // Start ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame();
@@ -522,24 +537,34 @@ int main(int argc, char* argv[]) {
                 for (int i = 0; i < n; ++i) {
                     state.colors[i] = color_gen.getColorForIndex(i, n);
                 }
+                state.needs_redraw = true;
             }
         }
 
-        // Post-processing parameters
+        // Post-processing parameters (live update)
         if (ImGui::CollapsingHeader("Post-Processing", ImGuiTreeNodeFlags_DefaultOpen)) {
+            bool pp_changed = false;
+
             float gamma = static_cast<float>(state.config.post_process.gamma);
             if (ImGui::SliderFloat("Gamma", &gamma, 0.5f, 2.5f)) {
                 state.config.post_process.gamma = gamma;
+                pp_changed = true;
             }
 
             float brightness = static_cast<float>(state.config.post_process.target_brightness);
             if (ImGui::SliderFloat("Brightness", &brightness, 0.1f, 1.0f)) {
                 state.config.post_process.target_brightness = brightness;
+                pp_changed = true;
             }
 
             float contrast = static_cast<float>(state.config.post_process.contrast);
             if (ImGui::SliderFloat("Contrast", &contrast, 0.5f, 2.0f)) {
                 state.config.post_process.contrast = contrast;
+                pp_changed = true;
+            }
+
+            if (pp_changed && state.running) {
+                state.needs_redraw = true;
             }
         }
 
