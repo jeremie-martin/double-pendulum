@@ -8,24 +8,36 @@
 #include <iostream>
 #include <optional>
 #include <string>
+#include <toml.hpp>
 #include <utility>
 #include <vector>
+
+// Check if a config file is a batch config (has [batch] section)
+bool isBatchConfig(std::string const& path) {
+    try {
+        auto tbl = toml::parse_file(path);
+        return tbl["batch"].is_table();
+    } catch (...) {
+        return false;
+    }
+}
 
 void printUsage(char const* program) {
     std::cout << "Double Pendulum Simulation (GPU)\n\n"
               << "Usage:\n"
-              << "  " << program << " [config.toml] [options]  Run simulation\n"
-              << "  " << program << " --batch <batch.toml> [options]\n"
-              << "                                      Run batch generation\n"
+              << "  " << program << " [config.toml] [options]  Run simulation or batch\n"
               << "  " << program << " --add-music <video> <track-id> <boom-frame> <fps>\n"
               << "                                      Add music to existing video\n"
               << "  " << program << " --list-tracks           List available music tracks\n"
               << "  " << program << " -h, --help              Show this help\n\n"
+              << "Config auto-detection:\n"
+              << "  If config contains [batch] section, runs batch generation\n"
+              << "  Otherwise, runs single simulation\n\n"
               << "Options:\n"
               << "  --set <key>=<value>    Override config parameter (can be used multiple times)\n"
               << "  --analysis             Enable analysis mode (extended statistics)\n"
               << "  --music <track|random> Add music synced to chaos onset\n"
-              << "  --resume               Resume interrupted batch (with --batch)\n\n"
+              << "  --resume               Resume interrupted batch\n\n"
               << "Parameter keys use dot notation: section.parameter\n"
               << "  Sections: physics, simulation, render, post_process, color, detection, output\n\n"
               << "Examples:\n"
@@ -33,9 +45,9 @@ void printUsage(char const* program) {
               << "  " << program << " config/default.toml --set simulation.pendulum_count=50000\n"
               << "  " << program << " config/default.toml --set post_process.exposure=2.0 --analysis\n"
               << "  " << program << " config/default.toml --music random\n"
-              << "  " << program << " --batch config/batch.toml\n"
-              << "  " << program << " --batch config/batch.toml --resume\n"
-              << "  " << program << " --batch config/grid.toml --set render.width=1920\n"
+              << "  " << program << " config/batch.toml\n"
+              << "  " << program << " config/batch.toml --resume\n"
+              << "  " << program << " config/batch.toml --set render.width=1920\n"
               << "  " << program << " --add-music output/run_xxx/video.mp4 petrunko 32 60\n";
 }
 
@@ -275,44 +287,34 @@ int main(int argc, char* argv[]) {
         return addMusic(video, track_id, boom_frame, fps);
     }
 
-    if (arg == "--batch") {
-        if (argc < 3) {
-            std::cerr << "Usage: " << argv[0] << " --batch <batch.toml> [options]\n";
-            return 1;
-        }
-        std::string batch_config = argv[2];
-        bool resume = false;
-        std::vector<std::pair<std::string, std::string>> overrides;
-
-        for (int i = 3; i < argc; ++i) {
-            std::string opt = argv[i];
-            if (opt == "--resume") {
-                resume = true;
-            } else if (opt == "--set" && i + 1 < argc) {
-                auto parsed = parseSetArg(argv[++i]);
-                if (!parsed) return 1;
-                overrides.push_back(*parsed);
-            }
-        }
-        return runBatch(batch_config, resume, overrides);
-    }
-
-    // Otherwise, treat argument as config path
-    CLIOptions opts;
-    opts.config_path = arg;
+    // Treat argument as config path
+    std::string config_path = arg;
+    bool resume = false;
+    std::vector<std::pair<std::string, std::string>> overrides;
 
     // Parse remaining options
+    CLIOptions opts;
+    opts.config_path = config_path;
+
     for (int i = 2; i < argc; ++i) {
         std::string opt = argv[i];
-        if (opt == "--music" && i + 1 < argc) {
+        if (opt == "--resume") {
+            resume = true;
+        } else if (opt == "--music" && i + 1 < argc) {
             opts.music_track = argv[++i];
         } else if (opt == "--set" && i + 1 < argc) {
             auto parsed = parseSetArg(argv[++i]);
             if (!parsed) return 1;
             opts.overrides.push_back(*parsed);
+            overrides.push_back(*parsed);
         } else if (opt == "--analysis") {
             opts.analysis = true;
         }
+    }
+
+    // Auto-detect: if config has [batch] section, run batch mode
+    if (isBatchConfig(config_path)) {
+        return runBatch(config_path, resume, overrides);
     }
 
     return runSimulation(opts);

@@ -28,8 +28,8 @@ physics_quality = "high"
 # max_dt = 0.007              # Uncomment to override quality preset
 
 [render]
-width = 2160
-height = 2160
+width = 1080
+height = 1080
 thread_count = 0               # 0 = auto-detect hardware concurrency
 
 [post_process]

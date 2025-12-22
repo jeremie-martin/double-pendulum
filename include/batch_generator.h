@@ -5,30 +5,10 @@
 #include "probe_results.h"
 
 #include <filesystem>
-#include <map>
 #include <optional>
 #include <random>
 #include <string>
 #include <vector>
-
-// Batch generation mode
-enum class BatchMode {
-    Random, // Random sampling from ranges (original behavior)
-    Grid    // Cartesian product of discrete value sets
-};
-
-// Grid configuration for parameter sweeps
-struct GridConfig {
-    // Map of parameter paths to discrete values
-    // e.g., {"simulation.pendulum_count": ["10000", "100000"]}
-    std::map<std::string, std::vector<std::string>> param_sets;
-
-    // Compute all combinations (Cartesian product)
-    std::vector<std::map<std::string, std::string>> expandCombinations() const;
-
-    // Total number of combinations
-    size_t totalCombinations() const;
-};
 
 // Filter criteria for probe validation
 // Used to reject simulations with unsuitable parameters before full rendering
@@ -114,15 +94,9 @@ private:
 // Batch configuration loaded from TOML
 struct BatchConfig {
     std::string output_directory = "batch_output";
-    int count = 10; // Only used in Random mode
+    int count = 10;
 
-    // Batch mode
-    BatchMode mode = BatchMode::Random;
-
-    // Grid configuration (for Grid mode)
-    GridConfig grid;
-
-    // Physics parameter ranges (for Random mode)
+    // Physics parameter ranges for randomization
     struct Range {
         double min = 0.0;
         double max = 0.0;
@@ -142,7 +116,7 @@ struct BatchConfig {
     bool random_music = true;
     std::string fixed_track_id; // If random_music is false
 
-    // Probe settings for pre-filtering (Random mode only)
+    // Probe settings for pre-filtering
     int probe_pendulum_count = 1000;  // Pendulum count for fast probing
     int probe_total_frames = 0;       // Frame count for probing (0 = use base_config)
     double probe_max_dt = 0.0;        // Max timestep for probing (0 = use base_config)
@@ -152,8 +126,7 @@ struct BatchConfig {
     // Filter criteria for probe validation
     FilterCriteria filter;
 
-    // Color presets (for Random mode)
-    // If non-empty, randomly select from these instead of base_config.color
+    // Color presets - randomly select from these instead of base_config.color
     std::vector<ColorParams> color_presets;
 
     static BatchConfig load(std::string const& path);
@@ -204,26 +177,14 @@ private:
     BatchProgress progress_;
     ProbeFilter filter_;
 
-    // Grid mode: pre-computed combinations
-    std::vector<std::map<std::string, std::string>> grid_combinations_;
-
     // Setup batch directory
     void setupBatchDirectory();
 
-    // Generate a single video (random mode)
+    // Generate a single video
     bool generateOne(int index);
-
-    // Generate a single video (grid mode)
-    bool generateOneGrid(int index, std::map<std::string, std::string> const& params);
 
     // Generate randomized config
     Config generateRandomConfig();
-
-    // Generate config from grid params
-    Config generateGridConfig(std::map<std::string, std::string> const& params);
-
-    // Generate folder name from grid params
-    std::string generateGridFolderName(std::map<std::string, std::string> const& params) const;
 
     // Run probe simulation and check if it passes filter criteria
     // Returns pair of (passes, probe_results)

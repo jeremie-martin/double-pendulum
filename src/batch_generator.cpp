@@ -14,104 +14,6 @@
 
 using json = nlohmann::json;
 
-// Parameter name abbreviations for folder naming
-static std::map<std::string, std::string> const PARAM_ABBREVIATIONS = {
-    {"simulation.pendulum_count", "n"},
-    {"simulation.angle_variation_deg", "var"},
-    {"simulation.duration_seconds", "dur"},
-    {"simulation.total_frames", "frames"},
-    {"simulation.physics_quality", "qual"},
-    {"physics.initial_angle1_deg", "a1"},
-    {"physics.initial_angle2_deg", "a2"},
-    {"physics.gravity", "g"},
-    {"physics.length1", "L1"},
-    {"physics.length2", "L2"},
-    {"physics.mass1", "m1"},
-    {"physics.mass2", "m2"},
-    {"render.width", "w"},
-    {"render.height", "h"},
-    {"post_process.exposure", "exp"},
-    {"post_process.gamma", "gam"},
-    {"post_process.contrast", "con"},
-    {"post_process.tone_map", "tm"},
-    {"post_process.normalization", "norm"},
-    {"color.scheme", "col"},
-    {"color.start", "cstart"},
-    {"color.end", "cend"},
-    {"detection.boom_threshold", "boom"},
-    {"detection.white_threshold", "white"},
-    {"output.format", "fmt"},
-    {"output.video_fps", "fps"},
-};
-
-// Sanitize value for use in folder name
-static std::string sanitizeValue(std::string const& value) {
-    std::string result;
-    for (char c : value) {
-        if (std::isalnum(c) || c == '.' || c == '-' || c == '_') {
-            result += c;
-        } else if (c == ' ') {
-            result += '_';
-        }
-    }
-    // Trim trailing zeros after decimal point for floats
-    if (result.find('.') != std::string::npos) {
-        while (result.back() == '0') result.pop_back();
-        if (result.back() == '.') result.pop_back();
-    }
-    return result;
-}
-
-// Get abbreviated parameter name
-static std::string abbreviateParam(std::string const& param) {
-    auto it = PARAM_ABBREVIATIONS.find(param);
-    if (it != PARAM_ABBREVIATIONS.end()) {
-        return it->second;
-    }
-    // Fallback: use last component
-    auto dot = param.rfind('.');
-    return dot != std::string::npos ? param.substr(dot + 1) : param;
-}
-
-// GridConfig implementation
-std::vector<std::map<std::string, std::string>> GridConfig::expandCombinations() const {
-    std::vector<std::map<std::string, std::string>> result;
-
-    if (param_sets.empty()) {
-        return result;
-    }
-
-    // Start with one empty combination
-    result.push_back({});
-
-    // For each parameter, expand all existing combinations
-    for (auto const& [param, values] : param_sets) {
-        std::vector<std::map<std::string, std::string>> new_result;
-
-        for (auto const& combo : result) {
-            for (auto const& value : values) {
-                auto new_combo = combo;
-                new_combo[param] = value;
-                new_result.push_back(new_combo);
-            }
-        }
-
-        result = std::move(new_result);
-    }
-
-    return result;
-}
-
-size_t GridConfig::totalCombinations() const {
-    if (param_sets.empty()) return 0;
-
-    size_t total = 1;
-    for (auto const& [param, values] : param_sets) {
-        total *= values.size();
-    }
-    return total;
-}
-
 BatchConfig BatchConfig::load(std::string const& path) {
     BatchConfig config;
 
@@ -126,43 +28,9 @@ BatchConfig BatchConfig::load(std::string const& path) {
             if (auto cnt = batch->get("count")) {
                 config.count = cnt->value<int>().value_or(10);
             }
-            // Parse mode
-            if (auto mode_str = batch->get("mode")) {
-                std::string mode = mode_str->value<std::string>().value_or("random");
-                if (mode == "grid") {
-                    config.mode = BatchMode::Grid;
-                } else {
-                    config.mode = BatchMode::Random;
-                }
-            }
         }
 
-        // Grid parameters (for Grid mode)
-        if (auto grid_tbl = tbl["grid"].as_table()) {
-            for (auto const& [key, node] : *grid_tbl) {
-                if (auto arr = node.as_array()) {
-                    std::vector<std::string> values;
-                    for (auto const& elem : *arr) {
-                        if (auto s = elem.value<std::string>()) {
-                            values.push_back(*s);
-                        } else if (auto i = elem.value<int64_t>()) {
-                            values.push_back(std::to_string(*i));
-                        } else if (auto d = elem.value<double>()) {
-                            std::ostringstream oss;
-                            oss << std::setprecision(6) << *d;
-                            values.push_back(oss.str());
-                        } else if (auto b = elem.value<bool>()) {
-                            values.push_back(*b ? "true" : "false");
-                        }
-                    }
-                    if (!values.empty()) {
-                        config.grid.param_sets[std::string(key)] = values;
-                    }
-                }
-            }
-        }
-
-        // Physics ranges (for Random mode)
+        // Physics ranges
         if (auto ranges = tbl["physics_ranges"].as_table()) {
             if (auto node = ranges->get("initial_angle1_deg")) {
                 if (auto arr = node->as_array(); arr && arr->size() >= 2) {
@@ -374,63 +242,22 @@ void BatchGenerator::run() {
     }
 
     std::cout << "\n=== Starting Batch Generation ===\n";
+    std::cout << "Total videos to generate: " << config_.count << "\n\n";
 
-    if (config_.mode == BatchMode::Grid) {
-        // Grid mode: generate all combinations
-        grid_combinations_ = config_.grid.expandCombinations();
-        progress_.total = static_cast<int>(grid_combinations_.size());
+    progress_.total = config_.count;
+    progress_.completed = 0;
+    progress_.failed = 0;
 
-        if (grid_combinations_.empty()) {
-            std::cerr << "Error: No grid parameters specified\n";
-            return;
+    for (int i = 0; i < config_.count; ++i) {
+        std::cout << "\n--- Video " << (i + 1) << "/" << config_.count << " ---\n";
+
+        if (generateOne(i)) {
+            progress_.completed++;
+        } else {
+            progress_.failed++;
         }
 
-        std::cout << "Mode: Grid (parameter sweep)\n";
-        std::cout << "Grid parameters:\n";
-        for (auto const& [param, values] : config_.grid.param_sets) {
-            std::cout << "  " << param << ": [";
-            for (size_t i = 0; i < values.size(); ++i) {
-                if (i > 0) std::cout << ", ";
-                std::cout << values[i];
-            }
-            std::cout << "]\n";
-        }
-        std::cout << "Total combinations: " << progress_.total << "\n\n";
-
-        progress_.completed = 0;
-        progress_.failed = 0;
-
-        for (size_t i = 0; i < grid_combinations_.size(); ++i) {
-            std::cout << "\n--- Combination " << (i + 1) << "/" << grid_combinations_.size() << " ---\n";
-
-            if (generateOneGrid(static_cast<int>(i), grid_combinations_[i])) {
-                progress_.completed++;
-            } else {
-                progress_.failed++;
-            }
-
-            saveProgress();
-        }
-    } else {
-        // Random mode: original behavior
-        progress_.total = config_.count;
-        progress_.completed = 0;
-        progress_.failed = 0;
-
-        std::cout << "Mode: Random (sampling from ranges)\n";
-        std::cout << "Total videos to generate: " << config_.count << "\n\n";
-
-        for (int i = 0; i < config_.count; ++i) {
-            std::cout << "\n--- Video " << (i + 1) << "/" << config_.count << " ---\n";
-
-            if (generateOne(i)) {
-                progress_.completed++;
-            } else {
-                progress_.failed++;
-            }
-
-            saveProgress();
-        }
+        saveProgress();
     }
 
     printSummary();
@@ -517,7 +344,9 @@ bool BatchGenerator::generateOne(int index) {
                 std::cout << "Probe " << (retry + 1) << "/" << (config_.max_probe_retries + 1)
                           << ": angles=" << std::fixed << std::setprecision(1)
                           << rad2deg(config.physics.initial_angle1) << ", "
-                          << rad2deg(config.physics.initial_angle2) << " deg... ";
+                          << rad2deg(config.physics.initial_angle2) << " deg, vels=" << std::fixed
+                          << std::setprecision(2) << rad2deg(config.physics.initial_velocity1)
+                          << ", " << rad2deg(config.physics.initial_velocity2) << " deg/s... ";
                 std::cout.flush();
 
                 // Run probe (physics only)
@@ -542,8 +371,9 @@ bool BatchGenerator::generateOne(int index) {
                 auto end_time = std::chrono::steady_clock::now();
                 double duration = std::chrono::duration<double>(end_time - start_time).count();
 
-                RunResult result{video_name, "", false, std::nullopt, 0.0, duration, 0.0,
-                                 config_.max_probe_retries + 1, 1.0};
+                RunResult result{video_name, "",       false, std::nullopt,
+                                 0.0,        duration, 0.0,   config_.max_probe_retries + 1,
+                                 1.0};
                 progress_.results.push_back(result);
                 progress_.failed_ids.push_back(video_name);
                 return false;
@@ -576,7 +406,8 @@ bool BatchGenerator::generateOne(int index) {
         // Calculate boom_seconds from boom_frame (needed for music selection)
         double boom_seconds = 0.0;
         if (results.boom_frame) {
-            double frame_duration = config.simulation.duration_seconds / config.simulation.total_frames;
+            double frame_duration =
+                config.simulation.duration_seconds / config.simulation.total_frames;
             boom_seconds = *results.boom_frame * frame_duration;
         }
 
@@ -617,15 +448,9 @@ bool BatchGenerator::generateOne(int index) {
 
         // Track result and create symlink
         // Use actual simulation spread (more accurate than probe spread)
-        RunResult result{video_name,
-                         final_video_path,
-                         true,
-                         results.boom_frame,
-                         boom_seconds,
-                         duration,
-                         results.final_spread_ratio,
-                         probe_retries,
-                         simulation_speed};
+        RunResult result{
+            video_name, final_video_path,           true,          results.boom_frame, boom_seconds,
+            duration,   results.final_spread_ratio, probe_retries, simulation_speed};
         progress_.results.push_back(result);
         progress_.completed_ids.push_back(video_name);
 
@@ -686,33 +511,6 @@ Config BatchGenerator::generateRandomConfig() {
     return config;
 }
 
-Config BatchGenerator::generateGridConfig(std::map<std::string, std::string> const& params) {
-    Config config = config_.base_config;
-
-    // Apply each parameter override
-    for (auto const& [key, value] : params) {
-        if (!config.applyOverride(key, value)) {
-            std::cerr << "Warning: Failed to apply grid parameter: " << key << " = " << value << "\n";
-        }
-    }
-
-    return config;
-}
-
-std::string BatchGenerator::generateGridFolderName(std::map<std::string, std::string> const& params) const {
-    std::ostringstream name;
-    bool first = true;
-
-    for (auto const& [param, value] : params) {
-        if (!first) name << "_";
-        first = false;
-
-        name << abbreviateParam(param) << sanitizeValue(value);
-    }
-
-    return name.str();
-}
-
 std::pair<bool, ProbeResults> BatchGenerator::runProbe(Config const& config) {
     // Create a modified config for probing (fewer pendulums, faster settings)
     Config probe_config = config;
@@ -737,110 +535,6 @@ std::pair<bool, ProbeResults> BatchGenerator::runProbe(Config const& config) {
     bool passes = filter_.passes(results);
 
     return {passes, results};
-}
-
-bool BatchGenerator::generateOneGrid(int index, std::map<std::string, std::string> const& params) {
-    auto start_time = std::chrono::steady_clock::now();
-    std::string folder_name = generateGridFolderName(params);
-
-    try {
-        // Generate config from grid params
-        Config config = generateGridConfig(params);
-
-        // Set output directory (direct mode, no timestamp subdirectory)
-        config.output.directory = batch_dir_.string() + "/" + folder_name;
-        config.output.format = OutputFormat::Video;
-        config.output.mode = OutputMode::Direct;
-
-        // Create output directory and save resolved config
-        std::filesystem::create_directories(config.output.directory);
-        config.save(config.output.directory + "/config.toml");
-
-        std::cout << "Parameters:";
-        for (auto const& [key, value] : params) {
-            std::cout << " " << abbreviateParam(key) << "=" << value;
-        }
-        std::cout << "\n";
-        std::cout << "Output: " << folder_name << "/\n";
-
-        // Run simulation
-        Simulation sim(config);
-        auto results = sim.run([](int current, int total) {
-            std::cout << "\rFrame " << current << "/" << total << std::flush;
-        });
-
-        // Calculate boom_seconds from boom_frame (needed for music selection)
-        double boom_seconds = 0.0;
-        if (results.boom_frame) {
-            double frame_duration =
-                config.simulation.duration_seconds / config.simulation.total_frames;
-            boom_seconds = *results.boom_frame * frame_duration;
-        }
-
-        // Mux with music if we have tracks and a boom frame
-        std::string final_video_path = results.video_path;
-        if (results.boom_frame && music_.trackCount() > 0) {
-            auto track = pickMusicTrackForBoom(boom_seconds);
-            if (track) {
-                std::filesystem::path video_path = results.video_path;
-                std::filesystem::path output_path =
-                    video_path.parent_path() / (video_path.stem().string() + "_with_music.mp4");
-
-                std::cout << "\nAdding music: " << track->title << "\n";
-                if (MusicManager::muxWithAudio(video_path, track->filepath, output_path,
-                                               *results.boom_frame, track->drop_time_ms,
-                                               config.output.video_fps)) {
-                    // Replace original with muxed version
-                    std::filesystem::remove(video_path);
-                    std::filesystem::rename(output_path, video_path);
-                }
-            } else if (config_.filter.require_valid_music) {
-                // No valid music track found (drop not after boom) - fail
-                std::cout << "\nNo music track with drop > " << std::fixed << std::setprecision(1)
-                          << boom_seconds << "s - failing video\n";
-                // Clean up the rendered video
-                std::filesystem::remove(results.video_path);
-                return false;
-            }
-        }
-
-        auto end_time = std::chrono::steady_clock::now();
-        double duration = std::chrono::duration<double>(end_time - start_time).count();
-
-        // Calculate simulation speed (physics time / video time)
-        double video_duration =
-            static_cast<double>(config.simulation.total_frames) / config.output.video_fps;
-        double simulation_speed = config.simulation.duration_seconds / video_duration;
-
-        // Track result and create symlink
-        RunResult result{folder_name,
-                         final_video_path,
-                         true,
-                         results.boom_frame,
-                         boom_seconds,
-                         duration,
-                         results.final_spread_ratio,
-                         0, // No probe retries in grid mode
-                         simulation_speed};
-        progress_.results.push_back(result);
-        progress_.completed_ids.push_back(folder_name);
-
-        // Create symlink to video in batch root
-        createVideoSymlink(final_video_path, folder_name + ".mp4");
-
-        return true;
-
-    } catch (std::exception const& e) {
-        std::cerr << "Error generating combination " << index << ": " << e.what() << "\n";
-
-        auto end_time = std::chrono::steady_clock::now();
-        double duration = std::chrono::duration<double>(end_time - start_time).count();
-
-        RunResult result{folder_name, "", false, std::nullopt, 0.0, duration, 0.0, 0, 1.0};
-        progress_.results.push_back(result);
-        progress_.failed_ids.push_back(folder_name);
-        return false;
-    }
 }
 
 std::optional<MusicTrack> BatchGenerator::pickMusicTrack() {
@@ -906,11 +600,14 @@ bool BatchGenerator::loadProgress() {
     return true;
 }
 
-void BatchGenerator::createVideoSymlink(std::string const& video_path, std::string const& link_name) {
-    if (video_path.empty()) return;
+void BatchGenerator::createVideoSymlink(std::string const& video_path,
+                                        std::string const& link_name) {
+    if (video_path.empty())
+        return;
 
     std::filesystem::path target(video_path);
-    if (!std::filesystem::exists(target)) return;
+    if (!std::filesystem::exists(target))
+        return;
 
     std::filesystem::path link_path = batch_dir_ / link_name;
 
@@ -942,8 +639,8 @@ void BatchGenerator::printSummary() const {
 
     std::cout << "║  Total: " << std::setw(4) << progress_.total
               << "    Completed: " << std::setw(4) << progress_.completed
-              << "    Failed: " << std::setw(4) << progress_.failed
-              << std::string(25, ' ') << "║\n";
+              << "    Failed: " << std::setw(4) << progress_.failed << std::string(25, ' ')
+              << "║\n";
 
     std::cout << "║  Total time: " << std::fixed << std::setprecision(1) << total_time << "s";
     if (progress_.completed > 0) {
@@ -995,12 +692,13 @@ void BatchGenerator::printSummary() const {
         std::cout << std::right << std::setw(5) << r.probe_retries << "   ";
 
         // Duration
-        std::cout << std::fixed << std::setprecision(1) << std::setw(5) << r.duration_seconds << "s";
+        std::cout << std::fixed << std::setprecision(1) << std::setw(5) << r.duration_seconds
+                  << "s";
         std::cout << " ║\n";
     }
 
     std::cout << "╠════════════════════════════════════════════════════════════════════════════╣\n";
-    std::cout << "║  Output: " << std::left << std::setw(66)
-              << batch_dir_.string().substr(0, 66) << "║\n";
+    std::cout << "║  Output: " << std::left << std::setw(66) << batch_dir_.string().substr(0, 66)
+              << "║\n";
     std::cout << "╚════════════════════════════════════════════════════════════════════════════╝\n";
 }
