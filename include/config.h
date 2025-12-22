@@ -23,15 +23,47 @@ struct PhysicsParams {
     double initial_velocity2 = 0.0;
 };
 
+// Physics simulation quality presets
+// Each maps to a max_dt value that determines simulation accuracy
+enum class PhysicsQuality {
+    Low,    // max_dt = 0.020 (~100 steps/period, visible artifacts)
+    Medium, // max_dt = 0.012 (~167 steps/period, acceptable)
+    High,   // max_dt = 0.007 (~286 steps/period, gold standard)
+    Ultra,  // max_dt = 0.003 (~667 steps/period, overkill but perfect)
+    Custom  // Use explicit max_dt value
+};
+
+// Get max_dt value for a quality preset
+inline double qualityToMaxDt(PhysicsQuality quality) {
+    switch (quality) {
+    case PhysicsQuality::Low: return 0.020;
+    case PhysicsQuality::Medium: return 0.012;
+    case PhysicsQuality::High: return 0.007;
+    case PhysicsQuality::Ultra: return 0.003;
+    case PhysicsQuality::Custom: return 0.007; // Default to high if somehow used
+    }
+    return 0.007;
+}
+
 struct SimulationParams {
     int pendulum_count = 100000;
     double angle_variation = deg2rad(0.1); // radians
     double duration_seconds = 11.0;        // physical simulation time
     int total_frames = 660;                // number of frames to output
-    int substeps_per_frame = 20;
 
-    // Physics timestep: duration / (frames * substeps)
-    double dt() const { return duration_seconds / (total_frames * substeps_per_frame); }
+    // Physics quality control (replaces substeps_per_frame)
+    // Either use a preset quality level, or specify max_dt directly
+    PhysicsQuality physics_quality = PhysicsQuality::High;
+    double max_dt = 0.007; // Maximum physics timestep (seconds)
+
+    // Compute substeps needed to achieve max_dt constraint
+    int substeps() const {
+        double frame_dt = duration_seconds / total_frames;
+        return std::max(1, static_cast<int>(std::ceil(frame_dt / max_dt)));
+    }
+
+    // Physics timestep: frame_dt / substeps (always <= max_dt)
+    double dt() const { return duration_seconds / (total_frames * substeps()); }
 };
 
 struct RenderParams {

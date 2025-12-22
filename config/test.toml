@@ -13,7 +13,7 @@ pendulum_count = 1000       # Reduced for quick test
 angle_variation_deg = 0.1
 duration_seconds = 1.0      # Just 1 second of physics
 total_frames = 30           # 30 frames output
-substeps_per_frame = 20
+physics_quality = "high"
 
 [render]
 width = 540

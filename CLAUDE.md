@@ -61,6 +61,23 @@ C++20 double pendulum physics simulation with GPU-accelerated rendering. Simulat
 - Uses RK4 integration with Lagrangian equations of motion
 - Thread-safe (each pendulum is independent)
 
+### Physics Quality System
+The simulation uses a `physics_quality` setting that maps to maximum timestep (`max_dt`):
+
+| Quality | max_dt | Steps/period | Description |
+|---------|--------|--------------|-------------|
+| low     | 20ms   | ~100         | Visible artifacts, fast |
+| medium  | 12ms   | ~167         | Acceptable quality |
+| high    | 7ms    | ~286         | Gold standard (default) |
+| ultra   | 3ms    | ~667         | Overkill, perfect accuracy |
+
+The system automatically computes substeps per frame to maintain constant quality:
+```cpp
+substeps = max(1, ceil(frame_dt / max_dt))
+```
+
+This ensures consistent simulation quality regardless of frame count or duration. You can also specify `max_dt` directly in the config for fine control.
+
 ## Build Commands
 
 ```bash

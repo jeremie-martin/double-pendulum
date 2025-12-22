@@ -141,7 +141,7 @@ void Simulation::saveVarianceCSV(std::vector<double> const& variance) {
 SimulationResults Simulation::run(ProgressCallback progress) {
     int const pendulum_count = config_.simulation.pendulum_count;
     int const total_frames = config_.simulation.total_frames;
-    int const substeps = config_.simulation.substeps_per_frame;
+    int const substeps = config_.simulation.substeps();
     double const dt = config_.simulation.dt();
     int const width = config_.render.width;
     int const height = config_.render.height;

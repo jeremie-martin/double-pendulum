@@ -15,7 +15,7 @@ pendulum_count = 1000000    # Enough to see accumulation differences
 angle_variation_deg = 0.1
 duration_seconds = 20.0    # 10 second physics duration
 total_frames = 10          # Only 10 frames to compare
-substeps_per_frame = 200   # High substeps for good quality per frame
+physics_quality = "ultra"  # Highest quality for comparison tests
 
 [render]
 width = 4160

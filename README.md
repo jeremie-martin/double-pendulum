@@ -86,7 +86,7 @@ pendulum_count = 100000
 angle_variation_deg = 0.1
 duration_seconds = 11.0
 total_frames = 660
-substeps_per_frame = 200
+physics_quality = "high"  # low, medium, high, ultra (or use max_dt)
 
 [render]
 width = 2160

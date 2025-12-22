@@ -45,6 +45,19 @@ ToneMapOperator parseToneMapOperator(std::string const& str) {
     return ToneMapOperator::None;
 }
 
+PhysicsQuality parsePhysicsQuality(std::string const& str) {
+    if (str == "low")
+        return PhysicsQuality::Low;
+    if (str == "medium")
+        return PhysicsQuality::Medium;
+    if (str == "high")
+        return PhysicsQuality::High;
+    if (str == "ultra")
+        return PhysicsQuality::Ultra;
+    std::cerr << "Unknown physics quality: " << str << ", using high\n";
+    return PhysicsQuality::High;
+}
+
 // Safe value extraction helpers
 template <typename T> T get_or(toml::table const& tbl, std::string_view key, T default_val) {
     if (auto node = tbl.get(key)) {
@@ -100,7 +113,18 @@ Config Config::load(std::string const& path) {
             config.simulation.angle_variation = deg2rad(get_or(*sim, "angle_variation_deg", 0.1));
             config.simulation.duration_seconds = get_or(*sim, "duration_seconds", 11.0);
             config.simulation.total_frames = get_or(*sim, "total_frames", 660);
-            config.simulation.substeps_per_frame = get_or(*sim, "substeps_per_frame", 20);
+
+            // Physics quality: either use a preset or specify max_dt directly
+            auto quality_str = get_string_or(*sim, "physics_quality", "");
+            if (!quality_str.empty()) {
+                config.simulation.physics_quality = parsePhysicsQuality(quality_str);
+                config.simulation.max_dt = qualityToMaxDt(config.simulation.physics_quality);
+            }
+            // max_dt overrides quality preset if specified
+            if (sim->contains("max_dt")) {
+                config.simulation.max_dt = get_or(*sim, "max_dt", 0.007);
+                config.simulation.physics_quality = PhysicsQuality::Custom;
+            }
         }
 
         // Render
@@ -165,6 +189,11 @@ Config Config::load(std::string const& path) {
         std::cerr << "Warning: total_frames must be positive, using default ("
                   << defaults.simulation.total_frames << ")\n";
         config.simulation.total_frames = defaults.simulation.total_frames;
+    }
+    if (config.simulation.max_dt <= 0) {
+        std::cerr << "Warning: max_dt must be positive, using default ("
+                  << defaults.simulation.max_dt << ")\n";
+        config.simulation.max_dt = defaults.simulation.max_dt;
     }
     if (config.render.width <= 0) {
         std::cerr << "Warning: width must be positive, using default (" << defaults.render.width

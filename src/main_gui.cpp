@@ -513,8 +513,28 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
         }
 
         ImGui::SliderInt("Total Frames", &state.config.simulation.total_frames, 60, 3600);
-        ImGui::SliderInt("Substeps/Frame", &state.config.simulation.substeps_per_frame, 1, 100);
-        ImGui::Text("dt = %.6f s", state.config.simulation.dt());
+
+        // Physics quality settings
+        const char* quality_names[] = {"Low", "Medium", "High", "Ultra", "Custom"};
+        int quality_idx = static_cast<int>(state.config.simulation.physics_quality);
+        if (ImGui::Combo("Physics Quality", &quality_idx, quality_names, 5)) {
+            state.config.simulation.physics_quality = static_cast<PhysicsQuality>(quality_idx);
+            if (quality_idx < 4) { // Not Custom
+                state.config.simulation.max_dt = qualityToMaxDt(state.config.simulation.physics_quality);
+            }
+        }
+
+        // Show max_dt slider (editable, sets quality to Custom)
+        auto max_dt_ms = static_cast<float>(state.config.simulation.max_dt * 1000.0);
+        if (ImGui::SliderFloat("Max dt (ms)", &max_dt_ms, 1.0f, 30.0f, "%.1f")) {
+            state.config.simulation.max_dt = max_dt_ms / 1000.0;
+            state.config.simulation.physics_quality = PhysicsQuality::Custom;
+        }
+
+        // Display computed values
+        ImGui::Text("Substeps: %d, dt = %.4f ms",
+                    state.config.simulation.substeps(),
+                    state.config.simulation.dt() * 1000.0);
     }
 
     // Color parameters

@@ -9,20 +9,20 @@ initial_angle1_deg = 152
 initial_angle2_deg = 152.0
 
 [simulation]
-pendulum_count = 1000000       # Reduced for quick test
+pendulum_count = 100000       # Reduced for quick test
 angle_variation_deg = 0.1
-duration_seconds = 20.0      # Just 20 second of physics
-total_frames = 300           # 300 frames output (5s at 60 FPS)
-physics_quality = "high"
+duration_seconds = 18.0      # Just 20 second of physics
+total_frames = 2400           # 300 frames output (5s at 60 FPS)
+physics_quality = "ultra"
 
 [render]
-width = 1080
-height = 1080
+width = 2160
+height = 2160
 
 [post_process]
-exposure = 4.0
+exposure = 6.0
 contrast = 1.0
-gamma = 2.2
+gamma = 1.6
 
 [color]
 scheme = "spectrum"
