@@ -45,6 +45,103 @@ void main() {
 }
 )";
 
+// Post-processing vertex shader - fullscreen triangle
+static const char* pp_vertex_shader_src = R"(
+#version 330 core
+out vec2 TexCoord;
+
+void main() {
+    // Fullscreen triangle trick: 3 vertices cover the screen
+    vec2 positions[3] = vec2[](
+        vec2(-1.0, -1.0),
+        vec2( 3.0, -1.0),
+        vec2(-1.0,  3.0)
+    );
+    vec2 texcoords[3] = vec2[](
+        vec2(0.0, 0.0),
+        vec2(2.0, 0.0),
+        vec2(0.0, 2.0)
+    );
+    gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0);
+    TexCoord = texcoords[gl_VertexID];
+}
+)";
+
+// Post-processing fragment shader - full pipeline on GPU
+static const char* pp_fragment_shader_src = R"(
+#version 330 core
+in vec2 TexCoord;
+out vec4 FragColor;
+
+uniform sampler2D uFloatTexture;
+uniform float uMaxVal;
+uniform float uExposureMult;
+uniform float uContrast;
+uniform float uInvGamma;
+uniform int uToneMapOp;
+uniform float uWhitePoint;
+
+// Tone mapping functions
+float toneMapReinhard(float v) {
+    return v / (1.0 + v);
+}
+
+float toneMapReinhardExtended(float v, float wp) {
+    float w2 = wp * wp;
+    return (v * (1.0 + v / w2)) / (1.0 + v);
+}
+
+float toneMapACES(float v) {
+    float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+    return clamp((v * (a * v + b)) / (v * (c * v + d) + e), 0.0, 1.0);
+}
+
+float toneMapLogarithmic(float v, float wp) {
+    return log(1.0 + v) / log(1.0 + wp);
+}
+
+float toneMap(float v, int op, float wp) {
+    if (op == 1) return toneMapReinhard(v);
+    if (op == 2) return toneMapReinhardExtended(v, wp);
+    if (op == 3) return toneMapACES(v);
+    if (op == 4) return toneMapLogarithmic(v, wp);
+    return clamp(v, 0.0, 1.0); // None
+}
+
+void main() {
+    // Sample float texture (flip Y for correct orientation)
+    vec2 flippedCoord = vec2(TexCoord.x, 1.0 - TexCoord.y);
+    vec4 hdr = texture(uFloatTexture, flippedCoord);
+
+    vec3 color;
+    for (int c = 0; c < 3; c++) {
+        float v = hdr[c];
+
+        // 1. Normalize
+        v = v / uMaxVal;
+
+        // 2. Exposure
+        v = v * uExposureMult;
+
+        // 3. Tone mapping
+        v = toneMap(v, uToneMapOp, uWhitePoint);
+
+        // 4. Contrast
+        v = (v - 0.5) * uContrast + 0.5;
+
+        // 5. Clamp
+        v = clamp(v, 0.0, 1.0);
+
+        // 6. Gamma
+        v = pow(v, uInvGamma);
+
+        color[c] = v;
+    }
+
+    FragColor = vec4(color, 1.0);
+}
+)";
+
 GLRenderer::GLRenderer() {}
 
 GLRenderer::~GLRenderer() {
@@ -98,6 +195,13 @@ bool GLRenderer::init(int width, int height) {
 
     glBindVertexArray(0);
 
+    // Create empty VAO for post-processing (fullscreen triangle uses gl_VertexID)
+    glGenVertexArrays(1, &pp_vao_);
+
+    if (!createPostProcessShader()) {
+        return false;
+    }
+
     float_buffer_.resize(width * height * 4);
 
     return true;
@@ -110,9 +214,17 @@ void GLRenderer::shutdown() {
         glDeleteProgram(shader_program_);
         shader_program_ = 0;
     }
+    if (pp_shader_program_) {
+        glDeleteProgram(pp_shader_program_);
+        pp_shader_program_ = 0;
+    }
     if (vao_) {
         glDeleteVertexArrays(1, &vao_);
         vao_ = 0;
+    }
+    if (pp_vao_) {
+        glDeleteVertexArrays(1, &pp_vao_);
+        pp_vao_ = 0;
     }
     if (vbo_) {
         glDeleteBuffers(1, &vbo_);
@@ -147,6 +259,16 @@ bool GLRenderer::createFramebuffer() {
                  nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    // Create FBO for rendering to display texture (post-processing output)
+    glGenFramebuffers(1, &display_fbo_);
+    glBindFramebuffer(GL_FRAMEBUFFER, display_fbo_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, display_texture_, 0);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        std::cerr << "Display framebuffer not complete!\n";
+        return false;
+    }
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
@@ -201,10 +323,62 @@ bool GLRenderer::createShaders() {
     return true;
 }
 
+bool GLRenderer::createPostProcessShader() {
+    // Compile vertex shader
+    GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertex_shader, 1, &pp_vertex_shader_src, nullptr);
+    glCompileShader(vertex_shader);
+
+    GLint success;
+    glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        char log[512];
+        glGetShaderInfoLog(vertex_shader, 512, nullptr, log);
+        std::cerr << "PP vertex shader error: " << log << "\n";
+        return false;
+    }
+
+    // Compile fragment shader
+    GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragment_shader, 1, &pp_fragment_shader_src, nullptr);
+    glCompileShader(fragment_shader);
+
+    glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        char log[512];
+        glGetShaderInfoLog(fragment_shader, 512, nullptr, log);
+        std::cerr << "PP fragment shader error: " << log << "\n";
+        return false;
+    }
+
+    // Link program
+    pp_shader_program_ = glCreateProgram();
+    glAttachShader(pp_shader_program_, vertex_shader);
+    glAttachShader(pp_shader_program_, fragment_shader);
+    glLinkProgram(pp_shader_program_);
+
+    glGetProgramiv(pp_shader_program_, GL_LINK_STATUS, &success);
+    if (!success) {
+        char log[512];
+        glGetProgramInfoLog(pp_shader_program_, 512, nullptr, log);
+        std::cerr << "PP shader link error: " << log << "\n";
+        return false;
+    }
+
+    glDeleteShader(vertex_shader);
+    glDeleteShader(fragment_shader);
+
+    return true;
+}
+
 void GLRenderer::deleteFramebuffer() {
     if (fbo_) {
         glDeleteFramebuffers(1, &fbo_);
         fbo_ = 0;
+    }
+    if (display_fbo_) {
+        glDeleteFramebuffers(1, &display_fbo_);
+        display_fbo_ = 0;
     }
     if (float_texture_) {
         glDeleteTextures(1, &float_texture_);
@@ -344,61 +518,20 @@ void GLRenderer::flush() {
 
 void GLRenderer::readPixels(std::vector<uint8_t>& out, float exposure, float contrast, float gamma,
                             ToneMapOperator tone_map, float white_point) {
-    // Flush any pending lines first
-    flush();
+    // Process on GPU first
+    updateDisplayTexture(exposure, contrast, gamma, tone_map, white_point);
 
-    out.resize(width_ * height_ * 3);
+    // Read back 8-bit display texture (4x smaller transfer than float texture)
+    std::vector<uint8_t> rgba(static_cast<size_t>(width_) * height_ * 4);
+    glBindTexture(GL_TEXTURE_2D, display_texture_);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
 
-    // Read floating-point data
-    glBindTexture(GL_TEXTURE_2D, float_texture_);
-    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, float_buffer_.data());
-
-    // Find max value for normalization
-    float max_val = 0.0f;
-    for (size_t i = 0; i < float_buffer_.size(); i += 4) {
-        max_val = std::max(max_val, float_buffer_[i]);
-        max_val = std::max(max_val, float_buffer_[i + 1]);
-        max_val = std::max(max_val, float_buffer_[i + 2]);
-    }
-
-    if (max_val < 1e-6f)
-        max_val = 1.0f;
-
-    // Precompute constants
-    float exposure_mult = std::pow(2.0f, exposure);
-    float inv_gamma = 1.0f / gamma;
-
-    // Apply full post-processing pipeline (flip Y - OpenGL has Y=0 at bottom)
-    for (int y = 0; y < height_; ++y) {
-        for (int x = 0; x < width_; ++x) {
-            size_t src_idx = (y * width_ + x) * 4;
-            size_t dst_idx = ((height_ - 1 - y) * width_ + x) * 3; // Flip Y
-
-            for (int c = 0; c < 3; ++c) {
-                float v = float_buffer_[src_idx + c];
-
-                // 1. Normalize to [0,1]
-                v = v / max_val;
-
-                // 2. Apply exposure (gain in HDR space)
-                v = v * exposure_mult;
-
-                // 3. Apply tone mapping (HDR -> SDR)
-                v = PostProcess::toneMap(v, tone_map, white_point);
-
-                // 4. Apply contrast (centered at 0.5)
-                v = (v - 0.5f) * contrast + 0.5f;
-
-                // 5. Clamp to [0,1]
-                v = std::max(0.0f, std::min(1.0f, v));
-
-                // 6. Apply gamma correction
-                v = std::pow(v, inv_gamma);
-
-                // 7. Scale to [0,255]
-                out[dst_idx + c] = static_cast<uint8_t>(v * 255.0f);
-            }
-        }
+    // Convert RGBA to RGB (shader already flipped Y)
+    out.resize(static_cast<size_t>(width_) * height_ * 3);
+    for (int i = 0; i < width_ * height_; ++i) {
+        out[i * 3 + 0] = rgba[i * 4 + 0];
+        out[i * 3 + 1] = rgba[i * 4 + 1];
+        out[i * 3 + 2] = rgba[i * 4 + 2];
     }
 }
 
@@ -407,64 +540,49 @@ void GLRenderer::updateDisplayTexture(float exposure, float contrast, float gamm
     // Flush any pending lines first
     flush();
 
-    // Read floating-point data from GPU
+    // Read float texture to find max value (CPU - required for proper normalization)
     glBindTexture(GL_TEXTURE_2D, float_texture_);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, float_buffer_.data());
 
-    // Find max value for normalization
     float max_val = 0.0f;
     for (size_t i = 0; i < float_buffer_.size(); i += 4) {
-        max_val = std::max(max_val, float_buffer_[i]);     // R
-        max_val = std::max(max_val, float_buffer_[i + 1]); // G
-        max_val = std::max(max_val, float_buffer_[i + 2]); // B
+        max_val = std::max(max_val, float_buffer_[i]);
+        max_val = std::max(max_val, float_buffer_[i + 1]);
+        max_val = std::max(max_val, float_buffer_[i + 2]);
+    }
+    if (max_val < 1e-6f) {
+        max_val = 1.0f;
     }
 
-    if (max_val < 1e-6f)
-        max_val = 1.0f;
-
-    // Precompute exposure multiplier and inverse gamma
+    // Precompute shader uniforms
     float exposure_mult = std::pow(2.0f, exposure);
     float inv_gamma = 1.0f / gamma;
+    int tone_map_op = static_cast<int>(tone_map);
 
-    // Create 8-bit buffer with standard post-processing pipeline
-    // (same as CPU: normalize -> exposure -> tone_map -> contrast -> clamp -> gamma)
-    std::vector<uint8_t> rgba(width_ * height_ * 4);
+    // Render post-processing on GPU
+    glBindFramebuffer(GL_FRAMEBUFFER, display_fbo_);
+    glViewport(0, 0, width_, height_);
+    glDisable(GL_BLEND);
 
-    for (int y = 0; y < height_; ++y) {
-        for (int x = 0; x < width_; ++x) {
-            size_t src_idx = (y * width_ + x) * 4;
-            size_t dst_idx = (y * width_ + x) * 4;
+    glUseProgram(pp_shader_program_);
 
-            for (int c = 0; c < 3; ++c) {
-                float v = float_buffer_[src_idx + c];
+    // Set uniforms
+    glUniform1f(glGetUniformLocation(pp_shader_program_, "uMaxVal"), max_val);
+    glUniform1f(glGetUniformLocation(pp_shader_program_, "uExposureMult"), exposure_mult);
+    glUniform1f(glGetUniformLocation(pp_shader_program_, "uContrast"), contrast);
+    glUniform1f(glGetUniformLocation(pp_shader_program_, "uInvGamma"), inv_gamma);
+    glUniform1i(glGetUniformLocation(pp_shader_program_, "uToneMapOp"), tone_map_op);
+    glUniform1f(glGetUniformLocation(pp_shader_program_, "uWhitePoint"), white_point);
 
-                // 1. Normalize to [0,1]
-                v = v / max_val;
+    // Bind float texture
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, float_texture_);
+    glUniform1i(glGetUniformLocation(pp_shader_program_, "uFloatTexture"), 0);
 
-                // 2. Apply exposure (gain in HDR space)
-                v = v * exposure_mult;
+    // Draw fullscreen triangle
+    glBindVertexArray(pp_vao_);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
 
-                // 3. Apply tone mapping (HDR -> SDR)
-                v = PostProcess::toneMap(v, tone_map, white_point);
-
-                // 4. Apply contrast (centered at 0.5)
-                v = (v - 0.5f) * contrast + 0.5f;
-
-                // 5. Clamp to [0,1]
-                v = std::max(0.0f, std::min(1.0f, v));
-
-                // 6. Apply gamma correction
-                v = std::pow(v, inv_gamma);
-
-                // 7. Scale to [0,255]
-                rgba[dst_idx + c] = static_cast<uint8_t>(v * 255.0f);
-            }
-            rgba[dst_idx + 3] = 255;
-        }
-    }
-
-    // Upload to display texture
-    glBindTexture(GL_TEXTURE_2D, display_texture_);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width_, height_, GL_RGBA, GL_UNSIGNED_BYTE,
-                    rgba.data());
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }

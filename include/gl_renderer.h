@@ -64,6 +64,11 @@ private:
     GLuint vao_ = 0;
     GLuint vbo_ = 0;
 
+    // Post-processing shader and resources
+    GLuint pp_shader_program_ = 0;
+    GLuint pp_vao_ = 0;
+    GLuint display_fbo_ = 0;
+
     // Line data buffer (x0, y0, x1, y1, r, g, b, intensity per line)
     struct LineData {
         float x0, y0, x1, y1;
@@ -80,5 +85,6 @@ private:
 
     bool createFramebuffer();
     bool createShaders();
+    bool createPostProcessShader();
     void deleteFramebuffer();
 };
