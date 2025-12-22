@@ -29,12 +29,15 @@ int runSimulation(std::string const& config_path) {
     std::cout << "Loading config from: " << config_path << "\n";
     Config config = Config::load(config_path);
 
+    // Calculate video duration
+    double video_duration = static_cast<double>(config.simulation.total_frames) / config.output.video_fps;
+
     // Print config summary
     std::cout << "\nSimulation parameters:\n"
               << "  Pendulums: " << config.simulation.pendulum_count << "\n"
-              << "  Duration: " << config.simulation.duration_seconds << "s\n"
+              << "  Physics duration: " << config.simulation.duration_seconds << "s\n"
               << "  Frames: " << config.simulation.total_frames << "\n"
-              << "  Video FPS: " << config.output.video_fps << "\n"
+              << "  Video: " << video_duration << "s @ " << config.output.video_fps << " FPS\n"
               << "  Resolution: " << config.render.width << "x" << config.render.height << "\n"
               << "  Output: " << config.output.directory << "/\n\n";
 

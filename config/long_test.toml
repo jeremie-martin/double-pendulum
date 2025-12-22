@@ -30,10 +30,11 @@ start = 0.0
 end = 1.0
 
 [detection]
-boom_threshold = 0.3
+boom_threshold = 1.0
+white_threshold = 500
 
 [output]
-format = "png"
+format = "video"
 directory = "output/long_test"
 filename_prefix = "frame"
 video_fps = 60              # Lower FPS for test videos

@@ -63,11 +63,17 @@ struct AppState
     std::vector<Color> colors;
     VarianceTracker variance_tracker;
 
+    // Frame history for timeline scrubbing
+    std::vector<std::vector<PendulumState>> frame_history;
+    int max_history_frames = 1000;  // Limit memory usage
+
     // Control
     bool running = false;
     bool paused = false;
     bool needs_redraw = false;  // For re-rendering when paused
     int current_frame = 0;
+    int display_frame = 0;      // Frame being displayed (for timeline scrubbing)
+    bool scrubbing = false;     // True when user is dragging timeline
 
     // Detection results
     std::optional<int> boom_frame;
@@ -119,27 +125,33 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
     state.boom_frame.reset();
     state.white_frame.reset();
     state.current_frame = 0;
+    state.display_frame = 0;
+    state.scrubbing = false;
     state.running = true;
     state.paused = false;
+
+    // Clear frame history
+    state.frame_history.clear();
+    state.frame_history.reserve(state.max_history_frames);
 
     renderer.resize(state.preview.width, state.preview.height);
 }
 
-// Render current state (without physics step)
-void renderFrame(AppState& state, GLRenderer& renderer) {
-    if (!state.running || state.states.empty()) return;
+// Render a given set of states
+void renderStates(AppState& state, GLRenderer& renderer, std::vector<PendulumState> const& states_to_render) {
+    if (!state.running || states_to_render.empty()) return;
 
     auto render_start = std::chrono::high_resolution_clock::now();
 
     renderer.clear();
 
-    int n = state.states.size();
+    int n = states_to_render.size();
     float scale = state.preview.width / 5.0f;
     float cx = state.preview.width / 2.0f;
     float cy = state.preview.height / 2.0f;
 
     for (int i = 0; i < n; ++i) {
-        auto const& s = state.states[i];
+        auto const& s = states_to_render[i];
         auto const& c = state.colors[i];
 
         float x0 = cx;
@@ -157,6 +169,19 @@ void renderFrame(AppState& state, GLRenderer& renderer) {
 
     auto render_end = std::chrono::high_resolution_clock::now();
     state.render_time_ms = std::chrono::duration<double, std::milli>(render_end - render_start).count();
+}
+
+// Render current state (without physics step)
+void renderFrame(AppState& state, GLRenderer& renderer) {
+    renderStates(state, renderer, state.states);
+}
+
+// Render a specific frame from history
+void renderFrameFromHistory(AppState& state, GLRenderer& renderer, int frame_index) {
+    if (frame_index < 0 || frame_index >= static_cast<int>(state.frame_history.size())) {
+        return;
+    }
+    renderStates(state, renderer, state.frame_history[frame_index]);
 }
 
 void stepSimulation(AppState& state, GLRenderer& renderer) {
@@ -212,10 +237,16 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     auto sim_end = std::chrono::high_resolution_clock::now();
     state.sim_time_ms = std::chrono::duration<double, std::milli>(sim_end - start).count();
 
+    // Save to frame history (if under limit)
+    if (static_cast<int>(state.frame_history.size()) < state.max_history_frames) {
+        state.frame_history.push_back(state.states);
+    }
+
     // Render
     renderFrame(state, renderer);
 
     state.current_frame++;
+    state.display_frame = state.current_frame;
 }
 
 void drawVarianceGraph(AppState const& state, ImVec2 size) {
@@ -331,7 +362,12 @@ void drawExportPanel(AppState& state) {
             ImGui::SliderInt("Width", &state.config.render.width, 540, 4320);
             ImGui::SliderInt("Height", &state.config.render.height, 540, 4320);
             ImGui::SliderInt("Pendulum Count", &state.config.simulation.pendulum_count, 1000, 500000);
+            ImGui::SliderInt("Total Frames", &state.config.simulation.total_frames, 60, 3600);
             ImGui::SliderInt("Video FPS", &state.config.output.video_fps, 24, 120);
+
+            // Calculate and display video duration
+            double video_duration = static_cast<double>(state.config.simulation.total_frames) / state.config.output.video_fps;
+            ImGui::Text("Video duration: %.2f seconds", video_duration);
 
             const char* formats[] = {"PNG Sequence", "Video (MP4)"};
             int format_idx = state.config.output.format == OutputFormat::PNG ? 0 : 1;
@@ -352,6 +388,86 @@ void drawExportPanel(AppState& state) {
                 ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Output: %s", state.export_state.output_path.c_str());
             }
         }
+    }
+}
+
+void drawTimeline(AppState& state, GLRenderer& renderer) {
+    if (!state.running) {
+        ImGui::Text("Start simulation to enable timeline");
+        return;
+    }
+
+    int history_size = static_cast<int>(state.frame_history.size());
+    if (history_size == 0) {
+        ImGui::Text("Recording frames...");
+        return;
+    }
+
+    ImGui::Text("Timeline");
+    ImGui::Separator();
+
+    // Playback controls
+    if (ImGui::Button(state.paused ? "Play" : "Pause")) {
+        state.paused = !state.paused;
+        if (!state.paused) {
+            // Resume from current display frame
+            state.scrubbing = false;
+        }
+    }
+    ImGui::SameLine();
+
+    // Step backward
+    if (ImGui::Button("<<") && state.display_frame > 0) {
+        state.paused = true;
+        state.display_frame--;
+        state.scrubbing = true;
+        renderFrameFromHistory(state, renderer, state.display_frame);
+    }
+    ImGui::SameLine();
+
+    // Step forward (only within history)
+    if (ImGui::Button(">>") && state.display_frame < history_size - 1) {
+        state.paused = true;
+        state.display_frame++;
+        state.scrubbing = true;
+        renderFrameFromHistory(state, renderer, state.display_frame);
+    }
+    ImGui::SameLine();
+
+    // Jump to live
+    if (ImGui::Button("Live")) {
+        state.scrubbing = false;
+        state.display_frame = state.current_frame;
+        if (!state.frame_history.empty()) {
+            renderFrameFromHistory(state, renderer, std::min(state.display_frame, history_size - 1));
+        }
+    }
+
+    // Timeline slider
+    int max_frame = std::max(1, history_size - 1);
+    int slider_frame = std::min(state.display_frame, max_frame);
+
+    if (ImGui::SliderInt("Frame", &slider_frame, 0, max_frame)) {
+        state.paused = true;
+        state.scrubbing = true;
+        state.display_frame = slider_frame;
+        renderFrameFromHistory(state, renderer, state.display_frame);
+    }
+
+    // Frame info
+    ImGui::Text("Displaying: %d / %d", state.display_frame, history_size - 1);
+    if (history_size >= state.max_history_frames) {
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "History limit reached (%d frames)", state.max_history_frames);
+    }
+
+    // Show boom/white markers on timeline
+    if (state.boom_frame.has_value() && *state.boom_frame < history_size) {
+        float boom_pos = static_cast<float>(*state.boom_frame) / max_frame;
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Boom at frame %d (%.1f%%)", *state.boom_frame, boom_pos * 100);
+    }
+    if (state.white_frame.has_value() && *state.white_frame < history_size) {
+        float white_pos = static_cast<float>(*state.white_frame) / max_frame;
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "White at frame %d (%.1f%%)", *state.white_frame, white_pos * 100);
     }
 }
 
@@ -715,6 +831,11 @@ int main(int argc, char* argv[]) {
         ImVec2 graph_size = ImGui::GetContentRegionAvail();
         graph_size.y = std::max(100.0f, graph_size.y);
         drawVarianceGraph(state, graph_size);
+        ImGui::End();
+
+        // Timeline
+        ImGui::Begin("Timeline");
+        drawTimeline(state, renderer);
         ImGui::End();
 
         // Rendering

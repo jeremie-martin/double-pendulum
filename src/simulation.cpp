@@ -288,10 +288,14 @@ void Simulation::run(ProgressCallback progress) {
         std::cout << "=== Simulation Complete ===\n";
     }
 
+    // Calculate video duration
+    double video_duration = static_cast<double>(results.frames_completed) / config_.output.video_fps;
+
     std::cout << std::fixed << std::setprecision(2);
     std::cout << "Frames:      " << results.frames_completed << "/" << total_frames;
     if (early_stopped) std::cout << " (early stop)";
     std::cout << "\n";
+    std::cout << "Video:       " << video_duration << "s @ " << config_.output.video_fps << " FPS\n";
     std::cout << "Pendulums:   " << pendulum_count << "\n";
     std::cout << "Total time:  " << results.timing.total_seconds << "s\n";
     std::cout << "  Physics:   " << std::setw(5) << results.timing.physics_seconds << "s ("
