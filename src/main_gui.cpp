@@ -130,6 +130,7 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
     }
 
     state.variance_tracker.reset();
+    state.analysis_tracker.reset();
     state.boom_frame.reset();
     state.white_frame.reset();
     state.current_frame = 0;
@@ -812,8 +813,8 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
     // Analysis metrics
     ImGui::Separator();
     ImGui::Text("Variance: %.4f", state.variance_tracker.getCurrentVariance());
-    ImGui::Text("Spread:   %.1f%% above",
-                state.variance_tracker.getCurrentSpread().spread_ratio * 100);
+    ImGui::Text("Spread:   %.1f%% (uniform)",
+                state.variance_tracker.getCurrentSpread().circular_spread * 100);
     auto const& current = state.analysis_tracker.getCurrent();
     ImGui::Text("Energy:   %.2f", current.total_energy);
 
@@ -1115,11 +1116,11 @@ int main(int argc, char* argv[]) {
         graph_size.y = std::max(100.0f, graph_size.y - 60.0f); // Leave room for score
         drawMetricGraph(state, graph_size);
 
-        // Display current and peak metrics
+        // Display current metrics (live from renderer, updates with post-processing)
         ImGui::Separator();
-        auto const& current = state.analysis_tracker.getCurrent();
-        ImGui::Text("Current: Brightness %.3f  Contrast %.3f", current.brightness,
-                    current.contrast_stddev);
+        ImGui::Text("Brightness %.3f  Coverage %.2f%%  ContrastRange %.3f", renderer.lastBrightness(),
+                    renderer.lastCoverage() * 100.0f, renderer.lastContrastRange());
+        ImGui::Text("Edge %.4f  ColorVar %.4f", renderer.lastEdgeEnergy(), renderer.lastColorVariance());
 
         // Calculate peak causticness from history
         if (!state.analysis_tracker.getHistory().empty() && state.boom_frame) {

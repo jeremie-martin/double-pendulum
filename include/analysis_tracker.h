@@ -24,25 +24,40 @@ struct FrameAnalysis {
     float peak_median_ratio = 0.0f; // p99/p50 brightness ratio (bright focal points)
 
     // Causticness score: rewards sharp edges, color diversity, moderate coverage
-    // Penalizes uniform blobs (low edge energy) and compact shapes (low coverage)
+    // Penalizes uniform blobs (low edge energy), compact shapes (low coverage),
+    // and washed-out images (high coverage/brightness)
     double causticness() const {
-        // Edge energy is key: sharp filaments have high gradients
-        // Color variance rewards colorful patterns
-        // Coverage should be moderate (not too compact, not washed out)
-        // Peak-median ratio rewards bright focal points against darker areas
-
-        // Coverage factor: peaks around 0.3-0.5, penalize <0.1 or >0.7
-        double coverage_factor = 1.0 - std::abs(coverage - 0.35) * 2.0;
-        coverage_factor = std::max(0.0, std::min(1.0, coverage_factor));
-
-        // Combine: edge_energy * color_variance * coverage_factor * sqrt(peak_median_ratio)
-        // The edge_energy is the most important differentiator
-        double score = edge_energy * (1.0 + color_variance) * coverage_factor;
-
-        // Boost if there are bright focal points (high peak/median)
-        if (peak_median_ratio > 1.5) {
-            score *= std::sqrt(std::min(peak_median_ratio, 10.0f) / 1.5);
+        // Coverage factor: peaks around 0.35, penalizes both extremes
+        // Low coverage (<0.15): too sparse/compact
+        // High coverage (>0.55): washed out/white
+        double coverage_factor = 0.0;
+        if (coverage > 0.1 && coverage < 0.7) {
+            // Peak at 0.35, with asymmetric falloff (harsher for high coverage)
+            if (coverage <= 0.35) {
+                coverage_factor = (coverage - 0.1) / 0.25; // Linear rise from 0.1 to 0.35
+            } else {
+                // Steeper falloff for high coverage (penalize white more)
+                coverage_factor = 1.0 - std::pow((coverage - 0.35) / 0.35, 1.5);
+            }
+            coverage_factor = std::max(0.0, coverage_factor);
         }
+
+        // Brightness penalty: high brightness means washed out
+        // Caustics look best at moderate brightness (0.05-0.15)
+        double brightness_factor = 1.0;
+        if (brightness > 0.15) {
+            brightness_factor = std::max(0.0, 1.0 - (brightness - 0.15) * 4.0);
+        }
+
+        // Contrast factor: good caustics have high contrast_range
+        // After white, contrast_range drops because everything is uniformly bright
+        double contrast_factor = std::min(1.0, contrast_range * 2.0);
+
+        // Base score from edge energy and color variance
+        double score = edge_energy * (1.0 + color_variance * 2.0);
+
+        // Apply all factors
+        score *= coverage_factor * brightness_factor * (0.5 + contrast_factor * 0.5);
 
         return score;
     }
