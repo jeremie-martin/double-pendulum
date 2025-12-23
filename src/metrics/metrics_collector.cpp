@@ -76,6 +76,29 @@ void MetricsCollector::setGPUMetrics(GPUMetricsBundle const& bundle) {
     setMetric(MetricNames::Causticness, causticness);
 }
 
+void MetricsCollector::updateGPUMetricsAtFrame(GPUMetricsBundle const& bundle, int frame) {
+    // Helper to update a metric at a specific frame
+    auto updateAt = [this, frame](std::string const& name, double value) {
+        auto* series = getMetricMutable(name);
+        if (series) {
+            series->updateAt(static_cast<size_t>(frame), value);
+        }
+    };
+
+    updateAt(MetricNames::MaxValue, bundle.max_value);
+    updateAt(MetricNames::Brightness, bundle.brightness);
+    updateAt(MetricNames::ContrastStddev, bundle.contrast_stddev);
+    updateAt(MetricNames::ContrastRange, bundle.contrast_range);
+    updateAt(MetricNames::EdgeEnergy, bundle.edge_energy);
+    updateAt(MetricNames::ColorVariance, bundle.color_variance);
+    updateAt(MetricNames::Coverage, bundle.coverage);
+    updateAt(MetricNames::PeakMedianRatio, bundle.peak_median_ratio);
+
+    // Recompute causticness
+    double causticness = computeCausticness(bundle);
+    updateAt(MetricNames::Causticness, causticness);
+}
+
 void MetricsCollector::endFrame() {
     // Nothing special needed for now
 }

@@ -70,6 +70,7 @@ public:
     void beginFrame(int frame_number);
     void setMetric(std::string const& name, double value);
     void setGPUMetrics(GPUMetricsBundle const& bundle);
+    void updateGPUMetricsAtFrame(GPUMetricsBundle const& bundle, int frame);
     void endFrame();
 
     // Physics update from pendulum data

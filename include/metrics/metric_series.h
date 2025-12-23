@@ -36,6 +36,14 @@ public:
 
     void reserve(size_t n) { values_.reserve(n); }
 
+    // Update value at specific index (for real-time re-rendering)
+    void updateAt(size_t frame, T value) {
+        if (frame < values_.size()) {
+            values_[frame] = value;
+            invalidateCache();
+        }
+    }
+
     size_t size() const { return values_.size(); }
     bool empty() const { return values_.empty(); }
 

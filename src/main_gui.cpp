@@ -1944,6 +1944,26 @@ int main(int argc, char* argv[]) {
         if (state.needs_redraw) {
             renderFrame(state, renderer);
             state.needs_redraw = false;
+
+            // Update GPU metrics at the current display frame
+            // This allows quality scores to update when changing colors/post-processing
+            if (state.running && state.display_frame >= 0) {
+                metrics::GPUMetricsBundle gpu_metrics;
+                gpu_metrics.max_value = renderer.lastMax();
+                gpu_metrics.brightness = renderer.lastBrightness();
+                gpu_metrics.contrast_stddev = renderer.lastContrastStddev();
+                gpu_metrics.contrast_range = renderer.lastContrastRange();
+                gpu_metrics.edge_energy = renderer.lastEdgeEnergy();
+                gpu_metrics.color_variance = renderer.lastColorVariance();
+                gpu_metrics.coverage = renderer.lastCoverage();
+                gpu_metrics.peak_median_ratio = renderer.lastPeakMedianRatio();
+                state.metrics_collector.updateGPUMetricsAtFrame(gpu_metrics, state.display_frame);
+
+                // Re-run causticness analyzer to update quality score
+                if (state.boom_frame.has_value()) {
+                    state.causticness_analyzer.analyze(state.metrics_collector, state.event_detector);
+                }
+            }
         }
 
         // Start ImGui frame
