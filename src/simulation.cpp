@@ -1,6 +1,7 @@
 #include "simulation.h"
 
 #include "enum_strings.h"
+#include "metrics/boom_detection.h"
 #include "simulation_data.h"
 
 #include <algorithm>
@@ -52,9 +53,9 @@ Simulation::Simulation(Config const& config) : config_(config), color_gen_(confi
     metrics_collector_.registerGPUMetrics();
 
     // Setup event detection from config
+    // Note: Boom is detected via max causticness, not threshold crossing
+    // Only chaos uses the EventDetector threshold mechanism
     auto const& detect = config_.detection;
-    event_detector_.addBoomCriteria(detect.boom_threshold, detect.boom_confirmation,
-                                    metrics::MetricNames::Variance);
     event_detector_.addChaosCriteria(detect.chaos_threshold, detect.chaos_confirmation,
                                      metrics::MetricNames::Variance);
 }
@@ -321,7 +322,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     SimulationResults results;
 
     // Frame duration for event timing
-    double const frame_duration = config_.simulation.duration_seconds / total_frames;
+    double const frame_duration = config_.simulation.frameDuration();
 
     // Reset metrics for fresh run
     metrics_collector_.reset();
@@ -482,24 +483,24 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         }
     }
 
-    // Override boom detection: use max angular_causticness frame
-    if (auto* caustic_series =
-            metrics_collector_.getMetric(metrics::MetricNames::AngularCausticness)) {
-        auto const& values = caustic_series->values();
-        if (!values.empty()) {
-            auto max_it = std::max_element(values.begin(), values.end());
-            int max_frame = static_cast<int>(std::distance(values.begin(), max_it));
-            results.boom_frame = max_frame;
-            // substract 0.3s to align with visual boom timing
-            // (empirically determined offset based on testing)
-            results.boom_frame =
-                std::max(0, *results.boom_frame - static_cast<int>(0.3 / frame_duration));
-            results.boom_variance = *max_it; // Store causticness value instead of variance
+    // Detect boom using max angular causticness (with 0.3s offset)
+    auto boom = metrics::findBoomFrame(metrics_collector_, frame_duration);
+    if (boom.frame >= 0) {
+        results.boom_frame = boom.frame;
+        results.boom_variance = boom.causticness;  // Store causticness value
+
+        // Force boom event for analyzers (like BoomAnalyzer) to use
+        double variance_at_boom = 0.0;
+        if (auto* var_series = metrics_collector_.getMetric(metrics::MetricNames::Variance)) {
+            if (boom.frame < static_cast<int>(var_series->size())) {
+                variance_at_boom = var_series->at(boom.frame);
+            }
         }
+        metrics::forceBoomEvent(event_detector_, boom, variance_at_boom);
     }
 
     // Extract metrics history
-    if (auto* variance_series = metrics_collector_.getMetric(metrics::MetricNames::Variance)) {
+    if (auto const* variance_series = metrics_collector_.getMetric(metrics::MetricNames::Variance)) {
         results.variance_history = variance_series->values();
     }
     results.spread_history = metrics_collector_.getSpreadHistory();
@@ -641,7 +642,7 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
     event_detector_.reset();
 
     // Time per frame for event timing
-    double const frame_duration = config_.simulation.duration_seconds / total_frames;
+    double const frame_duration = config_.simulation.frameDuration();
 
     // Main physics loop
     for (int frame = 0; frame < total_frames; ++frame) {
@@ -677,18 +678,7 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
         }
     }
 
-    // Run analyzers
-    boom_analyzer_.analyze(metrics_collector_, event_detector_);
-    causticness_analyzer_.setFrameDuration(frame_duration);
-    causticness_analyzer_.analyze(metrics_collector_, event_detector_);
-
-    // Populate results from event detector (legacy variance-based)
-    if (auto boom_event = event_detector_.getEvent(metrics::EventNames::Boom)) {
-        if (boom_event->detected()) {
-            results.boom_frame = boom_event->frame;
-            results.boom_seconds = boom_event->seconds;
-        }
-    }
+    // Get chaos event from detector
     if (auto chaos_event = event_detector_.getEvent(metrics::EventNames::Chaos)) {
         if (chaos_event->detected()) {
             results.chaos_frame = chaos_event->frame;
@@ -696,23 +686,30 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
         }
     }
 
-    // Override boom detection: use max angular_causticness frame
-    // This ensures boom is always detected (it's the peak, not a threshold)
-    if (auto const* caustic_series =
-            metrics_collector_.getMetric(metrics::MetricNames::AngularCausticness)) {
-        auto const& values = caustic_series->values();
-        if (!values.empty()) {
-            auto max_it = std::max_element(values.begin(), values.end());
-            int max_frame = static_cast<int>(std::distance(values.begin(), max_it));
-            // Apply 0.3s offset for better visual alignment
-            max_frame = std::max(0, max_frame - static_cast<int>(0.3 / frame_duration));
-            results.boom_frame = max_frame;
-            results.boom_seconds = max_frame * frame_duration;
+    // Detect boom using max angular causticness (with 0.3s offset)
+    // Must happen BEFORE analyzers so they can use the boom event
+    auto boom = metrics::findBoomFrame(metrics_collector_, frame_duration);
+    if (boom.frame >= 0) {
+        results.boom_frame = boom.frame;
+        results.boom_seconds = boom.seconds;
+
+        // Force boom event for analyzers to use
+        double variance_at_boom = 0.0;
+        if (auto const* var_series = metrics_collector_.getMetric(metrics::MetricNames::Variance)) {
+            if (boom.frame < static_cast<int>(var_series->size())) {
+                variance_at_boom = var_series->at(boom.frame);
+            }
         }
+        metrics::forceBoomEvent(event_detector_, boom, variance_at_boom);
     }
 
+    // Run analyzers (after boom is detected and forced)
+    boom_analyzer_.analyze(metrics_collector_, event_detector_);
+    causticness_analyzer_.setFrameDuration(frame_duration);
+    causticness_analyzer_.analyze(metrics_collector_, event_detector_);
+
     // Final metrics
-    if (auto* variance_series = metrics_collector_.getMetric(metrics::MetricNames::Variance)) {
+    if (auto const* variance_series = metrics_collector_.getMetric(metrics::MetricNames::Variance)) {
         if (!variance_series->empty()) {
             results.final_variance = variance_series->current();
         }

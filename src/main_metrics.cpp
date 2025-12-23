@@ -6,6 +6,7 @@
 #include "metrics/metrics_collector.h"
 #include "metrics/event_detector.h"
 #include "metrics/boom_analyzer.h"
+#include "metrics/boom_detection.h"
 #include "metrics/causticness_analyzer.h"
 
 #include <chrono>
@@ -97,10 +98,8 @@ int computePhysicsMetrics(Options const& opts,
     metrics::MetricsCollector collector;
     collector.registerStandardMetrics();
 
+    // Only chaos uses threshold detection; boom uses max causticness
     metrics::EventDetector detector;
-    detector.addBoomCriteria(config.detection.boom_threshold,
-                             config.detection.boom_confirmation,
-                             metrics::MetricNames::Variance);
     detector.addChaosCriteria(config.detection.chaos_threshold,
                               config.detection.chaos_confirmation,
                               metrics::MetricNames::Variance);
@@ -137,6 +136,19 @@ int computePhysicsMetrics(Options const& opts,
 
     std::cout << "  Processing time: " << duration_ms << " ms\n";
 
+    // Detect boom using max causticness (before running analyzers)
+    auto boom = metrics::findBoomFrame(collector, frame_duration);
+    if (boom.frame >= 0) {
+        // Force boom event for analyzers
+        double variance_at_boom = 0.0;
+        if (auto const* var_series = collector.getMetric(metrics::MetricNames::Variance)) {
+            if (boom.frame < static_cast<int>(var_series->size())) {
+                variance_at_boom = var_series->at(boom.frame);
+            }
+        }
+        metrics::forceBoomEvent(detector, boom, variance_at_boom);
+    }
+
     // Run analyzers
     metrics::BoomAnalyzer boom_analyzer;
     metrics::CausticnessAnalyzer causticness_analyzer;
@@ -148,20 +160,11 @@ int computePhysicsMetrics(Options const& opts,
     // Print results
     std::cout << "\nResults:\n";
 
-    // Boom detection: use max angular_causticness frame with 0.3s offset
-    if (auto const* caustic_series = collector.getMetric(metrics::MetricNames::AngularCausticness)) {
-        auto const& values = caustic_series->values();
-        if (!values.empty()) {
-            auto max_it = std::max_element(values.begin(), values.end());
-            int max_frame = static_cast<int>(std::distance(values.begin(), max_it));
-            // Apply 0.3s offset for consistency with other executables
-            int offset_frames = static_cast<int>(0.3 / frame_duration);
-            int boom_frame = std::max(0, max_frame - offset_frames);
-            double boom_seconds = boom_frame * frame_duration;
-            std::cout << "  Boom: frame " << boom_frame << " ("
-                      << std::fixed << std::setprecision(2) << boom_seconds << "s)"
-                      << ", causticness=" << std::setprecision(4) << *max_it << "\n";
-        }
+    // Show boom detection results
+    if (boom.frame >= 0) {
+        std::cout << "  Boom: frame " << boom.frame << " ("
+                  << std::fixed << std::setprecision(2) << boom.seconds << "s)"
+                  << ", causticness=" << std::setprecision(4) << boom.causticness << "\n";
     }
 
     if (auto chaos = detector.getEvent(metrics::EventNames::Chaos)) {
@@ -247,10 +250,8 @@ int computeGPUMetrics(Options const& opts,
     collector.registerStandardMetrics();
     collector.registerGPUMetrics();
 
+    // Only chaos uses threshold detection; boom uses max causticness
     metrics::EventDetector detector;
-    detector.addBoomCriteria(config.detection.boom_threshold,
-                             config.detection.boom_confirmation,
-                             metrics::MetricNames::Variance);
     detector.addChaosCriteria(config.detection.chaos_threshold,
                               config.detection.chaos_confirmation,
                               metrics::MetricNames::Variance);
@@ -336,6 +337,19 @@ int computeGPUMetrics(Options const& opts,
     std::cout << "  FPS: " << std::fixed << std::setprecision(1)
               << (static_cast<double>(total_frames) / duration_s) << "\n";
 
+    // Detect boom using max causticness (before running analyzers)
+    auto boom = metrics::findBoomFrame(collector, frame_duration);
+    if (boom.frame >= 0) {
+        // Force boom event for analyzers
+        double variance_at_boom = 0.0;
+        if (auto const* var_series = collector.getMetric(metrics::MetricNames::Variance)) {
+            if (boom.frame < static_cast<int>(var_series->size())) {
+                variance_at_boom = var_series->at(boom.frame);
+            }
+        }
+        metrics::forceBoomEvent(detector, boom, variance_at_boom);
+    }
+
     // Run analyzers
     metrics::BoomAnalyzer boom_analyzer;
     metrics::CausticnessAnalyzer causticness_analyzer;
@@ -346,20 +360,11 @@ int computeGPUMetrics(Options const& opts,
     // Print results
     std::cout << "\nResults:\n";
 
-    // Boom detection: use max angular_causticness frame with 0.3s offset
-    if (auto const* caustic_series = collector.getMetric(metrics::MetricNames::AngularCausticness)) {
-        auto const& values = caustic_series->values();
-        if (!values.empty()) {
-            auto max_it = std::max_element(values.begin(), values.end());
-            int max_frame = static_cast<int>(std::distance(values.begin(), max_it));
-            // Apply 0.3s offset for consistency with other executables
-            int offset_frames = static_cast<int>(0.3 / frame_duration);
-            int boom_frame = std::max(0, max_frame - offset_frames);
-            double boom_seconds = boom_frame * frame_duration;
-            std::cout << "  Boom: frame " << boom_frame << " ("
-                      << std::fixed << std::setprecision(2) << boom_seconds << "s)"
-                      << ", causticness=" << std::setprecision(4) << *max_it << "\n";
-        }
+    // Show boom detection results
+    if (boom.frame >= 0) {
+        std::cout << "  Boom: frame " << boom.frame << " ("
+                  << std::fixed << std::setprecision(2) << boom.seconds << "s)"
+                  << ", causticness=" << std::setprecision(4) << boom.causticness << "\n";
     }
 
     if (boom_analyzer.hasResults()) {

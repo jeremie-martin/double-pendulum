@@ -105,8 +105,8 @@ void ProbePipeline::beginPhase2() {
 
 void ProbePipeline::setupEventDetector() {
     event_detector_.clearCriteria();
-    event_detector_.addBoomCriteria(boom_threshold_, boom_confirmation_,
-                                     MetricNames::Variance);
+    // Note: Boom is detected via max causticness, not threshold crossing
+    // Only chaos uses the EventDetector threshold mechanism
     event_detector_.addChaosCriteria(chaos_threshold_, chaos_confirmation_,
                                       MetricNames::Variance);
 }

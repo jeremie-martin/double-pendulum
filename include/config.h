@@ -64,6 +64,9 @@ struct SimulationParams {
 
     // Physics timestep: frame_dt / substeps (always <= max_dt)
     double dt() const { return duration_seconds / (total_frames * substeps()); }
+
+    // Duration of one frame in seconds
+    double frameDuration() const { return duration_seconds / total_frames; }
 };
 
 struct RenderParams {

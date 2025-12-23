@@ -2,6 +2,7 @@
 #include "config.h"
 #include "gl_renderer.h"
 #include "metrics/boom_analyzer.h"
+#include "metrics/boom_detection.h"
 #include "metrics/causticness_analyzer.h"
 #include "metrics/event_detector.h"
 #include "metrics/metrics_collector.h"
@@ -197,15 +198,13 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
     state.causticness_analyzer.reset();
 
     // Set frame duration for analyzers (once at init, not every frame)
-    double frame_duration = state.config.simulation.duration_seconds /
-                            state.config.simulation.total_frames;
+    double frame_duration = state.config.simulation.frameDuration();
     state.causticness_analyzer.setFrameDuration(frame_duration);
 
     // Setup event detector
+    // Note: Boom is detected via max causticness, not threshold crossing
+    // Only chaos uses the EventDetector threshold mechanism
     state.event_detector.clearCriteria();
-    state.event_detector.addBoomCriteria(state.config.detection.boom_threshold,
-                                          state.config.detection.boom_confirmation,
-                                          metrics::MetricNames::Variance);
     state.event_detector.addChaosCriteria(state.config.detection.chaos_threshold,
                                            state.config.detection.chaos_confirmation,
                                            metrics::MetricNames::Variance);
@@ -323,8 +322,7 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     state.metrics_collector.setMetric(metrics::MetricNames::TotalEnergy, total_energy);
 
     // Frame duration for event timing
-    double frame_duration = state.config.simulation.duration_seconds /
-                            state.config.simulation.total_frames;
+    double frame_duration = state.config.simulation.frameDuration();
 
     auto sim_end = std::chrono::high_resolution_clock::now();
     state.sim_time_ms = std::chrono::duration<double, std::milli>(sim_end - start).count();
@@ -358,17 +356,20 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
         }
     }
 
-    // Boom detection: track max angular_causticness frame
-    if (auto* caustic_series = state.metrics_collector.getMetric(metrics::MetricNames::AngularCausticness)) {
-        auto const& values = caustic_series->values();
-        if (!values.empty()) {
-            auto max_it = std::max_element(values.begin(), values.end());
-            int max_frame = static_cast<int>(std::distance(values.begin(), max_it));
-            // Apply 0.3s offset for consistency with other executables
-            int offset_frames = static_cast<int>(0.3 / frame_duration);
-            state.boom_frame = std::max(0, max_frame - offset_frames);
-            state.boom_variance = *max_it;
+    // Boom detection: track max angular_causticness frame (with 0.3s offset)
+    auto boom = metrics::findBoomFrame(state.metrics_collector, frame_duration);
+    if (boom.frame >= 0) {
+        state.boom_frame = boom.frame;
+        state.boom_variance = boom.causticness;
+
+        // Force boom event for analyzers
+        double variance_at_boom = 0.0;
+        if (auto const* var_series = state.metrics_collector.getMetric(metrics::MetricNames::Variance)) {
+            if (boom.frame < static_cast<int>(var_series->size())) {
+                variance_at_boom = var_series->at(boom.frame);
+            }
         }
+        metrics::forceBoomEvent(state.event_detector, boom, variance_at_boom);
     }
 
     // Run analyzers periodically after boom (every 30 frames)
@@ -1806,9 +1807,6 @@ int main(int argc, char* argv[]) {
 
                 // Re-run causticness analyzer to update quality score
                 if (state.boom_frame.has_value()) {
-                    double frame_duration = state.config.simulation.duration_seconds /
-                                            state.config.simulation.total_frames;
-                    state.causticness_analyzer.setFrameDuration(frame_duration);
                     state.causticness_analyzer.analyze(state.metrics_collector, state.event_detector);
                 }
             }

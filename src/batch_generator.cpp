@@ -415,9 +415,7 @@ bool BatchGenerator::generateOne(int index) {
         // Calculate boom_seconds from boom_frame (needed for music selection)
         double boom_seconds = 0.0;
         if (results.boom_frame) {
-            double frame_duration =
-                config.simulation.duration_seconds / config.simulation.total_frames;
-            boom_seconds = *results.boom_frame * frame_duration;
+            boom_seconds = *results.boom_frame * config.simulation.frameDuration();
         }
 
         // Mux with music if we have tracks and a boom frame
@@ -568,10 +566,8 @@ std::pair<bool, metrics::ProbePhaseResults> BatchGenerator::runProbe(Config cons
     }
 
     metrics::EventDetector events;
-    // Add detected events to the detector for filter evaluation
+    // Force boom event for filter evaluation (already detected via max causticness)
     if (results.boom_frame) {
-        events.addBoomCriteria(0.0, 0, metrics::MetricNames::Variance);
-        // Force the event to be detected with the right timing
         metrics::DetectedEvent boom_event;
         boom_event.frame = *results.boom_frame;
         boom_event.seconds = results.boom_seconds;
