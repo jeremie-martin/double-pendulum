@@ -192,8 +192,10 @@ void Simulation::saveMetricsCSV() {
         return;
     }
 
-    // Get all metric series
+    // Get all metric series (using metric names for consistency)
     auto* variance = metrics_collector_.getMetric(metrics::MetricNames::Variance);
+    auto* circular_spread = metrics_collector_.getMetric(metrics::MetricNames::CircularSpread);
+    auto* spread_ratio = metrics_collector_.getMetric(metrics::MetricNames::SpreadRatio);
     auto* brightness = metrics_collector_.getMetric(metrics::MetricNames::Brightness);
     auto* contrast_stddev = metrics_collector_.getMetric(metrics::MetricNames::ContrastStddev);
     auto* contrast_range = metrics_collector_.getMetric(metrics::MetricNames::ContrastRange);
@@ -203,31 +205,36 @@ void Simulation::saveMetricsCSV() {
     auto* peak_median = metrics_collector_.getMetric(metrics::MetricNames::PeakMedianRatio);
     auto* causticness = metrics_collector_.getMetric(metrics::MetricNames::Causticness);
     auto* total_energy = metrics_collector_.getMetric(metrics::MetricNames::TotalEnergy);
-    auto spread_history = metrics_collector_.getSpreadHistory();
 
     // Determine number of frames
     size_t frame_count = variance ? variance->size() : 0;
     if (frame_count == 0) return;
 
-    // Write header
-    out << "frame,variance,spread_ratio,brightness,contrast_stddev,contrast_range,"
+    // Helper to get value at frame
+    auto getValue = [](auto* series, size_t i) -> double {
+        return (series && i < series->size()) ? series->at(i) : 0.0;
+    };
+
+    // Write header (circular_spread is the primary spread metric)
+    out << "frame,variance,circular_spread,spread_ratio,brightness,contrast_stddev,contrast_range,"
         << "edge_energy,color_variance,coverage,peak_median_ratio,causticness,total_energy\n";
     out << std::fixed << std::setprecision(6);
 
     // Write data
     for (size_t i = 0; i < frame_count; ++i) {
         out << i;
-        out << "," << (variance && i < variance->size() ? variance->at(i) : 0.0);
-        out << "," << (i < spread_history.size() ? spread_history[i].spread_ratio : 0.0);
-        out << "," << (brightness && i < brightness->size() ? brightness->at(i) : 0.0);
-        out << "," << (contrast_stddev && i < contrast_stddev->size() ? contrast_stddev->at(i) : 0.0);
-        out << "," << (contrast_range && i < contrast_range->size() ? contrast_range->at(i) : 0.0);
-        out << "," << (edge_energy && i < edge_energy->size() ? edge_energy->at(i) : 0.0);
-        out << "," << (color_variance && i < color_variance->size() ? color_variance->at(i) : 0.0);
-        out << "," << (coverage && i < coverage->size() ? coverage->at(i) : 0.0);
-        out << "," << (peak_median && i < peak_median->size() ? peak_median->at(i) : 0.0);
-        out << "," << (causticness && i < causticness->size() ? causticness->at(i) : 0.0);
-        out << "," << (total_energy && i < total_energy->size() ? total_energy->at(i) : 0.0);
+        out << "," << getValue(variance, i);
+        out << "," << getValue(circular_spread, i);
+        out << "," << getValue(spread_ratio, i);
+        out << "," << getValue(brightness, i);
+        out << "," << getValue(contrast_stddev, i);
+        out << "," << getValue(contrast_range, i);
+        out << "," << getValue(edge_energy, i);
+        out << "," << getValue(color_variance, i);
+        out << "," << getValue(coverage, i);
+        out << "," << getValue(peak_median, i);
+        out << "," << getValue(causticness, i);
+        out << "," << getValue(total_energy, i);
         out << "\n";
     }
 }
