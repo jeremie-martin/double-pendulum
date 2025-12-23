@@ -63,12 +63,28 @@ class SimulationTiming(BaseModel):
 
 
 class ScoreData(BaseModel):
-    """Quality/causticness score data from analysis."""
+    """Quality scores from simulation analyzers.
 
-    peak_causticness: float
-    average_causticness: float
-    best_frame: int
-    samples: list[float] = []
+    These are the normalized 0-1 scores computed by BoomAnalyzer and CausticnessAnalyzer.
+    The scores are used for filtering and ranking simulations.
+    """
+
+    # Core quality scores (0-1 normalized)
+    boom: Optional[float] = None              # Boom analyzer score
+    causticness: Optional[float] = None       # Causticness analyzer score
+
+    # Peak clarity: main_peak / (main_peak + max_competitor)
+    # 1.0 = no competing peaks, 0.5 = equal height peaks
+    peak_clarity: Optional[float] = None
+
+    # Post-boom sustain: normalized area under causticness curve after boom
+    post_boom_sustain: Optional[float] = None
+
+    @property
+    def quality_score(self) -> float:
+        """Combined quality score (average of available scores)."""
+        scores = [s for s in [self.causticness, self.peak_clarity, self.post_boom_sustain] if s is not None]
+        return sum(scores) / len(scores) if scores else 0.0
 
 
 class VideoMetadata(BaseModel):
@@ -79,7 +95,7 @@ class VideoMetadata(BaseModel):
     config: SimulationConfig
     results: SimulationResults
     timing: SimulationTiming
-    score: Optional[ScoreData] = None
+    scores: Optional[ScoreData] = None  # Quality scores from analyzers
 
     @classmethod
     def from_file(cls, path: str | Path) -> VideoMetadata:
@@ -105,7 +121,8 @@ class VideoMetadata(BaseModel):
 
     @property
     def best_frame_seconds(self) -> Optional[float]:
-        """Time of best visual quality frame in seconds."""
-        if self.score and self.score.best_frame:
-            return self.score.best_frame / self.config.video_fps
-        return None
+        """Time of best visual quality frame in seconds.
+
+        Returns the boom time as the "best" frame for thumbnails/effects.
+        """
+        return self.boom_seconds

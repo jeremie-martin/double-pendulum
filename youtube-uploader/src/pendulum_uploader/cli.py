@@ -495,8 +495,8 @@ def process(
     else:
         console.print("  [yellow]Warning: No boom detected, motion effects may be skipped[/yellow]")
 
-    if pipeline.metadata.score:
-        console.print(f"  Peak causticness: {pipeline.metadata.score.peak_causticness:.4f}")
+    if pipeline.metadata.scores:
+        console.print(f"  Causticness score: {pipeline.metadata.scores.causticness or 0:.4f}")
 
     console.print()
 
