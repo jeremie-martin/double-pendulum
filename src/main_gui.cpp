@@ -759,41 +759,60 @@ void drawColorSection(AppState& state) {
         float ramp_width = ImGui::GetContentRegionAvail().x;
         drawColorRamp(state.config.color, ramp_width, 24.0f);
 
-        // Preset selector
-        auto preset_names = state.presets.getColorNames();
-        if (!preset_names.empty()) {
-            if (ImGui::BeginCombo("Preset", state.preset_ui.selected_color_preset >= 0 &&
-                                                   state.preset_ui.selected_color_preset <
-                                                       static_cast<int>(preset_names.size())
-                                               ? preset_names[state.preset_ui.selected_color_preset]
-                                                     .c_str()
-                                               : "Select...")) {
-                for (int i = 0; i < static_cast<int>(preset_names.size()); ++i) {
-                    bool is_selected = (state.preset_ui.selected_color_preset == i);
-                    if (ImGui::Selectable(preset_names[i].c_str(), is_selected)) {
-                        state.preset_ui.selected_color_preset = i;
-                        if (auto preset = state.presets.getColor(preset_names[i])) {
-                            state.config.color = *preset;
-                            color_changed = true;
-                        }
-                    }
-                    if (is_selected) {
-                        ImGui::SetItemDefaultFocus();
-                    }
-                }
-                ImGui::EndCombo();
-            }
-            tooltip("Load a saved color preset");
-        }
-
+        // Scheme selector (this determines which presets are shown)
         const char* schemes[] = {"Spectrum", "Rainbow", "Heat", "Cool", "Monochrome"};
         int scheme_idx = static_cast<int>(state.config.color.scheme);
-        if (ImGui::Combo("Color Scheme", &scheme_idx, schemes, 5)) {
+        if (ImGui::Combo("Scheme", &scheme_idx, schemes, 5)) {
             state.config.color.scheme = static_cast<ColorScheme>(scheme_idx);
             color_changed = true;
+            // Clear loaded preset when scheme changes (it's no longer valid)
+            state.preset_ui.loaded_color_preset.clear();
         }
-        tooltip("Color mapping for pendulum index");
+        tooltip("Color mapping style");
 
+        // Preset selector - filtered by current scheme
+        auto preset_names = state.presets.getColorNamesForScheme(state.config.color.scheme);
+
+        // Build display label
+        std::string preset_label;
+        if (state.preset_ui.loaded_color_preset.empty()) {
+            preset_label = "(Custom)";
+        } else if (state.preset_ui.isColorModified(state.config.color)) {
+            preset_label = state.preset_ui.loaded_color_preset + " (modified)";
+        } else {
+            preset_label = state.preset_ui.loaded_color_preset;
+        }
+
+        if (ImGui::BeginCombo("Preset", preset_label.c_str())) {
+            // Option to clear preset
+            if (ImGui::Selectable("(Custom)", state.preset_ui.loaded_color_preset.empty())) {
+                state.preset_ui.loaded_color_preset.clear();
+            }
+
+            // Show presets for current scheme
+            for (auto const& name : preset_names) {
+                bool is_selected = (state.preset_ui.loaded_color_preset == name);
+                if (ImGui::Selectable(name.c_str(), is_selected)) {
+                    if (auto preset = state.presets.getColor(name)) {
+                        state.config.color = *preset;
+                        state.preset_ui.loaded_color_preset = name;
+                        state.preset_ui.loaded_color_values = *preset;
+                        color_changed = true;
+                    }
+                }
+                if (is_selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+        if (preset_names.empty()) {
+            tooltip("No presets for this scheme yet");
+        } else {
+            tooltip("Load a preset for this scheme");
+        }
+
+        // Start/End sliders
         auto color_start = static_cast<float>(state.config.color.start);
         if (ImGui::SliderFloat("Start", &color_start, 0.0f, 1.0f, "%.2f")) {
             state.config.color.start = color_start;
@@ -808,13 +827,38 @@ void drawColorSection(AppState& state) {
         }
         tooltip("End position in color range [0-1]");
 
-        // Save preset button
-        if (ImGui::Button("Save as Preset...")) {
+        // Preset management buttons
+        bool has_loaded_preset = !state.preset_ui.loaded_color_preset.empty();
+        bool is_modified = state.preset_ui.isColorModified(state.config.color);
+
+        // Save button (overwrite current preset) - only if loaded and modified
+        if (has_loaded_preset && is_modified) {
+            if (ImGui::Button("Save")) {
+                state.presets.setColor(state.preset_ui.loaded_color_preset, state.config.color);
+                state.presets.save();
+                state.preset_ui.loaded_color_values = state.config.color;
+            }
+            tooltip("Overwrite the current preset");
+            ImGui::SameLine();
+        }
+
+        // Save As button
+        if (ImGui::Button("Save As...")) {
             state.preset_ui.show_color_save_popup = true;
             state.preset_ui.new_color_preset_name[0] = '\0';
         }
+        tooltip("Save as a new preset");
 
-        // Save preset popup
+        // Delete button - only if a preset is loaded
+        if (has_loaded_preset) {
+            ImGui::SameLine();
+            if (ImGui::Button("Delete")) {
+                state.preset_ui.show_color_delete_confirm = true;
+            }
+            tooltip("Delete the current preset");
+        }
+
+        // Save As popup
         if (state.preset_ui.show_color_save_popup) {
             ImGui::OpenPopup("Save Color Preset");
         }
@@ -829,6 +873,8 @@ void drawColorSection(AppState& state) {
                     state.presets.setColor(state.preset_ui.new_color_preset_name,
                                            state.config.color);
                     state.presets.save();
+                    state.preset_ui.loaded_color_preset = state.preset_ui.new_color_preset_name;
+                    state.preset_ui.loaded_color_values = state.config.color;
                     state.preset_ui.show_color_save_popup = false;
                 }
             }
@@ -839,6 +885,30 @@ void drawColorSection(AppState& state) {
             ImGui::EndPopup();
         }
 
+        // Delete confirmation popup
+        if (state.preset_ui.show_color_delete_confirm) {
+            ImGui::OpenPopup("Delete Color Preset?");
+        }
+        if (ImGui::BeginPopupModal("Delete Color Preset?",
+                                   &state.preset_ui.show_color_delete_confirm,
+                                   ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::Text("Delete preset \"%s\"?", state.preset_ui.loaded_color_preset.c_str());
+            ImGui::Text("This cannot be undone.");
+
+            if (ImGui::Button("Delete", ImVec2(120, 0))) {
+                state.presets.deleteColor(state.preset_ui.loaded_color_preset);
+                state.presets.save();
+                state.preset_ui.loaded_color_preset.clear();
+                state.preset_ui.show_color_delete_confirm = false;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+                state.preset_ui.show_color_delete_confirm = false;
+            }
+            ImGui::EndPopup();
+        }
+
+        // Apply color changes to pendulums
         if (color_changed && state.running) {
             ColorSchemeGenerator color_gen(state.config.color);
             int n = static_cast<int>(state.colors.size());
@@ -854,32 +924,41 @@ void drawPostProcessSection(AppState& state) {
     if (ImGui::CollapsingHeader("Post-Processing", ImGuiTreeNodeFlags_DefaultOpen)) {
         bool pp_changed = false;
 
-        // Preset selector
+        // Preset selector with modified indicator
         auto preset_names = state.presets.getPostProcessNames();
-        if (!preset_names.empty()) {
-            if (ImGui::BeginCombo("Preset##pp",
-                                  state.preset_ui.selected_pp_preset >= 0 &&
-                                          state.preset_ui.selected_pp_preset <
-                                              static_cast<int>(preset_names.size())
-                                      ? preset_names[state.preset_ui.selected_pp_preset].c_str()
-                                      : "Select...")) {
-                for (int i = 0; i < static_cast<int>(preset_names.size()); ++i) {
-                    bool is_selected = (state.preset_ui.selected_pp_preset == i);
-                    if (ImGui::Selectable(preset_names[i].c_str(), is_selected)) {
-                        state.preset_ui.selected_pp_preset = i;
-                        if (auto preset = state.presets.getPostProcess(preset_names[i])) {
-                            state.config.post_process = *preset;
-                            pp_changed = true;
-                        }
-                    }
-                    if (is_selected) {
-                        ImGui::SetItemDefaultFocus();
+
+        std::string preset_label;
+        if (state.preset_ui.loaded_pp_preset.empty()) {
+            preset_label = "(Custom)";
+        } else if (state.preset_ui.isPPModified(state.config.post_process)) {
+            preset_label = state.preset_ui.loaded_pp_preset + " (modified)";
+        } else {
+            preset_label = state.preset_ui.loaded_pp_preset;
+        }
+
+        if (ImGui::BeginCombo("Preset##pp", preset_label.c_str())) {
+            // Option to clear preset
+            if (ImGui::Selectable("(Custom)", state.preset_ui.loaded_pp_preset.empty())) {
+                state.preset_ui.loaded_pp_preset.clear();
+            }
+
+            for (auto const& name : preset_names) {
+                bool is_selected = (state.preset_ui.loaded_pp_preset == name);
+                if (ImGui::Selectable(name.c_str(), is_selected)) {
+                    if (auto preset = state.presets.getPostProcess(name)) {
+                        state.config.post_process = *preset;
+                        state.preset_ui.loaded_pp_preset = name;
+                        state.preset_ui.loaded_pp_values = *preset;
+                        pp_changed = true;
                     }
                 }
-                ImGui::EndCombo();
+                if (is_selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
             }
-            tooltip("Load a saved post-processing preset");
+            ImGui::EndCombo();
         }
+        tooltip("Load a post-processing preset");
 
         // Normalization mode
         const char* norm_names[] = {"Per-Frame (auto)", "By Count (consistent)"};
@@ -931,13 +1010,39 @@ void drawPostProcessSection(AppState& state) {
         }
         tooltip("Display gamma (2.2 = sRGB standard)");
 
-        // Save preset button
-        if (ImGui::Button("Save as Preset...##pp")) {
+        // Preset management buttons
+        bool has_loaded_preset = !state.preset_ui.loaded_pp_preset.empty();
+        bool is_modified = state.preset_ui.isPPModified(state.config.post_process);
+
+        // Save button (overwrite current preset) - only if loaded and modified
+        if (has_loaded_preset && is_modified) {
+            if (ImGui::Button("Save##pp")) {
+                state.presets.setPostProcess(state.preset_ui.loaded_pp_preset,
+                                             state.config.post_process);
+                state.presets.save();
+                state.preset_ui.loaded_pp_values = state.config.post_process;
+            }
+            tooltip("Overwrite the current preset");
+            ImGui::SameLine();
+        }
+
+        // Save As button
+        if (ImGui::Button("Save As...##pp")) {
             state.preset_ui.show_pp_save_popup = true;
             state.preset_ui.new_pp_preset_name[0] = '\0';
         }
+        tooltip("Save as a new preset");
 
-        // Save preset popup
+        // Delete button - only if a preset is loaded
+        if (has_loaded_preset) {
+            ImGui::SameLine();
+            if (ImGui::Button("Delete##pp")) {
+                state.preset_ui.show_pp_delete_confirm = true;
+            }
+            tooltip("Delete the current preset");
+        }
+
+        // Save As popup
         if (state.preset_ui.show_pp_save_popup) {
             ImGui::OpenPopup("Save Post-Process Preset");
         }
@@ -952,12 +1057,37 @@ void drawPostProcessSection(AppState& state) {
                     state.presets.setPostProcess(state.preset_ui.new_pp_preset_name,
                                                  state.config.post_process);
                     state.presets.save();
+                    state.preset_ui.loaded_pp_preset = state.preset_ui.new_pp_preset_name;
+                    state.preset_ui.loaded_pp_values = state.config.post_process;
                     state.preset_ui.show_pp_save_popup = false;
                 }
             }
             ImGui::SameLine();
             if (ImGui::Button("Cancel", ImVec2(120, 0))) {
                 state.preset_ui.show_pp_save_popup = false;
+            }
+            ImGui::EndPopup();
+        }
+
+        // Delete confirmation popup
+        if (state.preset_ui.show_pp_delete_confirm) {
+            ImGui::OpenPopup("Delete Post-Process Preset?");
+        }
+        if (ImGui::BeginPopupModal("Delete Post-Process Preset?",
+                                   &state.preset_ui.show_pp_delete_confirm,
+                                   ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::Text("Delete preset \"%s\"?", state.preset_ui.loaded_pp_preset.c_str());
+            ImGui::Text("This cannot be undone.");
+
+            if (ImGui::Button("Delete", ImVec2(120, 0))) {
+                state.presets.deletePostProcess(state.preset_ui.loaded_pp_preset);
+                state.presets.save();
+                state.preset_ui.loaded_pp_preset.clear();
+                state.preset_ui.show_pp_delete_confirm = false;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+                state.preset_ui.show_pp_delete_confirm = false;
             }
             ImGui::EndPopup();
         }
