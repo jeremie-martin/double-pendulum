@@ -7,6 +7,7 @@ from .motion import (
     ShakeConfig,
     SlowZoomConfig,
     apply_motion_effects,
+    build_motion_filters,
 )
 from .pipeline import ProcessingConfig, ProcessingPipeline, ProcessingResult
 from .subtitles_ass import (
@@ -31,6 +32,7 @@ __all__ = [
     "extract_thumbnails",
     # Motion effects
     "apply_motion_effects",
+    "build_motion_filters",
     "MotionConfig",
     "SlowZoomConfig",
     "BoomPunchConfig",

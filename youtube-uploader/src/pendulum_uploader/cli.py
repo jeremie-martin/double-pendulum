@@ -415,6 +415,11 @@ def list_templates():
     help="Overwrite existing processed output",
 )
 @click.option(
+    "--no-nvenc",
+    is_flag=True,
+    help="Disable NVIDIA hardware encoding (use CPU libx264)",
+)
+@click.option(
     "--dry-run",
     is_flag=True,
     help="Show FFmpeg command without executing",
@@ -429,6 +434,7 @@ def process(
     no_thumbnail: bool,
     quality: int,
     force: bool,
+    no_nvenc: bool,
     dry_run: bool,
 ):
     """Process video with motion effects and text overlays.
@@ -461,6 +467,7 @@ def process(
         blurred_background=blur_bg,
         extract_thumbnails=not no_thumbnail,
         crf_quality=quality,
+        use_nvenc=not no_nvenc,
     )
 
     # Initialize pipeline
@@ -480,7 +487,8 @@ def process(
     console.print(f"  Shorts mode: {'Yes' if shorts else 'No'}")
     if shorts:
         console.print(f"  Blurred BG: {'Yes' if blur_bg else 'No'}")
-    console.print(f"  Quality (CRF): {quality}")
+    console.print(f"  Encoder: {'NVENC (GPU)' if config.use_nvenc else 'libx264 (CPU)'}")
+    console.print(f"  Quality: {config.nvenc_cq if config.use_nvenc else quality}")
 
     if pipeline.metadata.boom_seconds:
         console.print(f"  Boom at: {pipeline.metadata.boom_seconds:.2f}s")
@@ -657,6 +665,11 @@ def thumbnail(video_dir: Path, output: Path | None, timestamps: str):
     help="Overwrite existing processed output",
 )
 @click.option(
+    "--no-nvenc",
+    is_flag=True,
+    help="Disable NVIDIA hardware encoding (use CPU libx264)",
+)
+@click.option(
     "--dry-run",
     is_flag=True,
     help="Show what would be processed without executing",
@@ -668,6 +681,7 @@ def batch_process(
     blur_bg: bool,
     limit: int | None,
     force: bool,
+    no_nvenc: bool,
     dry_run: bool,
 ):
     """Process all videos in a batch directory.
@@ -705,6 +719,7 @@ def batch_process(
     console.print(f"  Template: {template}")
     console.print(f"  Shorts: {'Yes' if shorts else 'No'}")
     console.print(f"  Blurred BG: {'Yes' if blur_bg else 'No'}")
+    console.print(f"  Encoder: {'NVENC (GPU)' if not no_nvenc else 'libx264 (CPU)'}")
     console.print()
 
     results = []
@@ -718,6 +733,7 @@ def batch_process(
             shorts=shorts,
             blurred_background=blur_bg,
             extract_thumbnails=True,
+            use_nvenc=not no_nvenc,
         )
 
         try:

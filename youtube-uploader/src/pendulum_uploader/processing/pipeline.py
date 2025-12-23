@@ -8,7 +8,7 @@ from typing import Optional
 
 from ..models import VideoMetadata
 from .ffmpeg import FFmpegCommand, get_video_dimensions
-from .motion import apply_motion_effects
+from .motion import apply_motion_effects, build_motion_filters
 from .subtitles_ass import generate_ass_from_resolved, CaptionPreset
 from .templates import (
     TemplateLibrary,
@@ -38,7 +38,9 @@ class ProcessingConfig:
 
     # Quality settings
     crf_quality: int = 18  # Lower = better (18 = visually lossless)
-    preset: str = "slow"  # Slower = better compression
+    preset: str = "medium"  # Encoding preset (slower = better compression)
+    use_nvenc: bool = True  # Use NVIDIA hardware encoding (much faster)
+    nvenc_cq: int = 23  # NVENC quality (0-51, lower = better)
 
 
 @dataclass
@@ -146,29 +148,62 @@ class ProcessingPipeline:
         else:
             out_width, out_height = width, height
 
-        # Step 1: Apply motion effects from template
+        # Calculate foreground size for Shorts (scale input to fit output width)
+        # This ensures motion effects work at the correct visual scale
+        if self.config.shorts:
+            # Scale to fit output width, maintaining input aspect ratio
+            input_aspect = width / height
+            fg_width = out_width
+            fg_height = int(fg_width / input_aspect)
+        else:
+            fg_width, fg_height = width, height
+
+        # Build motion filters if template has motion effects
+        # Motion filters use FOREGROUND dimensions (after scaling), not input dimensions
+        motion_filters: list[str] | None = None
         if template.motion and boom_seconds:
-            apply_motion_effects(
-                cmd=cmd,
+            motion_filters = build_motion_filters(
                 motion=template.motion,
                 boom_seconds=boom_seconds,
                 video_duration=video_duration,
-                width=width,
-                height=height,
+                width=fg_width,
+                height=fg_height,
                 fps=fps,
             )
 
-        # Step 2: Apply background/padding for Shorts
+        # Apply background/padding for Shorts, or motion effects for regular video
         if self.config.shorts:
             if self.config.blurred_background:
+                # For blurred background, motion effects are applied to foreground
+                # inside the filter_complex graph (AFTER scaling to foreground size)
                 cmd.set_blurred_background(
                     blur_strength=self.config.blur_strength,
                     brightness=self.config.background_brightness,
                     target_width=out_width,
                     target_height=out_height,
+                    foreground_width=fg_width,
+                    foreground_height=fg_height,
+                    foreground_filters=motion_filters,
                 )
             else:
+                # Scale to foreground size first, apply motion effects, then pad
+                cmd.add_filter(f"scale={fg_width}:{fg_height}")
+                if motion_filters:
+                    for f in motion_filters:
+                        cmd.add_filter(f)
                 cmd.add_shorts_padding()
+        else:
+            # Regular video: just apply motion effects
+            if motion_filters:
+                apply_motion_effects(
+                    cmd=cmd,
+                    motion=template.motion,
+                    boom_seconds=boom_seconds,
+                    video_duration=video_duration,
+                    width=width,
+                    height=height,
+                    fps=fps,
+                )
 
         # Step 3: Resolve template and generate ASS subtitles
         resolved_captions = resolve_template(
@@ -195,10 +230,13 @@ class ProcessingPipeline:
             if ass_path and (dry_run or ass_path.exists()):
                 cmd.add_subtitles(ass_path)
 
-        # Set output quality
-        cmd.set_codec("libx264")
+        # Set output quality and encoding
         cmd.set_pixel_format("yuv420p")
-        cmd.set_quality(crf=self.config.crf_quality, preset=self.config.preset)
+        if self.config.use_nvenc:
+            cmd.use_nvenc(cq=self.config.nvenc_cq)
+        else:
+            cmd.set_codec("libx264")
+            cmd.set_quality(crf=self.config.crf_quality, preset=self.config.preset)
         cmd.set_movflags("faststart")
         cmd.copy_audio()
 
@@ -282,5 +320,6 @@ class ProcessingPipeline:
                 "shorts": self.config.shorts,
                 "blurred_background": self.config.blurred_background,
                 "crf_quality": self.config.crf_quality,
+                "use_nvenc": self.config.use_nvenc,
             },
         }
