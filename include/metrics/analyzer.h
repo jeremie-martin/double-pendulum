@@ -96,6 +96,8 @@ public:
 namespace ScoreNames {
 constexpr const char* Boom = "boom";
 constexpr const char* Causticness = "causticness";
+constexpr const char* PeakClarity = "peak_clarity";     // Peak clarity from causticness
+constexpr const char* PostBoomSustain = "post_boom_sustain";  // Post-boom area normalized
 constexpr const char* Animation = "animation";  // Future
 } // namespace ScoreNames
 

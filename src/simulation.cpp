@@ -3,6 +3,7 @@
 #include "enum_strings.h"
 #include "simulation_data.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <ctime>
@@ -53,9 +54,9 @@ Simulation::Simulation(Config const& config) : config_(config), color_gen_(confi
     // Setup event detection from config
     auto const& detect = config_.detection;
     event_detector_.addBoomCriteria(detect.boom_threshold, detect.boom_confirmation,
-                                     metrics::MetricNames::Variance);
+                                    metrics::MetricNames::Variance);
     event_detector_.addChaosCriteria(detect.chaos_threshold, detect.chaos_confirmation,
-                                      metrics::MetricNames::Variance);
+                                     metrics::MetricNames::Variance);
 }
 
 Simulation::~Simulation() {
@@ -174,7 +175,8 @@ void Simulation::saveMetadata(SimulationResults const& results) {
         out << "  \"scores\": {\n";
         bool first = true;
         for (auto const& [name, value] : results.score.scores) {
-            if (!first) out << ",\n";
+            if (!first)
+                out << ",\n";
             out << "    \"" << name << "\": " << value;
             first = false;
         }
@@ -198,14 +200,16 @@ void Simulation::saveMetricsCSV() {
     auto* circular_spread = metrics_collector_.getMetric(metrics::MetricNames::CircularSpread);
     auto* spread_ratio = metrics_collector_.getMetric(metrics::MetricNames::SpreadRatio);
     auto* angular_range = metrics_collector_.getMetric(metrics::MetricNames::AngularRange);
-    auto* angular_causticness = metrics_collector_.getMetric(metrics::MetricNames::AngularCausticness);
+    auto* angular_causticness =
+        metrics_collector_.getMetric(metrics::MetricNames::AngularCausticness);
     auto* brightness = metrics_collector_.getMetric(metrics::MetricNames::Brightness);
     auto* coverage = metrics_collector_.getMetric(metrics::MetricNames::Coverage);
     auto* total_energy = metrics_collector_.getMetric(metrics::MetricNames::TotalEnergy);
 
     // Determine number of frames
     size_t frame_count = variance ? variance->size() : 0;
-    if (frame_count == 0) return;
+    if (frame_count == 0)
+        return;
 
     // Helper to get value at frame
     auto getValue = [](auto* series, size_t i) -> double {
@@ -464,7 +468,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     results.timing.render_seconds = render_time.count();
     results.timing.io_seconds = io_time.count();
 
-    // Extract detected events
+    // Extract detected events (legacy variance-based)
     if (auto boom_event = event_detector_.getEvent(metrics::EventNames::Boom)) {
         if (boom_event->detected()) {
             results.boom_frame = boom_event->frame;
@@ -478,6 +482,22 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         }
     }
 
+    // Override boom detection: use max angular_causticness frame
+    if (auto* caustic_series =
+            metrics_collector_.getMetric(metrics::MetricNames::AngularCausticness)) {
+        auto const& values = caustic_series->values();
+        if (!values.empty()) {
+            auto max_it = std::max_element(values.begin(), values.end());
+            int max_frame = static_cast<int>(std::distance(values.begin(), max_it));
+            results.boom_frame = max_frame;
+            // substract 0.3s to align with visual boom timing
+            // (empirically determined offset based on testing)
+            results.boom_frame =
+                std::max(0, *results.boom_frame - static_cast<int>(0.3 / frame_duration));
+            results.boom_variance = *max_it; // Store causticness value instead of variance
+        }
+    }
+
     // Extract metrics history
     if (auto* variance_series = metrics_collector_.getMetric(metrics::MetricNames::Variance)) {
         results.variance_history = variance_series->values();
@@ -487,6 +507,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
 
     // Run analyzers to compute quality scores
     boom_analyzer_.analyze(metrics_collector_, event_detector_);
+    causticness_analyzer_.setFrameDuration(frame_duration);
     causticness_analyzer_.analyze(metrics_collector_, event_detector_);
 
     // Aggregate scores
@@ -495,6 +516,10 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     }
     if (causticness_analyzer_.hasResults()) {
         results.score.set(metrics::ScoreNames::Causticness, causticness_analyzer_.score());
+        results.score.set(metrics::ScoreNames::PeakClarity,
+                          causticness_analyzer_.peakClarityScore());
+        results.score.set(metrics::ScoreNames::PostBoomSustain,
+                          causticness_analyzer_.postBoomAreaNormalized());
     }
 
     // Save metadata, config copy, and metrics
@@ -572,10 +597,12 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
                   << ", type=" << quality.value("boom_type", "unknown") << ")\n";
     }
     if (causticness_analyzer_.hasResults()) {
-        auto const& metrics = causticness_analyzer_.toJSON();
+        auto const& json = causticness_analyzer_.toJSON();
+        auto const& m = json["metrics"];
         std::cout << "Causticness: " << std::setprecision(2) << causticness_analyzer_.score()
-                  << " (peak=" << metrics.value("peak_causticness", 0.0)
-                  << ", avg=" << metrics.value("average_causticness", 0.0) << ")\n";
+                  << " (peak=" << m.value("peak_causticness", 0.0)
+                  << ", avg=" << m.value("average_causticness", 0.0)
+                  << ", clarity=" << m.value("peak_clarity_score", 0.0) << ")\n";
     }
 
     std::cout << "\nOutput: " << output_path << "\n";
@@ -650,9 +677,10 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
 
     // Run analyzers
     boom_analyzer_.analyze(metrics_collector_, event_detector_);
+    causticness_analyzer_.setFrameDuration(frame_duration);
     causticness_analyzer_.analyze(metrics_collector_, event_detector_);
 
-    // Populate results from event detector
+    // Populate results from event detector (legacy variance-based)
     if (auto boom_event = event_detector_.getEvent(metrics::EventNames::Boom)) {
         if (boom_event->detected()) {
             results.boom_frame = boom_event->frame;
@@ -663,6 +691,21 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
         if (chaos_event->detected()) {
             results.chaos_frame = chaos_event->frame;
             results.chaos_seconds = chaos_event->seconds;
+        }
+    }
+
+    // Override boom detection: use max angular_causticness frame
+    // This ensures boom is always detected (it's the peak, not a threshold)
+    if (auto const* caustic_series =
+            metrics_collector_.getMetric(metrics::MetricNames::AngularCausticness)) {
+        auto const& values = caustic_series->values();
+        if (!values.empty()) {
+            auto max_it = std::max_element(values.begin(), values.end());
+            int max_frame = static_cast<int>(std::distance(values.begin(), max_it));
+            // Apply 0.3s offset for better visual alignment
+            max_frame = std::max(0, max_frame - static_cast<int>(0.3 / frame_duration));
+            results.boom_frame = max_frame;
+            results.boom_seconds = max_frame * frame_duration;
         }
     }
 
@@ -681,10 +724,15 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
     }
     if (causticness_analyzer_.hasResults()) {
         results.scores.set(metrics::ScoreNames::Causticness, causticness_analyzer_.score());
+        // Add peak clarity and post-boom sustain scores for filtering
+        results.scores.set(metrics::ScoreNames::PeakClarity,
+                           causticness_analyzer_.peakClarityScore());
+        results.scores.set(metrics::ScoreNames::PostBoomSustain,
+                           causticness_analyzer_.postBoomAreaNormalized());
     }
 
     results.completed = true;
-    results.passed_filter = true;  // No filter applied in basic probe
+    results.passed_filter = true; // No filter applied in basic probe
 
     return results;
 }

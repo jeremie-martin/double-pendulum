@@ -140,6 +140,7 @@ int computePhysicsMetrics(Options const& opts,
     // Run analyzers
     metrics::BoomAnalyzer boom_analyzer;
     metrics::CausticnessAnalyzer causticness_analyzer;
+    causticness_analyzer.setFrameDuration(frame_duration);
 
     boom_analyzer.analyze(collector, detector);
     causticness_analyzer.analyze(collector, detector);
@@ -147,13 +148,17 @@ int computePhysicsMetrics(Options const& opts,
     // Print results
     std::cout << "\nResults:\n";
 
-    if (auto boom = detector.getEvent(metrics::EventNames::Boom)) {
-        double boom_seconds = boom->frame * frame_duration;
-        std::cout << "  Boom: frame " << boom->frame << " ("
-                  << std::fixed << std::setprecision(2) << boom_seconds << "s)"
-                  << ", variance=" << std::setprecision(4) << boom->value << "\n";
-    } else {
-        std::cout << "  Boom: not detected\n";
+    // Boom detection: use max angular_causticness frame
+    if (auto* caustic_series = collector.getMetric(metrics::MetricNames::AngularCausticness)) {
+        auto const& values = caustic_series->values();
+        if (!values.empty()) {
+            auto max_it = std::max_element(values.begin(), values.end());
+            int boom_frame = static_cast<int>(std::distance(values.begin(), max_it));
+            double boom_seconds = boom_frame * frame_duration;
+            std::cout << "  Boom: frame " << boom_frame << " ("
+                      << std::fixed << std::setprecision(2) << boom_seconds << "s)"
+                      << ", causticness=" << std::setprecision(4) << *max_it << "\n";
+        }
     }
 
     if (auto chaos = detector.getEvent(metrics::EventNames::Chaos)) {
@@ -171,6 +176,36 @@ int computePhysicsMetrics(Options const& opts,
     if (boom_analyzer.hasResults()) {
         std::cout << "  Boom score: " << std::fixed << std::setprecision(3)
                   << boom_analyzer.score() << "\n";
+    }
+
+    if (causticness_analyzer.hasResults()) {
+        auto const& metrics = causticness_analyzer.getMetrics();
+        std::cout << "  Peak clarity: " << std::fixed << std::setprecision(3)
+                  << metrics.peak_clarity_score;
+        if (metrics.competing_peaks_count > 0) {
+            std::cout << " (" << metrics.competing_peaks_count << " competing peak"
+                      << (metrics.competing_peaks_count > 1 ? "s" : "")
+                      << ", max ratio=" << std::setprecision(2) << metrics.max_competitor_ratio
+                      << ")";
+        }
+        std::cout << "\n";
+
+        std::cout << "  Post-boom sustain: " << std::fixed << std::setprecision(3)
+                  << metrics.post_boom_area_normalized
+                  << " (area=" << std::setprecision(1) << metrics.post_boom_area
+                  << " over " << std::setprecision(1) << metrics.post_boom_duration << "s)\n";
+
+        // Show detected peaks
+        auto const& peaks = causticness_analyzer.getDetectedPeaks();
+        if (!peaks.empty()) {
+            std::cout << "  Detected peaks: " << peaks.size() << " [";
+            for (size_t i = 0; i < peaks.size() && i < 5; ++i) {
+                if (i > 0) std::cout << ", ";
+                std::cout << std::setprecision(2) << peaks[i].seconds << "s";
+            }
+            if (peaks.size() > 5) std::cout << ", ...";
+            std::cout << "]\n";
+        }
     }
 
     // Export metrics

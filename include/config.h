@@ -138,6 +138,10 @@ struct OutputParams {
     int video_crf = 23;
     int video_fps = 60; // Only affects video encoding, not simulation
     OutputMode mode = OutputMode::Timestamped;
+
+    // Save raw simulation data for metric iteration
+    // When enabled, saves simulation_data.bin alongside video/frames
+    bool save_simulation_data = false;
 };
 
 // Analysis mode parameters for extended statistics

@@ -25,10 +25,12 @@ initial_velocity1 = [-0.5, 0.5]
 initial_velocity2 = [-0.5, 0.5]
 
 [filter]
-min_boom_seconds = 8.0    # Boom must happen after this time
-max_boom_seconds = 14.0   # Boom must happen before this time
+min_boom_seconds = 8.0     # Boom must happen after this time
+max_boom_seconds = 14.0    # Boom must happen before this time
 min_uniformity = 0.9       # Minimum distribution uniformity (0=concentrated, 1=uniform)
-require_boom = true       # Reject simulations with no detectable boom
+min_peak_clarity = 0.75    # Minimum peak clarity (0.5=equal peaks, 1.0=no competition)
+# min_post_boom_sustain = 0.3  # Minimum post-boom sustain (area under curve / max area)
+require_boom = true        # Reject simulations with no detectable boom
 require_valid_music = true # Fail if no music track has drop > boom time
 
 [music]

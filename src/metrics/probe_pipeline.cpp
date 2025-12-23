@@ -145,6 +145,10 @@ void ProbePipeline::runAnalyzers() {
         boom_analyzer_->analyze(collector_, event_detector_);
     }
     if (causticness_analyzer_enabled_) {
+        // Set frame duration if available
+        if (frame_duration_ > 0.0) {
+            causticness_analyzer_->setFrameDuration(frame_duration_);
+        }
         causticness_analyzer_->analyze(collector_, event_detector_);
     }
 }
@@ -157,6 +161,10 @@ SimulationScore ProbePipeline::getScores() const {
     }
     if (causticness_analyzer_enabled_ && causticness_analyzer_->hasResults()) {
         scores.set(ScoreNames::Causticness, causticness_analyzer_->score());
+        // Add peak clarity and post-boom sustain scores for filtering
+        scores.set(ScoreNames::PeakClarity, causticness_analyzer_->peakClarityScore());
+        scores.set(ScoreNames::PostBoomSustain,
+                   causticness_analyzer_->postBoomAreaNormalized());
     }
 
     return scores;

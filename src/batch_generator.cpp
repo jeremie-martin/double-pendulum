@@ -128,6 +128,12 @@ BatchConfig BatchConfig::load(std::string const& path) {
             if (auto req_music = filter->get("require_valid_music")) {
                 config.filter.require_valid_music = req_music->value<bool>().value_or(true);
             }
+            if (auto min_clarity = filter->get("min_peak_clarity")) {
+                config.filter.min_peak_clarity = min_clarity->value<double>().value_or(0.0);
+            }
+            if (auto min_sustain = filter->get("min_post_boom_sustain")) {
+                config.filter.min_post_boom_sustain = min_sustain->value<double>().value_or(0.0);
+            }
         }
 
         // Load preset library if specified

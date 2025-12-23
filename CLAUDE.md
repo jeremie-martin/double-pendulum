@@ -32,10 +32,13 @@ C++20 double pendulum physics simulation with GPU-accelerated rendering. Simulat
 | `src/simulation.cpp` | Main simulation loop, coordinates physics + rendering |
 | `src/batch_generator.cpp` | Batch video generation with probe filtering |
 | `src/main_gui.cpp` | GUI application with real-time preview and analysis |
+| `src/main_metrics.cpp` | Metric iteration tool for recomputing metrics |
+| `src/simulation_data.cpp` | ZSTD-compressed simulation data I/O |
 | `src/gl_renderer.cpp` | GPU line rendering with GLSL shaders |
 | `src/headless_gl.cpp` | EGL context for headless GPU rendering |
 | `include/pendulum.h` | RK4 physics integration (Lagrangian mechanics) |
 | `include/config.h` | TOML config parsing, all parameters |
+| `include/simulation_data.h` | Binary data format and Reader/Writer classes |
 | `include/batch_generator.h` | Batch config, filter criteria, probe filter |
 | `include/metrics/` | Unified metrics system (see Metrics System below) |
 
@@ -222,6 +225,59 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
 # With GUI
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_GUI=ON && cmake --build build -j
 ```
+
+## Metric Iteration Workflow
+
+The metric iteration system allows fast experimentation with metric formulas by saving raw simulation data and recomputing metrics without re-running physics.
+
+### Save Simulation Data
+
+```bash
+# Add --save-data flag to save raw pendulum state data
+./pendulum config.toml --save-data
+
+# Or enable in config file
+# [output]
+# save_simulation_data = true
+```
+
+This creates `simulation_data.bin` alongside the video/frames, containing ZSTD-compressed pendulum states (x1, y1, x2, y2, th1, th2) for all frames.
+
+### Recompute Metrics
+
+```bash
+# Physics metrics only (fast, ~2ms for 100 frames)
+./pendulum-metrics output/run_xxx/simulation_data.bin
+
+# With GPU re-rendering (for GPU metrics like causticness)
+./pendulum-metrics output/run_xxx/simulation_data.bin --render
+
+# Use modified config for different rendering settings
+./pendulum-metrics output/run_xxx/simulation_data.bin --render --config modified.toml
+```
+
+### Workflow for Metric Development
+
+1. Run simulation once with `--save-data`
+2. Modify metric formula in `src/metrics/metrics_collector.cpp`
+3. Rebuild: `cmake --build build -j` (only recompiles changed files)
+4. Test: `./pendulum-metrics output/run_xxx/simulation_data.bin`
+5. Iterate steps 2-4 until satisfied
+
+### Data Format
+
+Binary file with 144-byte header + ZSTD-compressed payload:
+- Header: magic, version, pendulum_count, frame_count, physics params
+- Payload: 24 bytes per pendulum per frame (6 floats: x1, y1, x2, y2, th1, th2)
+- Compression: ~2-5x reduction (varies with motion complexity)
+
+### Size Estimates
+
+| Pendulums | Frames | Raw Size | Compressed |
+|-----------|--------|----------|------------|
+| 1,000 | 100 | 2.4 MB | ~2 MB |
+| 100,000 | 660 | 1.6 GB | ~400 MB |
+| 1,000,000 | 3,000 | 72 GB | ~18 GB |
 
 ## GUI Application
 

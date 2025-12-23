@@ -206,6 +206,8 @@ Config Config::load(std::string const& path) {
             config.output.video_codec = get_string_or(*out, "video_codec", "libx264");
             config.output.video_crf = get_or(*out, "video_crf", 23);
             config.output.video_fps = get_or(*out, "video_fps", 60);
+            config.output.save_simulation_data =
+                get_or(*out, "save_simulation_data", false);
         }
 
         // Analysis mode
@@ -415,6 +417,8 @@ bool Config::applyOverride(std::string const& key, std::string const& value) {
                 output.video_crf = std::stoi(value);
             } else if (param == "video_fps") {
                 output.video_fps = std::stoi(value);
+            } else if (param == "save_simulation_data") {
+                output.save_simulation_data = (value == "true" || value == "1");
             } else {
                 std::cerr << "Unknown output parameter: " << param << "\n";
                 return false;
@@ -567,4 +571,6 @@ void Config::save(std::string const& path) const {
     file << "video_codec = \"" << output.video_codec << "\"\n";
     file << "video_crf = " << output.video_crf << "\n";
     file << "video_fps = " << output.video_fps << "\n";
+    file << "save_simulation_data = " << (output.save_simulation_data ? "true" : "false")
+         << "\n";
 }

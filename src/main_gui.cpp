@@ -327,13 +327,7 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     // End frame metrics collection
     state.metrics_collector.endFrame();
 
-    // Extract events for state
-    if (auto boom_event = state.event_detector.getEvent(metrics::EventNames::Boom)) {
-        if (boom_event->detected() && !state.boom_frame) {
-            state.boom_frame = boom_event->frame;
-            state.boom_variance = boom_event->value;
-        }
-    }
+    // Extract chaos event
     if (auto chaos_event = state.event_detector.getEvent(metrics::EventNames::Chaos)) {
         if (chaos_event->detected() && !state.chaos_frame) {
             state.chaos_frame = chaos_event->frame;
@@ -341,9 +335,22 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
         }
     }
 
+    // Boom detection: track max angular_causticness frame
+    if (auto* caustic_series = state.metrics_collector.getMetric(metrics::MetricNames::AngularCausticness)) {
+        auto const& values = caustic_series->values();
+        if (!values.empty()) {
+            auto max_it = std::max_element(values.begin(), values.end());
+            int max_frame = static_cast<int>(std::distance(values.begin(), max_it));
+            // Update boom_frame to track the peak
+            state.boom_frame = max_frame;
+            state.boom_variance = *max_it;
+        }
+    }
+
     // Run analyzers periodically after boom (every 30 frames)
     if (state.boom_frame && (state.current_frame % 30 == 0)) {
         state.boom_analyzer.analyze(state.metrics_collector, state.event_detector);
+        state.causticness_analyzer.setFrameDuration(frame_duration);
         state.causticness_analyzer.analyze(state.metrics_collector, state.event_detector);
     }
 
@@ -1794,6 +1801,9 @@ int main(int argc, char* argv[]) {
 
                 // Re-run causticness analyzer to update quality score
                 if (state.boom_frame.has_value()) {
+                    double frame_duration = state.config.simulation.duration_seconds /
+                                            state.config.simulation.total_frames;
+                    state.causticness_analyzer.setFrameDuration(frame_duration);
                     state.causticness_analyzer.analyze(state.metrics_collector, state.event_detector);
                 }
             }

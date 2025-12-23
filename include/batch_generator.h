@@ -15,16 +15,18 @@
 // Filter criteria for probe validation (config-level struct)
 // Maps to metrics::ProbeFilter for evaluation
 struct FilterCriteria {
-    double min_boom_seconds = 0.0; // Minimum boom time (0 = no minimum)
-    double max_boom_seconds = 0.0; // Maximum boom time (0 = no maximum)
-    double min_uniformity = 0.0;   // Minimum uniformity (0 = no requirement, 0.9 recommended)
-    bool require_boom = true;      // Reject simulations with no detectable boom
+    double min_boom_seconds = 0.0;   // Minimum boom time (0 = no minimum)
+    double max_boom_seconds = 0.0;   // Maximum boom time (0 = no maximum)
+    double min_uniformity = 0.0;     // Minimum uniformity (0 = no requirement, 0.9 recommended)
+    double min_peak_clarity = 0.0;   // Minimum peak clarity (0 = no requirement, 0.75 recommended)
+    double min_post_boom_sustain = 0.0;  // Minimum post-boom area (0 = no requirement)
+    bool require_boom = true;        // Reject simulations with no detectable boom
     bool require_valid_music = true; // Fail if no music track has drop > boom time
 
     // Check if filtering is enabled (any non-default values)
     bool isEnabled() const {
         return min_boom_seconds > 0.0 || max_boom_seconds > 0.0 || min_uniformity > 0.0 ||
-               require_boom;
+               min_peak_clarity > 0.0 || min_post_boom_sustain > 0.0 || require_boom;
     }
 
     // Convert to metrics::ProbeFilter
@@ -40,6 +42,12 @@ struct FilterCriteria {
         }
         if (min_uniformity > 0.0) {
             filter.addMetricThreshold(metrics::MetricNames::CircularSpread, min_uniformity);
+        }
+        if (min_peak_clarity > 0.0) {
+            filter.addScoreThreshold(metrics::ScoreNames::PeakClarity, min_peak_clarity);
+        }
+        if (min_post_boom_sustain > 0.0) {
+            filter.addScoreThreshold(metrics::ScoreNames::PostBoomSustain, min_post_boom_sustain);
         }
         return filter;
     }

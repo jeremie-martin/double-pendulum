@@ -36,6 +36,7 @@ void printUsage(char const* program) {
               << "Options:\n"
               << "  --set <key>=<value>    Override config parameter (can be used multiple times)\n"
               << "  --analysis             Enable analysis mode (extended statistics)\n"
+              << "  --save-data            Save raw simulation data for metric iteration\n"
               << "  --music <track|random> Add music synced to chaos onset\n"
               << "  --resume               Resume interrupted batch\n\n"
               << "Parameter keys use dot notation: section.parameter\n"
@@ -57,6 +58,7 @@ struct CLIOptions {
     std::string music_track;
     std::vector<std::pair<std::string, std::string>> overrides;
     bool analysis = false;
+    bool save_data = false;  // Save raw simulation data for metric iteration
 };
 
 int runSimulation(CLIOptions const& opts) {
@@ -76,6 +78,12 @@ int runSimulation(CLIOptions const& opts) {
     if (opts.analysis) {
         config.analysis.enabled = true;
         std::cout << "Analysis mode: enabled\n";
+    }
+
+    // Apply save-data flag
+    if (opts.save_data) {
+        config.output.save_simulation_data = true;
+        std::cout << "Saving simulation data: enabled\n";
     }
 
     // Calculate derived values
@@ -309,6 +317,8 @@ int main(int argc, char* argv[]) {
             overrides.push_back(*parsed);
         } else if (opt == "--analysis") {
             opts.analysis = true;
+        } else if (opt == "--save-data") {
+            opts.save_data = true;
         }
     }
 
