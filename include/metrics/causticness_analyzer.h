@@ -99,6 +99,8 @@ public:
         detected_peaks_.clear();
         total_frames_ = 0;
         // Don't reset frame_duration_ so user-set value persists
+        // Reset warning flag so it can warn again if frame_duration becomes invalid
+        warned_frame_duration_fallback_ = false;
     }
 
     bool hasResults() const override { return has_results_; }

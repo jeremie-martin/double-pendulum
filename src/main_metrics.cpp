@@ -198,13 +198,24 @@ int computePhysicsMetrics(Options const& opts,
         }
     }
 
-    // Export metrics
+    // Export metrics with canonical column order (matches simulation.cpp)
     fs::path output_path = opts.output_path;
     if (output_path.empty()) {
         output_path = opts.data_path.parent_path() / "metrics_recomputed.csv";
     }
 
-    collector.exportCSV(output_path.string());
+    // Use explicit column order for reproducibility across tools
+    std::vector<std::string> const canonical_columns = {
+        metrics::MetricNames::Variance,
+        metrics::MetricNames::CircularSpread,
+        metrics::MetricNames::SpreadRatio,
+        metrics::MetricNames::AngularRange,
+        metrics::MetricNames::AngularCausticness,
+        metrics::MetricNames::Brightness,
+        metrics::MetricNames::Coverage,
+        metrics::MetricNames::TotalEnergy
+    };
+    collector.exportCSV(output_path.string(), canonical_columns);
     std::cout << "\nMetrics saved to: " << output_path << "\n";
 
     return 0;
@@ -348,13 +359,24 @@ int computeGPUMetrics(Options const& opts,
                   << metrics.post_boom_area_normalized << "\n";
     }
 
-    // Export metrics
+    // Export metrics with canonical column order (matches simulation.cpp)
     fs::path output_path = opts.output_path;
     if (output_path.empty()) {
         output_path = opts.data_path.parent_path() / "metrics_recomputed.csv";
     }
 
-    collector.exportCSV(output_path.string());
+    // Use explicit column order for reproducibility across tools
+    std::vector<std::string> const canonical_columns = {
+        metrics::MetricNames::Variance,
+        metrics::MetricNames::CircularSpread,
+        metrics::MetricNames::SpreadRatio,
+        metrics::MetricNames::AngularRange,
+        metrics::MetricNames::AngularCausticness,
+        metrics::MetricNames::Brightness,
+        metrics::MetricNames::Coverage,
+        metrics::MetricNames::TotalEnergy
+    };
+    collector.exportCSV(output_path.string(), canonical_columns);
     std::cout << "\nMetrics saved to: " << output_path << "\n";
 
     return 0;

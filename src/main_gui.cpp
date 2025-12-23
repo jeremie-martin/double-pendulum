@@ -1855,85 +1855,97 @@ int main(int argc, char* argv[]) {
         ImGui::End();
 
         // Quality Scores window (separate)
+        // Primary score is based on causticness (angular distribution quality).
+        // Boom timing is detected from max causticness, so causticness is the
+        // single source of truth for visual quality assessment.
         ImGui::Begin("Quality");
 
-        if (state.boom_analyzer.hasResults() || state.causticness_analyzer.hasResults()) {
-            // Get scores
-            double boom_score = state.boom_analyzer.hasResults() ? state.boom_analyzer.score() : 0.0;
-            double caustic_score = state.causticness_analyzer.hasResults() ? state.causticness_analyzer.score() : 0.0;
-            double composite = (boom_score + caustic_score) / 2.0;
+        if (state.causticness_analyzer.hasResults()) {
+            auto caustic_results = state.causticness_analyzer.toJSON();
+            double caustic_score = state.causticness_analyzer.score();
 
-            // Composite score at top (most important)
-            ImVec4 bar_color = composite < 0.4f ? ImVec4(0.8f, 0.2f, 0.2f, 1.0f) :
-                               composite < 0.7f ? ImVec4(0.8f, 0.8f, 0.2f, 1.0f) :
-                                                  ImVec4(0.2f, 0.8f, 0.2f, 1.0f);
-            ImGui::Text("Composite:");
+            // Primary quality score (causticness-based)
+            ImVec4 bar_color = caustic_score < 0.4f ? ImVec4(0.8f, 0.2f, 0.2f, 1.0f) :
+                               caustic_score < 0.7f ? ImVec4(0.8f, 0.8f, 0.2f, 1.0f) :
+                                                      ImVec4(0.2f, 0.8f, 0.2f, 1.0f);
+            ImGui::Text("Quality Score:");
             ImGui::SameLine();
             ImGui::PushStyleColor(ImGuiCol_PlotHistogram, bar_color);
-            ImGui::ProgressBar(static_cast<float>(composite), ImVec2(100, 0));
+            ImGui::ProgressBar(static_cast<float>(caustic_score), ImVec2(100, 0));
             ImGui::PopStyleColor();
             ImGui::SameLine();
-            ImGui::Text("%.2f", composite);
+            ImGui::Text("%.2f", caustic_score);
 
             ImGui::Separator();
 
-            // Boom Analysis section
-            if (state.boom_analyzer.hasResults()) {
-                auto boom_results = state.boom_analyzer.toJSON();
-                double sharpness = boom_results.value("sharpness_ratio", 0.0);
-                std::string type = boom_results.value("boom_type", "unknown");
-                int peak_frame = boom_results.value("peak_derivative_frame", 0);
+            // Causticness details
+            double peak = caustic_results.value("peak_causticness", 0.0);
+            double avg = caustic_results.value("average_causticness", 0.0);
+            int peak_frame = caustic_results.value("peak_frame", 0);
+            double time_above = caustic_results.value("time_above_threshold", 0.0);
 
-                ImGui::Text("Boom:");
+            // Use cached frame_duration for accurate time display
+            double peak_seconds = static_cast<double>(peak_frame) * state.frame_duration;
+            ImGui::Text("Peak: %.1f @ %.2fs", peak, peak_seconds);
+            ImGui::Text("Average: %.1f | Time above threshold: %.1fs", avg, time_above);
+
+            // Peak clarity (important for filtering)
+            double peak_clarity = caustic_results.value("peak_clarity_score", 1.0);
+            int competing_peaks = caustic_results.value("competing_peaks_count", 0);
+            ImVec4 clarity_color = peak_clarity < 0.6f ? ImVec4(0.8f, 0.2f, 0.2f, 1.0f) :
+                                   peak_clarity < 0.8f ? ImVec4(0.8f, 0.8f, 0.2f, 1.0f) :
+                                                         ImVec4(0.2f, 0.8f, 0.2f, 1.0f);
+            ImGui::Text("Peak Clarity:");
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, clarity_color);
+            ImGui::ProgressBar(static_cast<float>(peak_clarity), ImVec2(80, 0));
+            ImGui::PopStyleColor();
+            ImGui::SameLine();
+            ImGui::Text("%.2f", peak_clarity);
+            if (competing_peaks > 0) {
                 ImGui::SameLine();
-                ImGui::ProgressBar(static_cast<float>(boom_score), ImVec2(80, 0));
-                ImGui::SameLine();
-                ImGui::Text("%.2f", boom_score);
-                ImGui::Text("  Type: %s | Sharpness: %.2f | Peak: frame %d", type.c_str(), sharpness, peak_frame);
-
-                if (ImGui::TreeNode("Boom Details")) {
-                    double peak_deriv = boom_results.value("peak_derivative", 0.0);
-                    double init_accel = boom_results.value("initial_acceleration", 0.0);
-                    double pre_boom_mean = boom_results.value("pre_boom_variance_mean", 0.0);
-                    double post_boom_max = boom_results.value("post_boom_variance_max", 0.0);
-                    int frames_to_peak = boom_results.value("frames_to_peak", 0);
-
-                    ImGui::Text("Peak derivative: %.3f", peak_deriv);
-                    ImGui::Text("Frames to peak: %d", frames_to_peak);
-                    ImGui::Text("Initial acceleration: %.4f", init_accel);
-                    ImGui::Text("Pre-boom variance mean: %.3f", pre_boom_mean);
-                    ImGui::Text("Post-boom variance max: %.3f", post_boom_max);
-                    ImGui::TreePop();
-                }
+                ImGui::TextDisabled("(%d competing)", competing_peaks);
             }
 
-            // Causticness section
-            if (state.causticness_analyzer.hasResults()) {
-                auto caustic_results = state.causticness_analyzer.toJSON();
-                double peak = caustic_results.value("peak_causticness", 0.0);
-                double avg = caustic_results.value("average_causticness", 0.0);
-                int peak_frame = caustic_results.value("peak_frame", 0);
-                double time_above = caustic_results.value("time_above_threshold", 0.0);
+            // Post-boom sustain
+            double post_boom_area = caustic_results.value("post_boom_area_normalized", 0.0);
+            ImGui::Text("Post-boom Sustain:");
+            ImGui::SameLine();
+            ImGui::ProgressBar(static_cast<float>(post_boom_area), ImVec2(80, 0));
+            ImGui::SameLine();
+            ImGui::Text("%.2f", post_boom_area);
 
-                ImGui::Text("Causticness:");
-                ImGui::SameLine();
-                ImGui::ProgressBar(static_cast<float>(caustic_score), ImVec2(80, 0));
-                ImGui::SameLine();
-                ImGui::Text("%.2f", caustic_score);
+            // Collapsible details
+            if (ImGui::TreeNode("Details")) {
+                int frames_above = caustic_results.value("frames_above_threshold", 0);
+                double post_boom_avg = caustic_results.value("post_boom_average", 0.0);
+                double post_boom_peak_val = caustic_results.value("post_boom_peak", 0.0);
+                double threshold = caustic_results.value("threshold", 0.0);
+                double max_competitor_ratio = caustic_results.value("max_competitor_ratio", 0.0);
 
-                double peak_seconds = static_cast<double>(peak_frame) / state.config.output.video_fps;
-                ImGui::Text("  Peak: %.1f @ %.1fs | Avg: %.1f | Time above: %.1fs", peak, peak_seconds, avg, time_above);
+                ImGui::Text("Threshold: %.1f", threshold);
+                ImGui::Text("Frames above threshold: %d", frames_above);
+                ImGui::Text("Post-boom average: %.2f", post_boom_avg);
+                ImGui::Text("Post-boom peak: %.2f", post_boom_peak_val);
+                if (competing_peaks > 0) {
+                    ImGui::Text("Max competitor ratio: %.2f", max_competitor_ratio);
+                }
+                ImGui::TreePop();
+            }
 
-                if (ImGui::TreeNode("Causticness Details")) {
-                    int frames_above = caustic_results.value("frames_above_threshold", 0);
-                    double post_boom_avg = caustic_results.value("post_boom_average", 0.0);
-                    double post_boom_peak = caustic_results.value("post_boom_peak", 0.0);
-                    double threshold = caustic_results.value("threshold", 0.0);
+            // Legacy boom analysis (collapsed by default, kept for comparison)
+            if (state.boom_analyzer.hasResults()) {
+                if (ImGui::TreeNode("Variance Analysis (Legacy)")) {
+                    ImGui::TextDisabled("Note: Boom is now detected from causticness.");
+                    ImGui::TextDisabled("This shows variance-based analysis for comparison.");
 
-                    ImGui::Text("Threshold: %.1f", threshold);
-                    ImGui::Text("Frames above threshold: %d", frames_above);
-                    ImGui::Text("Post-boom average: %.2f", post_boom_avg);
-                    ImGui::Text("Post-boom peak: %.2f", post_boom_peak);
+                    auto boom_results = state.boom_analyzer.toJSON();
+                    double boom_score = state.boom_analyzer.score();
+                    double sharpness = boom_results.value("sharpness_ratio", 0.0);
+                    std::string type = boom_results.value("boom_type", "unknown");
+
+                    ImGui::Text("Variance Score: %.2f", boom_score);
+                    ImGui::Text("Type: %s | Sharpness: %.2f", type.c_str(), sharpness);
                     ImGui::TreePop();
                 }
             }

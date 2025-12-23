@@ -54,6 +54,10 @@ inline void initializeMetricsSystem(MetricsCollector& collector,
 // Overload that takes DetectionParams directly (convenience for config-based init)
 struct DetectionParams;  // Forward declaration
 
+// Overload that also resets BoomAnalyzer for consistency.
+// BoomAnalyzer has no configuration methods - it reads boom event from detector
+// and variance series from collector when analyze() is called. We just reset it
+// here so all analyzers start in a clean state together.
 inline void initializeMetricsSystem(MetricsCollector& collector,
                                     EventDetector& detector,
                                     CausticnessAnalyzer& causticness_analyzer,
@@ -65,7 +69,6 @@ inline void initializeMetricsSystem(MetricsCollector& collector,
     initializeMetricsSystem(collector, detector, causticness_analyzer,
                             chaos_threshold, chaos_confirmation,
                             frame_duration, with_gpu);
-    // BoomAnalyzer doesn't need special initialization - it reads from events
     boom_analyzer.reset();
 }
 

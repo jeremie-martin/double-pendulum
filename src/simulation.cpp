@@ -50,7 +50,7 @@ void savePNGFile(char const* path, uint8_t const* data, int width, int height) {
 
 Simulation::Simulation(Config const& config) : config_(config), color_gen_(config.color) {
     // Initialize metrics system using common helper
-    // Note: frame_duration set later in run() when we know the actual frame count
+    // frame_duration is computed from config (duration_seconds / total_frames)
     double frame_duration = config_.simulation.frameDuration();
     metrics::initializeMetricsSystem(
         metrics_collector_, event_detector_, causticness_analyzer_,
