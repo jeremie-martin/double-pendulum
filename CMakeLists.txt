@@ -21,8 +21,11 @@ find_package(GLEW REQUIRED)
 find_package(PNG REQUIRED)
 # EGL is required for headless GPU rendering
 find_library(EGL_LIBRARY EGL REQUIRED)
+# ZSTD for simulation data compression
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ZSTD REQUIRED libzstd)
 
-# Metrics library sources (new unified metrics system)
+# Metrics library sources (unified metrics system)
 set(METRICS_SOURCES
     src/metrics/metric_series.cpp
     src/metrics/metrics_collector.cpp
@@ -34,11 +37,11 @@ set(METRICS_SOURCES
     src/metrics/probe_pipeline.cpp
 )
 
-# Main executable (CLI with GPU rendering)
-add_executable(pendulum
-    src/main.cpp
+# Core library sources (shared between all executables)
+set(CORE_SOURCES
     src/config.cpp
     src/simulation.cpp
+    src/simulation_data.cpp
     src/video_writer.cpp
     src/music_manager.cpp
     src/batch_generator.cpp
@@ -48,21 +51,43 @@ add_executable(pendulum
     ${METRICS_SOURCES}
 )
 
-target_include_directories(pendulum PRIVATE
+# Core static library
+add_library(double-pendulum-core STATIC ${CORE_SOURCES})
+
+target_include_directories(double-pendulum-core PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/external
+    ${ZSTD_INCLUDE_DIRS}
 )
 
-target_link_libraries(pendulum PRIVATE
+target_link_libraries(double-pendulum-core PUBLIC
     Threads::Threads
     OpenGL::GL
     GLEW::GLEW
     PNG::PNG
     ${EGL_LIBRARY}
+    ${ZSTD_LIBRARIES}
 )
 
-# Enable warnings
+target_compile_options(double-pendulum-core PRIVATE
+    -Wall -Wextra -Wpedantic
+)
+
+# Main executable (CLI with GPU rendering)
+add_executable(pendulum src/main.cpp)
+
+target_link_libraries(pendulum PRIVATE double-pendulum-core)
+
 target_compile_options(pendulum PRIVATE
+    -Wall -Wextra -Wpedantic
+)
+
+# Metrics iteration executable
+add_executable(pendulum-metrics src/main_metrics.cpp)
+
+target_link_libraries(pendulum-metrics PRIVATE double-pendulum-core)
+
+target_compile_options(pendulum-metrics PRIVATE
     -Wall -Wextra -Wpedantic
 )
 
@@ -71,16 +96,8 @@ option(BUILD_GUI "Build GUI application with ImGui" OFF)
 if(BUILD_GUI)
     find_package(SDL2 REQUIRED)
 
-    add_executable(pendulum-gui
-        src/main_gui.cpp
-        src/config.cpp
-        src/simulation.cpp
-        src/video_writer.cpp
-        src/music_manager.cpp
-        src/preset_library.cpp
-        src/gl_renderer.cpp
-        src/headless_gl.cpp
-        ${METRICS_SOURCES}
+    # ImGui sources (GUI-specific)
+    set(IMGUI_SOURCES
         external/imgui/imgui.cpp
         external/imgui/imgui_draw.cpp
         external/imgui/imgui_tables.cpp
@@ -91,9 +108,12 @@ if(BUILD_GUI)
         external/implot/implot_items.cpp
     )
 
+    add_executable(pendulum-gui
+        src/main_gui.cpp
+        ${IMGUI_SOURCES}
+    )
+
     target_include_directories(pendulum-gui PRIVATE
-        ${CMAKE_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/external
         ${SDL2_INCLUDE_DIRS}
         ${CMAKE_SOURCE_DIR}/external/imgui
         ${CMAKE_SOURCE_DIR}/external/imgui/backends
@@ -101,12 +121,8 @@ if(BUILD_GUI)
     )
 
     target_link_libraries(pendulum-gui PRIVATE
-        Threads::Threads
+        double-pendulum-core
         ${SDL2_LIBRARIES}
-        OpenGL::GL
-        GLEW::GLEW
-        PNG::PNG
-        ${EGL_LIBRARY}
     )
 
     target_compile_options(pendulum-gui PRIVATE

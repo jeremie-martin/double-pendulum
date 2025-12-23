@@ -9,9 +9,9 @@ void CausticnessAnalyzer::analyze(MetricsCollector const& collector,
                                    EventDetector const& events) {
     reset();
 
-    // Get causticness series
+    // Get angular causticness series (physics-based metric)
     MetricSeries<double> const* series =
-        collector.getMetric(MetricNames::Causticness);
+        collector.getMetric(MetricNames::AngularCausticness);
     if (!series || series->empty()) {
         return;
     }

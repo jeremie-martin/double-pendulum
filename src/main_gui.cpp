@@ -53,19 +53,11 @@ struct MetricFlags {
     bool brightness_deriv = false;
     bool energy = false;
     bool energy_deriv = false;
-    bool uniformity = false;  // Renamed from spread
+    bool uniformity = false;
     bool uniformity_deriv = false;
-    bool contrast_stddev = false;
-    bool contrast_stddev_deriv = false;
-    bool contrast_range = false;
-    bool contrast_range_deriv = false;
-    bool edge_energy = false;
-    bool edge_energy_deriv = false;
-    bool color_variance = false;
-    bool color_variance_deriv = false;
     bool coverage = false;
     bool coverage_deriv = false;
-    bool causticness = false;
+    bool causticness = true;   // Angular causticness (physics-based)
     bool causticness_deriv = false;
 };
 
@@ -370,12 +362,7 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     metrics::GPUMetricsBundle gpu_metrics;
     gpu_metrics.max_value = renderer.lastMax();
     gpu_metrics.brightness = renderer.lastBrightness();
-    gpu_metrics.contrast_stddev = renderer.lastContrastStddev();
-    gpu_metrics.contrast_range = renderer.lastContrastRange();
-    gpu_metrics.edge_energy = renderer.lastEdgeEnergy();
-    gpu_metrics.color_variance = renderer.lastColorVariance();
     gpu_metrics.coverage = renderer.lastCoverage();
-    gpu_metrics.peak_median_ratio = renderer.lastPeakMedianRatio();
     state.metrics_collector.setGPUMetrics(gpu_metrics);
 
     state.current_frame++;
@@ -474,57 +461,13 @@ void drawAnalysisGraph(AppState& state, MetricFlags const& flags, ImVec2 size) {
             }
         }
 
-        // Plot causticness (Y1 - can be large values)
+        // Plot angular causticness (Y2 - normalized 0-1 range)
         if (flags.causticness) {
-            auto* series = state.metrics_collector.getMetric(metrics::MetricNames::Causticness);
+            auto* series = state.metrics_collector.getMetric(metrics::MetricNames::AngularCausticness);
             if (series && !series->empty()) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
                 ImPlot::SetNextLineStyle(color_causticness, 2.0f);
-                ImPlot::PlotLine("Causticness", frames.data(), series->values().data(),
-                                std::min(data_size, series->size()));
-            }
-        }
-
-        // Plot contrast stddev (Y1 - medium scale)
-        if (flags.contrast_stddev) {
-            auto* series = state.metrics_collector.getMetric(metrics::MetricNames::ContrastStddev);
-            if (series && !series->empty()) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-                ImPlot::SetNextLineStyle(ImVec4(0.8f, 0.5f, 0.2f, 1.0f), 2.0f);
-                ImPlot::PlotLine("Contrast", frames.data(), series->values().data(),
-                                std::min(data_size, series->size()));
-            }
-        }
-
-        // Plot contrast range (Y1)
-        if (flags.contrast_range) {
-            auto* series = state.metrics_collector.getMetric(metrics::MetricNames::ContrastRange);
-            if (series && !series->empty()) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-                ImPlot::SetNextLineStyle(ImVec4(0.9f, 0.6f, 0.3f, 1.0f), 2.0f);
-                ImPlot::PlotLine("Contr.Range", frames.data(), series->values().data(),
-                                std::min(data_size, series->size()));
-            }
-        }
-
-        // Plot edge energy (Y1)
-        if (flags.edge_energy) {
-            auto* series = state.metrics_collector.getMetric(metrics::MetricNames::EdgeEnergy);
-            if (series && !series->empty()) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-                ImPlot::SetNextLineStyle(ImVec4(0.3f, 0.7f, 0.7f, 1.0f), 2.0f);
-                ImPlot::PlotLine("EdgeEnergy", frames.data(), series->values().data(),
-                                std::min(data_size, series->size()));
-            }
-        }
-
-        // Plot color variance (Y1)
-        if (flags.color_variance) {
-            auto* series = state.metrics_collector.getMetric(metrics::MetricNames::ColorVariance);
-            if (series && !series->empty()) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-                ImPlot::SetNextLineStyle(ImVec4(0.7f, 0.3f, 0.7f, 1.0f), 2.0f);
-                ImPlot::PlotLine("ColorVar", frames.data(), series->values().data(),
+                ImPlot::PlotLine("AngCaustic", frames.data(), series->values().data(),
                                 std::min(data_size, series->size()));
             }
         }
@@ -574,12 +517,8 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
     auto* variance_series = state.metrics_collector.getMetric(metrics::MetricNames::Variance);
     auto* brightness_series = state.metrics_collector.getMetric(metrics::MetricNames::Brightness);
     auto* energy_series = state.metrics_collector.getMetric(metrics::MetricNames::TotalEnergy);
-    auto* causticness_series = state.metrics_collector.getMetric(metrics::MetricNames::Causticness);
-    auto* contrast_stddev_series = state.metrics_collector.getMetric(metrics::MetricNames::ContrastStddev);
-    auto* contrast_range_series = state.metrics_collector.getMetric(metrics::MetricNames::ContrastRange);
-    auto* edge_energy_series = state.metrics_collector.getMetric(metrics::MetricNames::EdgeEnergy);
-    auto* color_variance_series = state.metrics_collector.getMetric(metrics::MetricNames::ColorVariance);
     auto* coverage_series = state.metrics_collector.getMetric(metrics::MetricNames::Coverage);
+    auto* angular_causticness_series = state.metrics_collector.getMetric(metrics::MetricNames::AngularCausticness);
 
     if (!variance_series || variance_series->empty()) {
         ImGui::Text("No data yet");
@@ -745,106 +684,6 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
             }
         }
 
-        // Plot contrast stddev (Y3 - medium scale)
-        if (state.detailed_flags.contrast_stddev && contrast_stddev_series != nullptr && !contrast_stddev_series->empty()) {
-            if (s_plot_mode == PlotMode::MultiAxis) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y3);
-            }
-            auto const& contrast_stddev_values = contrast_stddev_series->values();
-            ImPlot::SetNextLineStyle(ImVec4(0.8f, 0.4f, 0.8f, 1.0f));
-            if (s_plot_mode == PlotMode::Normalized) {
-                auto normalized = normalizeData(contrast_stddev_values);
-                ImPlot::PlotLine("Contrast StdDev", frames.data(), normalized.data(), normalized.size());
-            } else {
-                ImPlot::PlotLine("Contrast StdDev", frames.data(), contrast_stddev_values.data(),
-                                 contrast_stddev_values.size());
-            }
-        }
-        // Plot contrast stddev derivative
-        if (state.detailed_flags.contrast_stddev_deriv && contrast_stddev_series != nullptr && contrast_stddev_series->size() > 1) {
-            auto derivs = contrast_stddev_series->derivativeHistory();
-            ImPlot::SetNextLineStyle(ImVec4(0.8f, 0.4f, 0.8f, 0.4f), 1.0f);
-            if (!derivs.empty()) {
-                auto normalized = normalizeData(derivs);
-                ImPlot::PlotLine("Contrast StdDev'", frames.data() + 1, normalized.data(), derivs.size());
-            }
-        }
-
-        // Plot contrast range (Y3 - medium scale)
-        if (state.detailed_flags.contrast_range && contrast_range_series != nullptr && !contrast_range_series->empty()) {
-            if (s_plot_mode == PlotMode::MultiAxis) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y3);
-            }
-            auto const& contrast_range_values = contrast_range_series->values();
-            ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.8f, 0.8f, 1.0f));
-            if (s_plot_mode == PlotMode::Normalized) {
-                auto normalized = normalizeData(contrast_range_values);
-                ImPlot::PlotLine("Contrast Range", frames.data(), normalized.data(), normalized.size());
-            } else {
-                ImPlot::PlotLine("Contrast Range", frames.data(), contrast_range_values.data(),
-                                 contrast_range_values.size());
-            }
-        }
-        // Plot contrast range derivative
-        if (state.detailed_flags.contrast_range_deriv && contrast_range_series != nullptr && contrast_range_series->size() > 1) {
-            auto derivs = contrast_range_series->derivativeHistory();
-            ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.8f, 0.8f, 0.4f), 1.0f);
-            if (!derivs.empty()) {
-                auto normalized = normalizeData(derivs);
-                ImPlot::PlotLine("Contrast Range'", frames.data() + 1, normalized.data(), derivs.size());
-            }
-        }
-
-        // Plot edge energy (Y3 - medium scale)
-        if (state.detailed_flags.edge_energy && edge_energy_series != nullptr && !edge_energy_series->empty()) {
-            if (s_plot_mode == PlotMode::MultiAxis) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y3);
-            }
-            auto const& edge_energy_values = edge_energy_series->values();
-            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
-            if (s_plot_mode == PlotMode::Normalized) {
-                auto normalized = normalizeData(edge_energy_values);
-                ImPlot::PlotLine("Edge Energy", frames.data(), normalized.data(), normalized.size());
-            } else {
-                ImPlot::PlotLine("Edge Energy", frames.data(), edge_energy_values.data(),
-                                 edge_energy_values.size());
-            }
-        }
-        // Plot edge energy derivative
-        if (state.detailed_flags.edge_energy_deriv && edge_energy_series != nullptr && edge_energy_series->size() > 1) {
-            auto derivs = edge_energy_series->derivativeHistory();
-            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.4f, 0.4f, 0.4f), 1.0f);
-            if (!derivs.empty()) {
-                auto normalized = normalizeData(derivs);
-                ImPlot::PlotLine("Edge Energy'", frames.data() + 1, normalized.data(), derivs.size());
-            }
-        }
-
-        // Plot color variance (Y3 - medium scale)
-        if (state.detailed_flags.color_variance && color_variance_series != nullptr && !color_variance_series->empty()) {
-            if (s_plot_mode == PlotMode::MultiAxis) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y3);
-            }
-            auto const& color_variance_values = color_variance_series->values();
-            ImPlot::SetNextLineStyle(ImVec4(0.4f, 1.0f, 0.4f, 1.0f));
-            if (s_plot_mode == PlotMode::Normalized) {
-                auto normalized = normalizeData(color_variance_values);
-                ImPlot::PlotLine("Color Variance", frames.data(), normalized.data(), normalized.size());
-            } else {
-                ImPlot::PlotLine("Color Variance", frames.data(), color_variance_values.data(),
-                                 color_variance_values.size());
-            }
-        }
-        // Plot color variance derivative
-        if (state.detailed_flags.color_variance_deriv && color_variance_series != nullptr && color_variance_series->size() > 1) {
-            auto derivs = color_variance_series->derivativeHistory();
-            ImPlot::SetNextLineStyle(ImVec4(0.4f, 1.0f, 0.4f, 0.4f), 1.0f);
-            if (!derivs.empty()) {
-                auto normalized = normalizeData(derivs);
-                ImPlot::PlotLine("Color Variance'", frames.data() + 1, normalized.data(), derivs.size());
-            }
-        }
-
         // Plot coverage (Y2 - normalized 0-1)
         if (state.detailed_flags.coverage && coverage_series != nullptr && !coverage_series->empty()) {
             if (s_plot_mode == PlotMode::MultiAxis) {
@@ -870,28 +709,27 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
             }
         }
 
-        // Plot causticness (Y3 - medium scale)
-        if (state.detailed_flags.causticness && causticness_series != nullptr && !causticness_series->empty()) {
+        // Plot angular causticness (physics-based, Y2 scale since it's 0-1)
+        if (state.detailed_flags.causticness && angular_causticness_series != nullptr && !angular_causticness_series->empty()) {
             if (s_plot_mode == PlotMode::MultiAxis) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y3);
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
             }
-            auto const& causticness_values = causticness_series->values();
-            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.2f, 1.0f, 1.0f));
+            auto const& values = angular_causticness_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(0.2f, 1.0f, 0.6f, 1.0f), 2.0f);  // Bright green
             if (s_plot_mode == PlotMode::Normalized) {
-                auto normalized = normalizeData(causticness_values);
-                ImPlot::PlotLine("Causticness", frames.data(), normalized.data(), normalized.size());
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("AngCaustic", frames.data(), normalized.data(), normalized.size());
             } else {
-                ImPlot::PlotLine("Causticness", frames.data(), causticness_values.data(),
-                                 causticness_values.size());
+                ImPlot::PlotLine("AngCaustic", frames.data(), values.data(), values.size());
             }
         }
-        // Plot causticness derivative
-        if (state.detailed_flags.causticness_deriv && causticness_series != nullptr && causticness_series->size() > 1) {
-            auto derivs = causticness_series->derivativeHistory();
-            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.2f, 1.0f, 0.4f), 1.0f);
+        // Plot angular causticness derivative
+        if (state.detailed_flags.causticness_deriv && angular_causticness_series != nullptr && angular_causticness_series->size() > 1) {
+            auto derivs = angular_causticness_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.2f, 1.0f, 0.6f, 0.4f), 1.0f);
             if (!derivs.empty()) {
                 auto normalized = normalizeData(derivs);
-                ImPlot::PlotLine("Causticness'", frames.data() + 1, normalized.data(), derivs.size());
+                ImPlot::PlotLine("AngCaustic'", frames.data() + 1, normalized.data(), derivs.size());
             }
         }
 
@@ -1951,12 +1789,7 @@ int main(int argc, char* argv[]) {
                 metrics::GPUMetricsBundle gpu_metrics;
                 gpu_metrics.max_value = renderer.lastMax();
                 gpu_metrics.brightness = renderer.lastBrightness();
-                gpu_metrics.contrast_stddev = renderer.lastContrastStddev();
-                gpu_metrics.contrast_range = renderer.lastContrastRange();
-                gpu_metrics.edge_energy = renderer.lastEdgeEnergy();
-                gpu_metrics.color_variance = renderer.lastColorVariance();
                 gpu_metrics.coverage = renderer.lastCoverage();
-                gpu_metrics.peak_median_ratio = renderer.lastPeakMedianRatio();
                 state.metrics_collector.updateGPUMetricsAtFrame(gpu_metrics, state.display_frame);
 
                 // Re-run causticness analyzer to update quality score
@@ -1996,15 +1829,6 @@ int main(int argc, char* argv[]) {
         ImGui::Checkbox("Caustic", &state.highlevel_flags.causticness);
         ImGui::SameLine();
         ImGui::Checkbox("Energy", &state.highlevel_flags.energy);
-
-        // Metric checkboxes - row 2
-        ImGui::Checkbox("Contrast", &state.highlevel_flags.contrast_stddev);
-        ImGui::SameLine();
-        ImGui::Checkbox("Contr.Rng", &state.highlevel_flags.contrast_range);
-        ImGui::SameLine();
-        ImGui::Checkbox("Edge", &state.highlevel_flags.edge_energy);
-        ImGui::SameLine();
-        ImGui::Checkbox("ColorVar", &state.highlevel_flags.color_variance);
         ImGui::SameLine();
         ImGui::Checkbox("Coverage", &state.highlevel_flags.coverage);
 
@@ -2141,20 +1965,12 @@ int main(int argc, char* argv[]) {
         ImGui::SameLine();
         metricWithDeriv("Unif", &state.detailed_flags.uniformity, &state.detailed_flags.uniformity_deriv, "unif");
         ImGui::SameLine();
-        metricWithDeriv("Edge", &state.detailed_flags.edge_energy, &state.detailed_flags.edge_energy_deriv, "edge");
+        metricWithDeriv("Coverage", &state.detailed_flags.coverage, &state.detailed_flags.coverage_deriv, "cov");
         ImGui::SameLine();
         metricWithDeriv("Caustic", &state.detailed_flags.causticness, &state.detailed_flags.causticness_deriv, "caustic");
 
         // Second row of metrics
         metricWithDeriv("Energy", &state.detailed_flags.energy, &state.detailed_flags.energy_deriv, "energy");
-        ImGui::SameLine();
-        metricWithDeriv("Contr.Std", &state.detailed_flags.contrast_stddev, &state.detailed_flags.contrast_stddev_deriv, "cstd");
-        ImGui::SameLine();
-        metricWithDeriv("Contr.Rng", &state.detailed_flags.contrast_range, &state.detailed_flags.contrast_range_deriv, "crng");
-        ImGui::SameLine();
-        metricWithDeriv("ColorVar", &state.detailed_flags.color_variance, &state.detailed_flags.color_variance_deriv, "cvar");
-        ImGui::SameLine();
-        metricWithDeriv("Coverage", &state.detailed_flags.coverage, &state.detailed_flags.coverage_deriv, "cov");
 
         // Full metric graph
         ImVec2 metrics_graph_size = ImGui::GetContentRegionAvail();
@@ -2188,12 +2004,8 @@ int main(int argc, char* argv[]) {
             showMetric("Energy", metrics::MetricNames::TotalEnergy);
 
             ImGui::TableNextRow();
-            showMetric("Causticness", metrics::MetricNames::Causticness);
+            showMetric("Causticness", metrics::MetricNames::AngularCausticness);
             showMetric("Coverage", metrics::MetricNames::Coverage);
-
-            ImGui::TableNextRow();
-            showMetric("Contrast", metrics::MetricNames::ContrastStddev);
-            showMetric("EdgeEnergy", metrics::MetricNames::EdgeEnergy);
 
             ImGui::EndTable();
         }

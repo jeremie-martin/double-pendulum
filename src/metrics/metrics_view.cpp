@@ -124,13 +124,8 @@ std::vector<std::string> MetricsView::getGPUMetrics() const {
 }
 
 std::vector<std::string> MetricsView::getDerivedMetrics() const {
-    std::vector<std::string> result;
-    for (auto const& [name, type] : metric_types_) {
-        if (type == MetricType::Derived) {
-            result.push_back(name);
-        }
-    }
-    return result;
+    // No derived metrics in the current system
+    return {};
 }
 
 std::vector<std::string> MetricsView::getAllMetrics() const {

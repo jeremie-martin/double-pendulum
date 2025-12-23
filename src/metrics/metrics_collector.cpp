@@ -1,6 +1,8 @@
 #include "metrics/metrics_collector.h"
 #include "pendulum.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
@@ -30,18 +32,13 @@ void MetricsCollector::registerStandardMetrics() {
     registerMetric(MetricNames::CircularSpread, MetricType::Physics);
     registerMetric(MetricNames::AngularRange, MetricType::Physics);
     registerMetric(MetricNames::TotalEnergy, MetricType::Physics);
+    registerMetric(MetricNames::AngularCausticness, MetricType::Physics);
 }
 
 void MetricsCollector::registerGPUMetrics() {
     registerMetric(MetricNames::MaxValue, MetricType::GPU);
     registerMetric(MetricNames::Brightness, MetricType::GPU);
-    registerMetric(MetricNames::ContrastStddev, MetricType::GPU);
-    registerMetric(MetricNames::ContrastRange, MetricType::GPU);
-    registerMetric(MetricNames::EdgeEnergy, MetricType::GPU);
-    registerMetric(MetricNames::ColorVariance, MetricType::GPU);
     registerMetric(MetricNames::Coverage, MetricType::GPU);
-    registerMetric(MetricNames::PeakMedianRatio, MetricType::GPU);
-    registerMetric(MetricNames::Causticness, MetricType::Derived);
 }
 
 void MetricsCollector::beginFrame(int frame_number) {
@@ -64,16 +61,7 @@ void MetricsCollector::setMetric(std::string const& name, double value) {
 void MetricsCollector::setGPUMetrics(GPUMetricsBundle const& bundle) {
     setMetric(MetricNames::MaxValue, bundle.max_value);
     setMetric(MetricNames::Brightness, bundle.brightness);
-    setMetric(MetricNames::ContrastStddev, bundle.contrast_stddev);
-    setMetric(MetricNames::ContrastRange, bundle.contrast_range);
-    setMetric(MetricNames::EdgeEnergy, bundle.edge_energy);
-    setMetric(MetricNames::ColorVariance, bundle.color_variance);
     setMetric(MetricNames::Coverage, bundle.coverage);
-    setMetric(MetricNames::PeakMedianRatio, bundle.peak_median_ratio);
-
-    // Compute causticness as derived metric
-    double causticness = computeCausticness(bundle);
-    setMetric(MetricNames::Causticness, causticness);
 }
 
 void MetricsCollector::updateGPUMetricsAtFrame(GPUMetricsBundle const& bundle, int frame) {
@@ -87,16 +75,7 @@ void MetricsCollector::updateGPUMetricsAtFrame(GPUMetricsBundle const& bundle, i
 
     updateAt(MetricNames::MaxValue, bundle.max_value);
     updateAt(MetricNames::Brightness, bundle.brightness);
-    updateAt(MetricNames::ContrastStddev, bundle.contrast_stddev);
-    updateAt(MetricNames::ContrastRange, bundle.contrast_range);
-    updateAt(MetricNames::EdgeEnergy, bundle.edge_energy);
-    updateAt(MetricNames::ColorVariance, bundle.color_variance);
     updateAt(MetricNames::Coverage, bundle.coverage);
-    updateAt(MetricNames::PeakMedianRatio, bundle.peak_median_ratio);
-
-    // Recompute causticness
-    double causticness = computeCausticness(bundle);
-    updateAt(MetricNames::Causticness, causticness);
 }
 
 void MetricsCollector::endFrame() {
@@ -137,6 +116,10 @@ void MetricsCollector::updateFromAngles(std::vector<double> const& angle1s,
     setMetric(MetricNames::SpreadRatio, spread.spread_ratio);
     setMetric(MetricNames::CircularSpread, spread.circular_spread);
     setMetric(MetricNames::AngularRange, spread.angular_range);
+
+    // Compute angular causticness from both angles
+    double angular_causticness = computeAngularCausticness(angle1s, angle2s);
+    setMetric(MetricNames::AngularCausticness, angular_causticness);
 }
 
 void MetricsCollector::reset() {
@@ -405,38 +388,71 @@ std::pair<double, double> MetricsCollector::computeCircularStats(
     return {circular_mean, resultant_length};
 }
 
-// Helper function for causticness computation (matches FrameAnalysis::causticness())
-double MetricsCollector::computeCausticness(GPUMetricsBundle const& m) const {
-    // Coverage factor: peaks around 0.35, penalizes both extremes
-    double coverage_factor = 0.0;
-    if (m.coverage > 0.1 && m.coverage < 0.7) {
-        if (m.coverage <= 0.35) {
-            coverage_factor = (m.coverage - 0.1) / 0.25;
-        } else {
-            coverage_factor =
-                1.0 - std::pow((m.coverage - 0.35) / 0.35, 1.5);
-        }
-        coverage_factor = std::max(0.0, coverage_factor);
+double MetricsCollector::computeAngularCausticness(
+    std::vector<double> const& angle1s,
+    std::vector<double> const& angle2s) const {
+
+    if (angle1s.empty() || angle1s.size() != angle2s.size()) {
+        return 0.0;
     }
 
-    // Brightness penalty
-    double brightness_factor = 1.0;
-    if (m.brightness > 0.15) {
-        brightness_factor =
-            std::max(0.0, 1.0 - (m.brightness - 0.15) * 4.0);
+    // Scale number of sectors based on N for consistent statistics
+    // Target: ~30-50 pendulums per sector for meaningful statistics
+    // This makes the metric independent of pendulum count
+    constexpr int MIN_SECTORS = 8;
+    constexpr int MAX_SECTORS = 72;
+    constexpr int TARGET_PER_SECTOR = 40;
+
+    int N = static_cast<int>(angle1s.size());
+    int num_sectors = std::max(MIN_SECTORS, std::min(MAX_SECTORS, N / TARGET_PER_SECTOR));
+    double sector_width = TWO_PI / num_sectors;
+
+    // Use vector for dynamic sector count
+    std::vector<int> sector_counts(num_sectors, 0);
+
+    // The tip of the pendulum is at angle (th1 + th2) from vertical
+    // This determines where it appears visually on the circle
+    for (size_t i = 0; i < angle1s.size(); ++i) {
+        double tip_angle = angle1s[i] + angle2s[i];
+
+        // Normalize to [0, 2π)
+        tip_angle = std::fmod(tip_angle, TWO_PI);
+        if (tip_angle < 0) tip_angle += TWO_PI;
+
+        int sector = static_cast<int>(tip_angle / sector_width) % num_sectors;
+        sector_counts[sector]++;
     }
 
-    // Contrast factor
-    double contrast_factor = std::min(1.0, m.contrast_range * 2.0);
+    // Compute coverage: fraction of sectors with at least one pendulum
+    int occupied_sectors = 0;
+    int total_count = 0;
 
-    // Base score
-    double score = m.edge_energy * (1.0 + m.color_variance * 2.0);
+    for (int count : sector_counts) {
+        if (count > 0) occupied_sectors++;
+        total_count += count;
+    }
 
-    // Apply factors
-    score *= coverage_factor * brightness_factor *
-             (0.5 + contrast_factor * 0.5);
+    if (total_count == 0) return 0.0;
 
-    return score;
+    double coverage = static_cast<double>(occupied_sectors) / num_sectors;
+
+    // Compute Gini coefficient to measure inequality of distribution
+    // Gini = 0: perfectly uniform, Gini = 1: maximally concentrated
+    // Gini is inherently scale-independent (normalized by total count)
+    std::sort(sector_counts.begin(), sector_counts.end());
+
+    double gini_sum = 0.0;
+    for (int i = 0; i < num_sectors; ++i) {
+        // Gini formula: sum of (2i - n - 1) * x_i / (n * sum(x))
+        gini_sum += (2.0 * (i + 1) - num_sectors - 1) * sector_counts[i];
+    }
+    double gini = gini_sum / (num_sectors * static_cast<double>(total_count));
+
+    // Causticness = coverage × gini
+    // - Early phase: low coverage × high gini = LOW
+    // - Interesting phase: medium coverage × medium gini = HIGH
+    // - Chaos: high coverage × low gini = LOW
+    return coverage * gini;
 }
 
 } // namespace metrics

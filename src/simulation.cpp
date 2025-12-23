@@ -1,6 +1,7 @@
 #include "simulation.h"
 
 #include "enum_strings.h"
+#include "simulation_data.h"
 
 #include <atomic>
 #include <chrono>
@@ -196,14 +197,10 @@ void Simulation::saveMetricsCSV() {
     auto* variance = metrics_collector_.getMetric(metrics::MetricNames::Variance);
     auto* circular_spread = metrics_collector_.getMetric(metrics::MetricNames::CircularSpread);
     auto* spread_ratio = metrics_collector_.getMetric(metrics::MetricNames::SpreadRatio);
+    auto* angular_range = metrics_collector_.getMetric(metrics::MetricNames::AngularRange);
+    auto* angular_causticness = metrics_collector_.getMetric(metrics::MetricNames::AngularCausticness);
     auto* brightness = metrics_collector_.getMetric(metrics::MetricNames::Brightness);
-    auto* contrast_stddev = metrics_collector_.getMetric(metrics::MetricNames::ContrastStddev);
-    auto* contrast_range = metrics_collector_.getMetric(metrics::MetricNames::ContrastRange);
-    auto* edge_energy = metrics_collector_.getMetric(metrics::MetricNames::EdgeEnergy);
-    auto* color_variance = metrics_collector_.getMetric(metrics::MetricNames::ColorVariance);
     auto* coverage = metrics_collector_.getMetric(metrics::MetricNames::Coverage);
-    auto* peak_median = metrics_collector_.getMetric(metrics::MetricNames::PeakMedianRatio);
-    auto* causticness = metrics_collector_.getMetric(metrics::MetricNames::Causticness);
     auto* total_energy = metrics_collector_.getMetric(metrics::MetricNames::TotalEnergy);
 
     // Determine number of frames
@@ -215,9 +212,9 @@ void Simulation::saveMetricsCSV() {
         return (series && i < series->size()) ? series->at(i) : 0.0;
     };
 
-    // Write header (circular_spread is the primary spread metric)
-    out << "frame,variance,circular_spread,spread_ratio,brightness,contrast_stddev,contrast_range,"
-        << "edge_energy,color_variance,coverage,peak_median_ratio,causticness,total_energy\n";
+    // Write header
+    out << "frame,variance,circular_spread,spread_ratio,angular_range,angular_causticness,"
+        << "brightness,coverage,total_energy\n";
     out << std::fixed << std::setprecision(6);
 
     // Write data
@@ -226,14 +223,10 @@ void Simulation::saveMetricsCSV() {
         out << "," << getValue(variance, i);
         out << "," << getValue(circular_spread, i);
         out << "," << getValue(spread_ratio, i);
+        out << "," << getValue(angular_range, i);
+        out << "," << getValue(angular_causticness, i);
         out << "," << getValue(brightness, i);
-        out << "," << getValue(contrast_stddev, i);
-        out << "," << getValue(contrast_range, i);
-        out << "," << getValue(edge_energy, i);
-        out << "," << getValue(color_variance, i);
         out << "," << getValue(coverage, i);
-        out << "," << getValue(peak_median, i);
-        out << "," << getValue(causticness, i);
         out << "," << getValue(total_energy, i);
         out << "\n";
     }
@@ -301,6 +294,17 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         }
     }
 
+    // Setup simulation data writer for metric iteration
+    std::unique_ptr<simulation_data::Writer> data_writer;
+    if (config_.output.save_simulation_data) {
+        data_writer = std::make_unique<simulation_data::Writer>();
+        std::string data_path = run_directory_ + "/simulation_data.bin";
+        if (!data_writer->open(data_path, config_, total_frames)) {
+            std::cerr << "Failed to open simulation data writer\n";
+            return SimulationResults{};
+        }
+    }
+
     // Allocate buffers
     std::vector<PendulumState> states(pendulum_count);
     std::vector<uint8_t> rgb_buffer(width * height * 3);
@@ -326,6 +330,11 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         auto physics_start = Clock::now();
         stepPendulums(pendulums, states, substeps, dt, thread_count);
         physics_time += Clock::now() - physics_start;
+
+        // Save raw simulation data for metric iteration
+        if (data_writer) {
+            data_writer->writeFrame(states);
+        }
 
         // Begin frame for metrics collection
         metrics_collector_.beginFrame(frame);
@@ -382,12 +391,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
             metrics::GPUMetricsBundle gpu_metrics;
             gpu_metrics.max_value = renderer_.lastMax();
             gpu_metrics.brightness = renderer_.lastBrightness();
-            gpu_metrics.contrast_stddev = renderer_.lastContrastStddev();
-            gpu_metrics.contrast_range = renderer_.lastContrastRange();
-            gpu_metrics.edge_energy = renderer_.lastEdgeEnergy();
-            gpu_metrics.color_variance = renderer_.lastColorVariance();
             gpu_metrics.coverage = renderer_.lastCoverage();
-            gpu_metrics.peak_median_ratio = renderer_.lastPeakMedianRatio();
             metrics_collector_.setGPUMetrics(gpu_metrics);
         }
 
@@ -442,6 +446,13 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     if (video_writer) {
         auto io_start = Clock::now();
         video_writer->close();
+        io_time += Clock::now() - io_start;
+    }
+
+    // Finalize simulation data file
+    if (data_writer) {
+        auto io_start = Clock::now();
+        data_writer->close();
         io_time += Clock::now() - io_start;
     }
 

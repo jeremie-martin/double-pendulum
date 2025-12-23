@@ -17,21 +17,15 @@ namespace metrics {
 
 // Metric type classification
 enum class MetricType {
-    Physics,  // Computed from pendulum state (variance, spread, energy)
-    GPU,      // Computed from rendered frame (brightness, contrast, edge_energy)
-    Derived   // Computed from other metrics (causticness)
+    Physics,  // Computed from pendulum state (variance, spread, causticness)
+    GPU       // Computed from rendered frame (brightness, coverage)
 };
 
-// Bundle for GPU metrics
+// Bundle for GPU metrics (simplified - removed unused metrics)
 struct GPUMetricsBundle {
     float max_value = 0.0f;
     float brightness = 0.0f;
-    float contrast_stddev = 0.0f;
-    float contrast_range = 0.0f;
-    float edge_energy = 0.0f;
-    float color_variance = 0.0f;
     float coverage = 0.0f;
-    float peak_median_ratio = 0.0f;
 };
 
 // Spread metrics (computed from angle1 distribution)
@@ -142,8 +136,10 @@ private:
     std::pair<double, double>
     computeCircularStats(std::vector<double> const& angles) const;
 
-    // Compute causticness from GPU metrics
-    double computeCausticness(GPUMetricsBundle const& bundle) const;
+    // Compute angular causticness from pendulum angles (physics-based)
+    // Measures: sector coverage × density concentration
+    double computeAngularCausticness(std::vector<double> const& angle1s,
+                                     std::vector<double> const& angle2s) const;
 };
 
 // Standard metric names (use these constants for consistency)
@@ -154,19 +150,12 @@ constexpr const char* SpreadRatio = "spread_ratio";
 constexpr const char* CircularSpread = "circular_spread";
 constexpr const char* AngularRange = "angular_range";
 constexpr const char* TotalEnergy = "total_energy";
+constexpr const char* AngularCausticness = "angular_causticness";
 
-// GPU metrics
+// GPU metrics (simplified)
 constexpr const char* MaxValue = "max_value";
 constexpr const char* Brightness = "brightness";
-constexpr const char* ContrastStddev = "contrast_stddev";
-constexpr const char* ContrastRange = "contrast_range";
-constexpr const char* EdgeEnergy = "edge_energy";
-constexpr const char* ColorVariance = "color_variance";
 constexpr const char* Coverage = "coverage";
-constexpr const char* PeakMedianRatio = "peak_median_ratio";
-
-// Derived metrics
-constexpr const char* Causticness = "causticness";
 } // namespace MetricNames
 
 } // namespace metrics

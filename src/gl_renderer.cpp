@@ -4,6 +4,7 @@
 
 #include <GL/glew.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -621,16 +622,8 @@ void GLRenderer::computeMetrics() {
 }
 
 void GLRenderer::computeMetricsFromRGBA(uint8_t const* rgba, int pixel_count) {
+    // Simplified metrics: only compute brightness and coverage
     double brightness_sum = 0.0;
-    double brightness_sq_sum = 0.0;
-    std::vector<float> luminances;
-    luminances.reserve(pixel_count);
-
-    // For color variance: track per-channel means
-    double r_sum = 0.0, g_sum = 0.0, b_sum = 0.0;
-    double r_sq_sum = 0.0, g_sq_sum = 0.0, b_sq_sum = 0.0;
-
-    // Coverage: count non-black pixels (threshold at ~1% brightness)
     int non_black_count = 0;
     constexpr float black_threshold = 0.01f;
 
@@ -643,95 +636,20 @@ void GLRenderer::computeMetricsFromRGBA(uint8_t const* rgba, int pixel_count) {
         float gf = g / 255.0f;
         float bf = b / 255.0f;
 
-        // Luminance using standard sRGB weights (normalized to 0-1)
+        // Luminance using standard sRGB weights
         float lum = 0.2126f * rf + 0.7152f * gf + 0.0722f * bf;
         brightness_sum += lum;
-        brightness_sq_sum += lum * lum;
-        luminances.push_back(lum);
 
-        // Color channel statistics
-        r_sum += rf;
-        g_sum += gf;
-        b_sum += bf;
-        r_sq_sum += rf * rf;
-        g_sq_sum += gf * gf;
-        b_sq_sum += bf * bf;
-
-        // Coverage
         if (lum > black_threshold) {
             ++non_black_count;
         }
     }
 
     // Mean brightness (0-1 range)
-    double mean = brightness_sum / pixel_count;
-    last_brightness_ = static_cast<float>(mean);
-
-    // Contrast metric 1: Standard deviation of luminance
-    double variance = (brightness_sq_sum / pixel_count) - (mean * mean);
-    last_contrast_stddev_ = static_cast<float>(std::sqrt(std::max(0.0, variance)));
-
-    // Contrast metric 2: Percentile spread (p95 - p5)
-    // Using nth_element for O(n) selection instead of full sort
-    size_t p5_idx = pixel_count / 20;
-    size_t p50_idx = pixel_count / 2;
-    size_t p95_idx = pixel_count * 19 / 20;
-    size_t p99_idx = pixel_count * 99 / 100;
-
-    std::nth_element(luminances.begin(), luminances.begin() + p5_idx, luminances.end());
-    float p5 = luminances[p5_idx];
-    std::nth_element(luminances.begin(), luminances.begin() + p50_idx, luminances.end());
-    float p50 = luminances[p50_idx];
-    std::nth_element(luminances.begin(), luminances.begin() + p95_idx, luminances.end());
-    float p95 = luminances[p95_idx];
-    std::nth_element(luminances.begin(), luminances.begin() + p99_idx, luminances.end());
-    float p99 = luminances[p99_idx];
-
-    last_contrast_range_ = p95 - p5;
+    last_brightness_ = static_cast<float>(brightness_sum / pixel_count);
 
     // Coverage: fraction of non-black pixels
     last_coverage_ = static_cast<float>(non_black_count) / pixel_count;
-
-    // Peak-median ratio: p99/p50 (bright focal points vs typical brightness)
-    // Use a very low threshold since most pixels are black
-    last_peak_median_ratio_ = (p50 > 0.0001f) ? (p99 / p50) : 0.0f;
-
-    // Color variance: average variance across R,G,B channels
-    // High color variance = colorful diverse patterns
-    double r_mean = r_sum / pixel_count;
-    double g_mean = g_sum / pixel_count;
-    double b_mean = b_sum / pixel_count;
-    double r_var = (r_sq_sum / pixel_count) - (r_mean * r_mean);
-    double g_var = (g_sq_sum / pixel_count) - (g_mean * g_mean);
-    double b_var = (b_sq_sum / pixel_count) - (b_mean * b_mean);
-    last_color_variance_ = static_cast<float>((r_var + g_var + b_var) / 3.0);
-
-    // Edge energy: compute gradient magnitude using Sobel-like operator
-    // Sample every 4th pixel for performance (still captures structure)
-    double edge_sum = 0.0;
-    int edge_samples = 0;
-    int const step = 4;
-
-    for (int y = step; y < height_ - step; y += step) {
-        for (int x = step; x < width_ - step; x += step) {
-            int idx = y * width_ + x;
-
-            // Get luminance of neighbors (already in luminances array)
-            float left = luminances[idx - step];
-            float right = luminances[idx + step];
-            float up = luminances[idx - step * width_];
-            float down = luminances[idx + step * width_];
-
-            // Gradient magnitude (simplified Sobel)
-            float gx = right - left;
-            float gy = down - up;
-            float grad = std::sqrt(gx * gx + gy * gy);
-            edge_sum += grad;
-            ++edge_samples;
-        }
-    }
-
-    last_edge_energy_ = (edge_samples > 0) ? static_cast<float>(edge_sum / edge_samples) : 0.0f;
 }
 
 bool GLRenderer::createComputeShader() {

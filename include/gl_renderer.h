@@ -60,15 +60,8 @@ public:
     // Get the last computed mean brightness (0-1 range, analysis mode)
     float lastBrightness() const { return last_brightness_; }
 
-    // Get the last computed contrast metrics (analysis mode)
-    float lastContrastStddev() const { return last_contrast_stddev_; }
-    float lastContrastRange() const { return last_contrast_range_; }
-
-    // Get the last computed causticness metrics
-    float lastEdgeEnergy() const { return last_edge_energy_; }
-    float lastColorVariance() const { return last_color_variance_; }
+    // Get the last computed coverage (fraction of non-black pixels)
     float lastCoverage() const { return last_coverage_; }
-    float lastPeakMedianRatio() const { return last_peak_median_ratio_; }
 
     // Compute brightness/contrast metrics from current display texture
     // Lightweight version for GUI preview (doesn't return pixel data)
@@ -120,15 +113,8 @@ private:
     // Last computed mean brightness (0-1 range, analysis mode)
     float last_brightness_ = 0.0f;
 
-    // Last computed contrast metrics (analysis mode)
-    float last_contrast_stddev_ = 0.0f; // Standard deviation of luminance
-    float last_contrast_range_ = 0.0f;  // p95 - p5 luminance spread
-
-    // Last computed causticness metrics
-    float last_edge_energy_ = 0.0f;       // Gradient magnitude (sharp filaments)
-    float last_color_variance_ = 0.0f;    // Color diversity across RGB channels
-    float last_coverage_ = 0.0f;          // Fraction of non-black pixels
-    float last_peak_median_ratio_ = 0.0f; // p99/p50 brightness ratio
+    // Last computed coverage (fraction of non-black pixels)
+    float last_coverage_ = 0.0f;
 
     bool createFramebuffer();
     bool createComputeShader();
