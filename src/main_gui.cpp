@@ -10,7 +10,10 @@
 #include "pendulum.h"
 #include "preset_library.h"
 #include "simulation.h"
+#include "simulation_data.h"
 
+#include <cstring>
+#include <filesystem>
 #include <GL/glew.h>
 #include <SDL2/SDL.h>
 #include <atomic>
@@ -174,6 +177,16 @@ struct AppState {
 
     // Export
     ExportState export_state;
+
+    // Loaded simulation data (for replay mode)
+    std::unique_ptr<simulation_data::Reader> loaded_data;
+    std::string loaded_data_path;
+    bool replay_mode = false;  // True when playing back loaded data
+
+    // Replay timing
+    std::chrono::high_resolution_clock::time_point replay_start_time;
+    int replay_start_frame = 0;
+    bool replay_playing = false;  // True when actively replaying in real-time
 };
 
 void initSimulation(AppState& state, GLRenderer& renderer) {
@@ -223,6 +236,174 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
     state.frame_history.reserve(state.max_history_frames);
 
     renderer.resize(state.preview.width, state.preview.height);
+
+    // Exit replay mode when starting fresh simulation
+    state.replay_mode = false;
+    state.replay_playing = false;
+    state.loaded_data.reset();
+    state.loaded_data_path.clear();
+}
+
+// Forward declaration (defined later)
+void renderFrameFromHistory(AppState& state, GLRenderer& renderer, int frame_index);
+
+// Load simulation data from file and prepare for replay
+bool loadSimulationData(AppState& state, GLRenderer& renderer, std::string const& path) {
+    namespace fs = std::filesystem;
+
+    // Create reader
+    auto reader = std::make_unique<simulation_data::Reader>();
+    if (!reader->open(path)) {
+        std::cerr << "Failed to load simulation data from: " << path << "\n";
+        return false;
+    }
+
+    std::cout << "Loaded simulation: " << reader->pendulumCount() << " pendulums, "
+              << reader->frameCount() << " frames\n";
+
+    // Try to load config from same directory
+    fs::path data_path(path);
+    fs::path config_path = data_path.parent_path() / "config.toml";
+    if (fs::exists(config_path)) {
+        state.config = Config::load(config_path.string());
+        std::cout << "Loaded config from: " << config_path << "\n";
+    } else {
+        std::cout << "Warning: No config.toml found, using current settings\n";
+    }
+
+    // Update config to match loaded data
+    state.config.simulation.total_frames = static_cast<int>(reader->frameCount());
+    state.config.simulation.duration_seconds = reader->header().duration_seconds;
+    state.config.physics.initial_angle1 = reader->header().initial_angle1;
+    state.config.physics.initial_angle2 = reader->header().initial_angle2;
+    state.config.simulation.angle_variation = reader->header().angle_variation;
+
+    // Setup colors based on loaded pendulum count
+    int n = static_cast<int>(reader->pendulumCount());
+    state.preview.pendulum_count = n;
+    state.colors.resize(n);
+    ColorSchemeGenerator color_gen(state.config.color);
+    for (int i = 0; i < n; ++i) {
+        state.colors[i] = color_gen.getColorForIndex(i, n);
+    }
+
+    // Pre-load all frames into frame_history for scrubbing
+    state.frame_history.clear();
+    state.frame_history.reserve(reader->frameCount());
+    for (uint32_t f = 0; f < reader->frameCount(); ++f) {
+        state.frame_history.push_back(reader->getFrame(f));
+    }
+
+    // Compute all physics metrics for the loaded data
+    state.updateFrameDuration();
+    metrics::resetMetricsSystem(state.metrics_collector, state.event_detector,
+                                state.boom_analyzer, state.causticness_analyzer);
+    metrics::initializeMetricsSystem(
+        state.metrics_collector, state.event_detector, state.causticness_analyzer,
+        state.config.detection.chaos_threshold, state.config.detection.chaos_confirmation,
+        state.frame_duration, /*with_gpu=*/true, state.boom_analyzer);
+
+    std::vector<double> angle1s, angle2s;
+    for (uint32_t f = 0; f < reader->frameCount(); ++f) {
+        reader->getAnglesForFrame(f, angle1s, angle2s);
+        state.metrics_collector.beginFrame(static_cast<int>(f));
+        state.metrics_collector.updateFromAngles(angle1s, angle2s);
+        state.metrics_collector.endFrame();
+        state.event_detector.update(state.metrics_collector, state.frame_duration);
+    }
+
+    // Detect boom and run analyzers
+    auto boom = metrics::findBoomFrame(state.metrics_collector, state.frame_duration);
+    if (boom.frame >= 0) {
+        state.boom_frame = boom.frame;
+        double variance_at_boom = 0.0;
+        if (auto const* var_series = state.metrics_collector.getMetric(metrics::MetricNames::Variance)) {
+            if (boom.frame < static_cast<int>(var_series->size())) {
+                variance_at_boom = var_series->at(boom.frame);
+            }
+        }
+        state.boom_variance = variance_at_boom;
+        metrics::forceBoomEvent(state.event_detector, boom, variance_at_boom);
+    } else {
+        state.boom_frame.reset();
+    }
+
+    // Check for chaos event
+    if (auto chaos = state.event_detector.getEvent(metrics::EventNames::Chaos)) {
+        state.chaos_frame = chaos->frame;
+        state.chaos_variance = chaos->value;
+    } else {
+        state.chaos_frame.reset();
+    }
+
+    // Run analyzers
+    state.boom_analyzer.analyze(state.metrics_collector, state.event_detector);
+    state.causticness_analyzer.analyze(state.metrics_collector, state.event_detector);
+
+    // Setup state for replay
+    state.loaded_data = std::move(reader);
+    state.loaded_data_path = path;
+    state.replay_mode = true;
+    state.replay_playing = false;
+    state.running = true;
+    state.paused = true;  // Start paused so user can see frame 0
+    state.current_frame = static_cast<int>(state.frame_history.size()) - 1;
+    state.display_frame = 0;
+    state.scrubbing = true;  // Show scrubbing UI initially
+
+    // Resize renderer to match config
+    renderer.resize(state.config.render.width, state.config.render.height);
+    state.preview.width = state.config.render.width;
+    state.preview.height = state.config.render.height;
+
+    // Render the first frame
+    if (!state.frame_history.empty()) {
+        renderFrameFromHistory(state, renderer, 0);
+    }
+
+    std::cout << "Ready for replay. Press Space to play.\n";
+    return true;
+}
+
+// Start real-time replay from current display frame
+void startReplay(AppState& state) {
+    if (!state.replay_mode || state.frame_history.empty()) return;
+
+    state.replay_playing = true;
+    state.paused = false;
+    state.replay_start_frame = state.display_frame;
+    state.replay_start_time = std::chrono::high_resolution_clock::now();
+}
+
+// Stop replay
+void stopReplay(AppState& state) {
+    state.replay_playing = false;
+    state.paused = true;
+}
+
+// Update replay - advances display_frame based on real time
+void updateReplay(AppState& state, GLRenderer& renderer) {
+    if (!state.replay_playing || state.frame_history.empty()) return;
+
+    auto now = std::chrono::high_resolution_clock::now();
+    double elapsed = std::chrono::duration<double>(now - state.replay_start_time).count();
+
+    // Calculate which frame we should be on
+    int frames_elapsed = static_cast<int>(elapsed / state.frame_duration);
+    int target_frame = state.replay_start_frame + frames_elapsed;
+
+    // Clamp to valid range
+    int max_frame = static_cast<int>(state.frame_history.size()) - 1;
+    if (target_frame > max_frame) {
+        target_frame = max_frame;
+        stopReplay(state);  // Stop at end
+    }
+
+    // Update display if frame changed
+    if (target_frame != state.display_frame) {
+        state.display_frame = target_frame;
+        renderFrameFromHistory(state, renderer, target_frame);
+    }
 }
 
 // Render a given set of states
@@ -1457,6 +1638,20 @@ void drawDetectionSection(AppState& state) {
 void drawControlPanel(AppState& state, GLRenderer& renderer) {
     ImGui::Begin("Controls");
 
+    // File path input for loading simulation data
+    static char load_path[512] = "";
+    ImGui::SetNextItemWidth(300);
+    ImGui::InputTextWithHint("##loadpath", "Path to simulation_data.bin", load_path, sizeof(load_path));
+    ImGui::SameLine();
+    if (ImGui::Button("Load")) {
+        if (strlen(load_path) > 0) {
+            loadSimulationData(state, renderer, load_path);
+        }
+    }
+    tooltip("Load saved simulation data for replay");
+
+    ImGui::Separator();
+
     // Simulation control buttons with keyboard hints
     if (!state.running) {
         if (ImGui::Button("Start [Space]")) {
@@ -1467,7 +1662,32 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
             randomizePhysics(state);
         }
         tooltip("Randomize physics parameters");
+    } else if (state.replay_mode) {
+        // Replay mode controls
+        if (state.replay_playing) {
+            if (ImGui::Button("Pause [Space]")) {
+                stopReplay(state);
+            }
+        } else {
+            if (ImGui::Button("Play [Space]")) {
+                startReplay(state);
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Restart")) {
+            state.display_frame = 0;
+            state.scrubbing = true;
+            stopReplay(state);
+            renderFrameFromHistory(state, renderer, 0);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("New Sim [R]")) {
+            state.replay_mode = false;
+            state.loaded_data.reset();
+            initSimulation(state, renderer);
+        }
     } else {
+        // Normal simulation mode controls
         if (ImGui::Button(state.paused ? "Resume [Space]" : "Pause [Space]")) {
             state.paused = !state.paused;
         }
@@ -1504,17 +1724,34 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
 
     // Status display
     ImGui::Separator();
-    ImGui::Text("Frame: %d", state.current_frame);
-    ImGui::Text("FPS: %.1f", state.fps);
-    ImGui::Text("Sim: %.2f ms", state.sim_time_ms);
-    ImGui::Text("Render: %.2f ms", state.render_time_ms);
+    if (state.replay_mode) {
+        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "REPLAY MODE");
+        ImGui::Text("Frame: %d / %d", state.display_frame,
+                    static_cast<int>(state.frame_history.size()) - 1);
+        double time_seconds = state.display_frame * state.frame_duration;
+        ImGui::Text("Time: %.2fs / %.2fs", time_seconds, state.config.simulation.duration_seconds);
+        if (!state.loaded_data_path.empty()) {
+            // Show just the filename
+            std::filesystem::path p(state.loaded_data_path);
+            ImGui::TextDisabled("File: %s", p.filename().string().c_str());
+        }
+    } else {
+        ImGui::Text("Frame: %d", state.current_frame);
+        ImGui::Text("FPS: %.1f", state.fps);
+        ImGui::Text("Sim: %.2f ms", state.sim_time_ms);
+        ImGui::Text("Render: %.2f ms", state.render_time_ms);
+    }
 
     // Event status
     if (state.boom_frame.has_value()) {
-        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Boom: frame %d", *state.boom_frame);
+        double boom_seconds = *state.boom_frame * state.frame_duration;
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Boom: frame %d (%.2fs)",
+                           *state.boom_frame, boom_seconds);
     }
     if (state.chaos_frame.has_value()) {
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "Chaos: frame %d", *state.chaos_frame);
+        double chaos_seconds = *state.chaos_frame * state.frame_duration;
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "Chaos: frame %d (%.2fs)",
+                           *state.chaos_frame, chaos_seconds);
     }
 
     ImGui::Separator();
@@ -1545,20 +1782,34 @@ void drawTimeline(AppState& state, GLRenderer& renderer) {
     }
 
     ImGui::Text("Timeline");
+    if (state.replay_mode) {
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "(Replay)");
+    }
     ImGui::Separator();
 
     // Playback controls
-    if (ImGui::Button(state.paused ? "Play" : "Pause")) {
-        state.paused = !state.paused;
-        if (!state.paused) {
-            // Resume from current display frame
-            state.scrubbing = false;
+    bool is_playing = state.replay_mode ? state.replay_playing : !state.paused;
+    if (ImGui::Button(is_playing ? "Pause" : "Play")) {
+        if (state.replay_mode) {
+            if (state.replay_playing) {
+                stopReplay(state);
+            } else {
+                startReplay(state);
+            }
+        } else {
+            state.paused = !state.paused;
+            if (!state.paused) {
+                // Resume from current display frame
+                state.scrubbing = false;
+            }
         }
     }
     ImGui::SameLine();
 
     // Step backward
     if (ImGui::Button("<<") && state.display_frame > 0) {
+        if (state.replay_mode) stopReplay(state);
         state.paused = true;
         state.display_frame--;
         state.scrubbing = true;
@@ -1568,6 +1819,7 @@ void drawTimeline(AppState& state, GLRenderer& renderer) {
 
     // Step forward (only within history)
     if (ImGui::Button(">>") && state.display_frame < history_size - 1) {
+        if (state.replay_mode) stopReplay(state);
         state.paused = true;
         state.display_frame++;
         state.scrubbing = true;
@@ -1575,13 +1827,14 @@ void drawTimeline(AppState& state, GLRenderer& renderer) {
     }
     ImGui::SameLine();
 
-    // Jump to live
-    if (ImGui::Button("Live")) {
+    // Jump to end (or live in normal mode)
+    const char* end_label = state.replay_mode ? "End" : "Live";
+    if (ImGui::Button(end_label)) {
+        if (state.replay_mode) stopReplay(state);
         state.scrubbing = false;
-        state.display_frame = state.current_frame;
+        state.display_frame = history_size - 1;
         if (!state.frame_history.empty()) {
-            renderFrameFromHistory(state, renderer,
-                                   std::min(state.display_frame, history_size - 1));
+            renderFrameFromHistory(state, renderer, state.display_frame);
         }
     }
 
@@ -1590,15 +1843,19 @@ void drawTimeline(AppState& state, GLRenderer& renderer) {
     int slider_frame = std::min(state.display_frame, max_frame);
 
     if (ImGui::SliderInt("Frame", &slider_frame, 0, max_frame)) {
+        if (state.replay_mode) stopReplay(state);
         state.paused = true;
         state.scrubbing = true;
         state.display_frame = slider_frame;
         renderFrameFromHistory(state, renderer, state.display_frame);
     }
 
-    // Frame info
-    ImGui::Text("Displaying: %d / %d", state.display_frame, history_size - 1);
-    if (history_size >= state.max_history_frames) {
+    // Frame info with time display
+    double display_time = state.display_frame * state.frame_duration;
+    double total_time = max_frame * state.frame_duration;
+    ImGui::Text("Frame: %d / %d  (%.2fs / %.2fs)",
+                state.display_frame, history_size - 1, display_time, total_time);
+    if (!state.replay_mode && history_size >= state.max_history_frames) {
         ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "History limit reached (%d frames)",
                            state.max_history_frames);
     }
@@ -1747,6 +2004,17 @@ int main(int argc, char* argv[]) {
                 case SDLK_SPACE:
                     if (!state.running) {
                         initSimulation(state, renderer);
+                    } else if (state.replay_mode) {
+                        // Toggle replay playback
+                        if (state.replay_playing) {
+                            stopReplay(state);
+                        } else {
+                            startReplay(state);
+                        }
+                    } else if (state.scrubbing && state.display_frame < state.current_frame) {
+                        // Resume playback from scrubbed position using real-time replay
+                        state.replay_mode = true;  // Enter replay mode temporarily
+                        startReplay(state);
                     } else {
                         state.paused = !state.paused;
                     }
@@ -1754,12 +2022,17 @@ int main(int argc, char* argv[]) {
                 case SDLK_r:
                     if (!state.running) {
                         randomizePhysics(state);
+                    } else if (state.replay_mode) {
+                        // Exit replay mode and start new simulation
+                        state.replay_mode = false;
+                        state.loaded_data.reset();
+                        initSimulation(state, renderer);
                     } else {
                         initSimulation(state, renderer);
                     }
                     break;
                 case SDLK_PERIOD:
-                    if (state.running && state.paused) {
+                    if (state.running && state.paused && !state.replay_mode) {
                         state.paused = false;
                         stepSimulation(state, renderer);
                         state.paused = true;
@@ -1788,9 +2061,15 @@ int main(int argc, char* argv[]) {
         state.fps = 1.0 / frame_time;
         last_time = now;
 
-        // Step simulation if running
+        // Update simulation or replay
         if (state.running && !state.paused) {
-            stepSimulation(state, renderer);
+            if (state.replay_mode) {
+                // In replay mode, advance frames based on real time
+                updateReplay(state, renderer);
+            } else {
+                // Normal simulation mode
+                stepSimulation(state, renderer);
+            }
         }
 
         // Re-render if needed (e.g., color/post-processing changed while paused)
