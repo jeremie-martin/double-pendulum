@@ -53,8 +53,8 @@ struct ProbePhaseResults {
     double final_variance = 0.0;
     double final_uniformity = 0.0;  // Distribution uniformity (0=concentrated, 1=uniform)
 
-    // Scores from analyzers
-    SimulationScore scores;
+    // Scores from analyzers (matches SimulationResults.score naming)
+    SimulationScore score;
 
     // Quality metrics
     std::optional<BoomQuality> boom_quality;

@@ -223,7 +223,7 @@ ProbePhaseResults ProbePipeline::buildResults(ProbeFilter const& filter) {
     results.final_uniformity = collector_.getUniformity();
 
     // Get scores
-    results.scores = getScores();
+    results.score = getScores();
 
     // Get boom quality
     if (boom_analyzer_enabled_ && boom_analyzer_->hasResults()) {
@@ -232,7 +232,7 @@ ProbePhaseResults ProbePipeline::buildResults(ProbeFilter const& filter) {
 
     // Evaluate filter
     FilterResult filter_result =
-        filter.evaluate(collector_, event_detector_, results.scores);
+        filter.evaluate(collector_, event_detector_, results.score);
     results.passed_filter = filter_result.passed;
     results.rejection_reason = filter_result.reason;
 

@@ -576,7 +576,7 @@ std::pair<bool, metrics::ProbePhaseResults> BatchGenerator::runProbe(Config cons
     }
 
     // Evaluate filter
-    auto filter_result = filter_.evaluate(collector, events, results.scores);
+    auto filter_result = filter_.evaluate(collector, events, results.score);
     results.passed_filter = filter_result.passed;
     results.rejection_reason = filter_result.reason;
 

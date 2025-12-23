@@ -706,16 +706,16 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
 
     // Scores from analyzers
     if (boom_analyzer_.hasResults()) {
-        results.scores.set(metrics::ScoreNames::Boom, boom_analyzer_.score());
+        results.score.set(metrics::ScoreNames::Boom, boom_analyzer_.score());
         results.boom_quality = boom_analyzer_.getQuality();
     }
     if (causticness_analyzer_.hasResults()) {
-        results.scores.set(metrics::ScoreNames::Causticness, causticness_analyzer_.score());
+        results.score.set(metrics::ScoreNames::Causticness, causticness_analyzer_.score());
         // Add peak clarity and post-boom sustain scores for filtering
-        results.scores.set(metrics::ScoreNames::PeakClarity,
-                           causticness_analyzer_.peakClarityScore());
-        results.scores.set(metrics::ScoreNames::PostBoomSustain,
-                           causticness_analyzer_.postBoomAreaNormalized());
+        results.score.set(metrics::ScoreNames::PeakClarity,
+                          causticness_analyzer_.peakClarityScore());
+        results.score.set(metrics::ScoreNames::PostBoomSustain,
+                          causticness_analyzer_.postBoomAreaNormalized());
     }
 
     results.completed = true;
