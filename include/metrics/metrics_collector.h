@@ -21,11 +21,20 @@ enum class MetricType {
     GPU       // Computed from rendered frame (brightness, coverage)
 };
 
-// Bundle for GPU metrics (simplified - removed unused metrics)
+// Bundle for GPU metrics from rendered frames
+//
+// SIMPLIFIED from original version. Removed fields that were computed but unused:
+//   - edge_energy: Was intended for detecting visual sharpness, but wasn't
+//     correlated with perceived quality. Removed to reduce GPU compute.
+//   - contrast: Similar to brightness in practice. Not useful for filtering.
+//   - color_variance: Only relevant for multi-color schemes, rarely used.
+//
+// If you need these metrics back, add them to GLRenderer::computeMetrics()
+// and the corresponding accessors, then add fields here.
 struct GPUMetricsBundle {
-    float max_value = 0.0f;
-    float brightness = 0.0f;
-    float coverage = 0.0f;
+    float max_value = 0.0f;   // Peak pixel intensity (before post-processing)
+    float brightness = 0.0f;  // Mean pixel intensity (0-1 range)
+    float coverage = 0.0f;    // Fraction of non-zero pixels (0-1 range)
 };
 
 // Spread metrics (computed from angle1 distribution)

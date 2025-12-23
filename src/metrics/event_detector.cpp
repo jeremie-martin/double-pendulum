@@ -57,7 +57,16 @@ void EventDetector::update(MetricsCollector const& collector,
             continue;
         }
 
-        // For chaos, only detect after boom
+        // ORDERING DEPENDENCY: Chaos detection requires boom to be detected first.
+        //
+        // This is intentional: chaos (full dispersion) typically happens AFTER
+        // the visual boom, and detecting chaos before boom would give misleading
+        // results. When using findBoomFrame() + forceBoomEvent(), the boom event
+        // is injected before chaos can be detected.
+        //
+        // If you're not seeing chaos detection:
+        //   1. Ensure boom is detected/forced before calling update()
+        //   2. Or ensure boom criteria are configured (though deprecated)
         if (name == EventNames::Chaos) {
             auto boom_it = detected_events_.find(EventNames::Boom);
             if (boom_it == detected_events_.end() || !boom_it->second.confirmed) {

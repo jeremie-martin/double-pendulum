@@ -69,8 +69,18 @@ public:
     void clearCriteria();
 
     // Convenience methods for common events
+    //
+    // DEPRECATED: addBoomCriteria() is no longer used.
+    // Boom detection now uses max angular causticness via findBoomFrame()
+    // in boom_detection.h. The threshold-based approach was replaced because
+    // causticness peaks correlate better with visual "boom" than variance.
+    // This method is kept for API compatibility but does nothing useful.
+    // Use: auto boom = findBoomFrame(collector, frame_duration);
+    //      forceBoomEvent(detector, boom, variance_at_boom);
+    [[deprecated("Use findBoomFrame() + forceBoomEvent() instead")]]
     void addBoomCriteria(double threshold = 0.1, int confirm = 10,
                          std::string const& metric = "variance");
+
     void addChaosCriteria(double threshold = 700.0, int confirm = 10,
                           std::string const& metric = "variance");
 
