@@ -14,10 +14,15 @@ C++20 double pendulum physics simulation with GPU-accelerated rendering. Simulat
       │                    │
       ▼                    ▼
 ┌─────────────┐     ┌──────────────┐
-│  Variance   │     │    Post-     │
-│  Tracker    │     │  Processing  │
+│  Metrics    │◀────│    Post-     │
+│  Collector  │     │  Processing  │
 └─────────────┘     │   (Shader)   │
-                    └──────────────┘
+      │             └──────────────┘
+      ▼
+┌─────────────┐
+│  Analyzers  │
+│ (Boom,etc.) │
+└─────────────┘
 ```
 
 ## Key Files
