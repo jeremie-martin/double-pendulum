@@ -18,6 +18,7 @@
 #include <implot.h>
 #include <iostream>
 #include <mutex>
+#include <random>
 #include <thread>
 #include <vector>
 
@@ -581,6 +582,27 @@ void tooltip(const char* text) {
     }
 }
 
+// Random number generator for physics randomization
+static std::random_device rd;
+static std::mt19937 rng(rd());
+
+// Randomize physics parameters within sensible ranges
+void randomizePhysics(AppState& state) {
+    std::uniform_real_distribution<double> angle_dist(100.0, 260.0);  // degrees, around 180
+    std::uniform_real_distribution<double> length_dist(0.5, 1.5);
+    std::uniform_real_distribution<double> mass_dist(0.5, 2.0);
+    std::uniform_real_distribution<double> vel_dist(-2.0, 2.0);
+
+    state.config.physics.initial_angle1 = deg2rad(angle_dist(rng));
+    state.config.physics.initial_angle2 = deg2rad(angle_dist(rng));
+    state.config.physics.length1 = length_dist(rng);
+    state.config.physics.length2 = length_dist(rng);
+    state.config.physics.mass1 = mass_dist(rng);
+    state.config.physics.mass2 = mass_dist(rng);
+    state.config.physics.initial_velocity1 = vel_dist(rng);
+    state.config.physics.initial_velocity2 = vel_dist(rng);
+}
+
 // Draw a color ramp preview (like Blender's ColorRamp)
 void drawColorRamp(ColorParams const& params, float width, float height) {
     ColorSchemeGenerator gen(params);
@@ -1123,26 +1145,48 @@ void drawDetectionSection(AppState& state) {
 void drawControlPanel(AppState& state, GLRenderer& renderer) {
     ImGui::Begin("Controls");
 
-    // Simulation control buttons
+    // Simulation control buttons with keyboard hints
     if (!state.running) {
-        if (ImGui::Button("Start Simulation")) {
+        if (ImGui::Button("Start [Space]")) {
             initSimulation(state, renderer);
         }
+        ImGui::SameLine();
+        if (ImGui::Button("Randomize [R]")) {
+            randomizePhysics(state);
+        }
+        tooltip("Randomize physics parameters");
     } else {
-        if (ImGui::Button(state.paused ? "Resume" : "Pause")) {
+        if (ImGui::Button(state.paused ? "Resume [Space]" : "Pause [Space]")) {
             state.paused = !state.paused;
         }
         ImGui::SameLine();
         if (state.paused) {
-            if (ImGui::Button("Step")) {
+            if (ImGui::Button("Step [.]")) {
                 state.paused = false;
                 stepSimulation(state, renderer);
                 state.paused = true;
             }
             ImGui::SameLine();
         }
-        if (ImGui::Button("Restart")) {
+        if (ImGui::Button("Restart [R]")) {
             initSimulation(state, renderer);
+        }
+    }
+
+    // Quick action buttons
+    if (state.running) {
+        if (state.boom_frame.has_value()) {
+            ImGui::SameLine();
+            if (ImGui::Button("Boom [B]")) {
+                int target = *state.boom_frame;
+                if (target < static_cast<int>(state.frame_history.size())) {
+                    state.paused = true;
+                    state.scrubbing = true;
+                    state.display_frame = target;
+                    renderFrameFromHistory(state, renderer, target);
+                }
+            }
+            tooltip("Jump to boom frame");
         }
     }
 
@@ -1392,6 +1436,46 @@ int main(int argc, char* argv[]) {
             if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE &&
                 event.window.windowID == SDL_GetWindowID(window)) {
                 done = true;
+            }
+
+            // Keyboard shortcuts (only when not typing in a text field)
+            if (event.type == SDL_KEYDOWN && !ImGui::GetIO().WantTextInput) {
+                switch (event.key.keysym.sym) {
+                case SDLK_SPACE:
+                    if (!state.running) {
+                        initSimulation(state, renderer);
+                    } else {
+                        state.paused = !state.paused;
+                    }
+                    break;
+                case SDLK_r:
+                    if (!state.running) {
+                        randomizePhysics(state);
+                    } else {
+                        initSimulation(state, renderer);
+                    }
+                    break;
+                case SDLK_PERIOD:
+                    if (state.running && state.paused) {
+                        state.paused = false;
+                        stepSimulation(state, renderer);
+                        state.paused = true;
+                    }
+                    break;
+                case SDLK_b:
+                    if (state.running && state.boom_frame.has_value()) {
+                        int target = *state.boom_frame;
+                        if (target < static_cast<int>(state.frame_history.size())) {
+                            state.paused = true;
+                            state.scrubbing = true;
+                            state.display_frame = target;
+                            renderFrameFromHistory(state, renderer, target);
+                        }
+                    }
+                    break;
+                default:
+                    break;
+                }
             }
         }
 
