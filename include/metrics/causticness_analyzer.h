@@ -132,6 +132,7 @@ private:
     int boom_frame_ = -1;
     double frame_duration_ = 0.0;  // 0 = auto-detect (was 1/60)
     size_t total_frames_ = 0;
+    mutable bool warned_frame_duration_fallback_ = false;  // One-time warning flag
 };
 
 } // namespace metrics

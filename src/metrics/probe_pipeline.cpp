@@ -171,6 +171,21 @@ SimulationScore ProbePipeline::getScores() const {
 }
 
 ProbePhaseResults ProbePipeline::finalizePhase() {
+    // Detect boom using max causticness (required before running analyzers)
+    if (frame_duration_ > 0.0) {
+        auto boom = findBoomFrame(collector_, frame_duration_);
+        if (boom.frame >= 0) {
+            // Get variance at boom for the event
+            double variance_at_boom = 0.0;
+            if (auto const* var_series = collector_.getMetric(MetricNames::Variance)) {
+                if (boom.frame < static_cast<int>(var_series->size())) {
+                    variance_at_boom = var_series->at(boom.frame);
+                }
+            }
+            forceBoomEvent(event_detector_, boom, variance_at_boom);
+        }
+    }
+
     // Run analyzers
     runAnalyzers();
 

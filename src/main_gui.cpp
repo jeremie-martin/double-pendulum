@@ -1050,10 +1050,15 @@ void drawSimulationSection(AppState& state) {
         auto duration = static_cast<float>(state.config.simulation.duration_seconds);
         if (ImGui::SliderFloat("Duration (s)", &duration, 1.0f, 60.0f)) {
             state.config.simulation.duration_seconds = duration;
+            // Update analyzer frame_duration when config changes
+            state.causticness_analyzer.setFrameDuration(state.config.simulation.frameDuration());
         }
         tooltip("Total simulation time in physical seconds");
 
-        ImGui::SliderInt("Total Frames", &state.config.simulation.total_frames, 60, 3600);
+        if (ImGui::SliderInt("Total Frames", &state.config.simulation.total_frames, 60, 3600)) {
+            // Update analyzer frame_duration when config changes
+            state.causticness_analyzer.setFrameDuration(state.config.simulation.frameDuration());
+        }
         tooltip("Number of frames to render");
 
         // Physics quality settings

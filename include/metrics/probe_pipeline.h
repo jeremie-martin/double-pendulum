@@ -2,6 +2,7 @@
 
 #include "metrics/analyzer.h"
 #include "metrics/boom_analyzer.h"
+#include "metrics/boom_detection.h"
 #include "metrics/causticness_analyzer.h"
 #include "metrics/event_detector.h"
 #include "metrics/metrics_collector.h"

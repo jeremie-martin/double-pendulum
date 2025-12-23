@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <limits>
 
 namespace metrics {
@@ -169,7 +170,13 @@ void CausticnessAnalyzer::analyze(MetricsCollector const& collector,
             frame_duration_ = boom_event->seconds / boom_event->frame;
         } else {
             // Default to 1/60s if nothing else available
+            // This is a fallback - callers should use setFrameDuration() for accuracy
             frame_duration_ = 1.0 / 60.0;
+            if (!warned_frame_duration_fallback_) {
+                std::cerr << "Warning: CausticnessAnalyzer using fallback frame_duration "
+                          << "(1/60s). Call setFrameDuration() for accurate results.\n";
+                warned_frame_duration_fallback_ = true;
+            }
         }
     }
 

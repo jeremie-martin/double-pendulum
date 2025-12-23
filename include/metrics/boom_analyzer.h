@@ -73,13 +73,6 @@ public:
 
     // Configure analysis parameters
     void setMetric(std::string const& metric_name) { metric_name_ = metric_name; }
-    void setAnalysisWindow(int frames_before, int frames_after) {
-        frames_before_ = frames_before;
-        frames_after_ = frames_after;
-    }
-    void setSharpnessThreshold(double threshold) {
-        sharpness_threshold_ = threshold;
-    }
 
     // Analyzer interface
     std::string name() const override { return ScoreNames::Boom; }

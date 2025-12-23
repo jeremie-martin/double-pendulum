@@ -126,6 +126,10 @@ private:
     SpreadMetrics current_spread_;
     std::vector<SpreadMetrics> spread_history_;
 
+    // Maximum spread_history size (0 = unlimited)
+    // For long-running GUI, keeps memory bounded (~40 bytes per entry)
+    static constexpr size_t MAX_SPREAD_HISTORY = 10000;  // ~3 minutes at 60fps
+
     // Compute spread metrics from angle1 values
     SpreadMetrics computeSpread(std::vector<double> const& angle1s) const;
 

@@ -113,6 +113,14 @@ void MetricsCollector::updateFromAngles(std::vector<double> const& angle1s,
     current_spread_ = spread;
     spread_history_.push_back(spread);
 
+    // Keep spread_history bounded to prevent unbounded memory growth
+    if (MAX_SPREAD_HISTORY > 0 && spread_history_.size() > MAX_SPREAD_HISTORY) {
+        // Remove oldest entries to stay within limit
+        spread_history_.erase(spread_history_.begin(),
+                              spread_history_.begin() +
+                                  (spread_history_.size() - MAX_SPREAD_HISTORY));
+    }
+
     setMetric(MetricNames::SpreadRatio, spread.spread_ratio);
     setMetric(MetricNames::CircularSpread, spread.circular_spread);
     setMetric(MetricNames::AngularRange, spread.angular_range);
