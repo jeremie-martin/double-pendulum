@@ -40,14 +40,6 @@ void ProbePipeline::setPhase2Filter(ProbeFilter const& filter) {
     phase2_filter_ = filter;
 }
 
-void ProbePipeline::setBoomThreshold(double threshold) {
-    boom_threshold_ = threshold;
-}
-
-void ProbePipeline::setBoomConfirmation(int frames) {
-    boom_confirmation_ = frames;
-}
-
 void ProbePipeline::setChaosThreshold(double threshold) {
     chaos_threshold_ = threshold;
 }

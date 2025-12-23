@@ -81,9 +81,7 @@ public:
     void setPhase1Filter(ProbeFilter const& filter);
     void setPhase2Filter(ProbeFilter const& filter);
 
-    // Configure event detection
-    void setBoomThreshold(double threshold);
-    void setBoomConfirmation(int frames);
+    // Configure event detection (boom uses max causticness, not threshold)
     void setChaosThreshold(double threshold);
     void setChaosConfirmation(int frames);
 
@@ -143,11 +141,8 @@ private:
     ProbeFilter phase1_filter_;
     ProbeFilter phase2_filter_;
 
-    // Detection parameters
-    // Note: boom_threshold_ and boom_confirmation_ are deprecated (boom uses max causticness)
-    double boom_threshold_ = 0.1;    // Unused, kept for API compatibility
-    int boom_confirmation_ = 10;     // Unused
-    double chaos_threshold_ = 700.0; // Used for chaos detection
+    // Detection parameters (boom uses max causticness, not threshold)
+    double chaos_threshold_ = 700.0;
     int chaos_confirmation_ = 10;
 
     // Internal state
