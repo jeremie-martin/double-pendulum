@@ -215,7 +215,9 @@ void Simulation::saveMetricsCSV() {
         return (series && i < series->size()) ? series->at(i) : 0.0;
     };
 
-    // Write header
+    // Write header - CANONICAL COLUMN ORDER for simulation metrics CSV
+    // This order is intentional and matches what downstream tools expect.
+    // Physics metrics first, then GPU metrics, then energy.
     out << "frame,variance,circular_spread,spread_ratio,angular_range,angular_causticness,"
         << "brightness,coverage,total_energy\n";
     out << std::fixed << std::setprecision(6);

@@ -90,7 +90,13 @@ public:
     // Configure analyzers
     void enableBoomAnalyzer(bool enable = true);
     void enableCausticnessAnalyzer(bool enable = true);
-    void setFrameDuration(double seconds) { frame_duration_ = seconds; }
+    // Set frame duration for time-based calculations.
+    // Must be positive for boom detection to work in finalizePhase().
+    void setFrameDuration(double seconds) {
+        if (seconds > 0.0) {
+            frame_duration_ = seconds;
+        }
+    }
 
     // Callbacks
     void setProgressCallback(ProgressCallback callback);

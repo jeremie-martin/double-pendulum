@@ -70,7 +70,14 @@ public:
     void setSamplingInterval(double seconds) { sampling_interval_ = seconds; }
     void setMinPeakSeparation(double seconds) { min_peak_separation_ = seconds; }
     void setMinPeakHeightFraction(double fraction) { min_peak_height_fraction_ = fraction; }
-    void setFrameDuration(double seconds) { frame_duration_ = seconds; }
+    // Set frame duration for time-based calculations.
+    // Must be positive. Zero or negative values will trigger a warning on analyze().
+    void setFrameDuration(double seconds) {
+        if (seconds > 0.0) {
+            frame_duration_ = seconds;
+        }
+        // Invalid values ignored - analyze() will use fallback with warning
+    }
 
     // Analyzer interface
     std::string name() const override { return ScoreNames::Causticness; }

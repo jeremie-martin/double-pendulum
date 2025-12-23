@@ -257,6 +257,9 @@ void MetricsCollector::exportCSV(
     }
 
     // Determine which columns to export
+    // NOTE: If columns is empty, uses getMetricNames() which may have arbitrary order
+    // depending on hash map iteration. For reproducible ordering, pass explicit column list.
+    // See Simulation::saveMetricsCSV() for canonical column order.
     std::vector<std::string> cols = columns;
     if (cols.empty()) {
         cols = getMetricNames();
