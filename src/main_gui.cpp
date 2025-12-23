@@ -162,6 +162,16 @@ struct AppState {
     double sim_time_ms = 0.0;
     double render_time_ms = 0.0;
 
+    // Cached frame duration (updated on config change)
+    // Avoids recomputing in every stepSimulation call
+    double frame_duration = 0.0;
+
+    // Update frame_duration from config
+    void updateFrameDuration() {
+        frame_duration = config.simulation.frameDuration();
+        causticness_analyzer.setFrameDuration(frame_duration);
+    }
+
     // Export
     ExportState export_state;
 };
@@ -192,13 +202,13 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
     }
 
     // Initialize metrics system using common helper
-    double frame_duration = state.config.simulation.frameDuration();
+    state.updateFrameDuration();  // Cache frame_duration and set on analyzer
     metrics::resetMetricsSystem(state.metrics_collector, state.event_detector,
                                 state.boom_analyzer, state.causticness_analyzer);
     metrics::initializeMetricsSystem(
         state.metrics_collector, state.event_detector, state.causticness_analyzer,
         state.config.detection.chaos_threshold, state.config.detection.chaos_confirmation,
-        frame_duration, /*with_gpu=*/true, state.boom_analyzer);
+        state.frame_duration, /*with_gpu=*/true, state.boom_analyzer);
 
     state.boom_frame.reset();
     state.chaos_frame.reset();
@@ -311,8 +321,7 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     }
     state.metrics_collector.setMetric(metrics::MetricNames::TotalEnergy, total_energy);
 
-    // Frame duration for event timing
-    double frame_duration = state.config.simulation.frameDuration();
+    // Use cached frame_duration (updated on config change via updateFrameDuration())
 
     auto sim_end = std::chrono::high_resolution_clock::now();
     state.sim_time_ms = std::chrono::duration<double, std::milli>(sim_end - start).count();
@@ -336,7 +345,7 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     state.metrics_collector.endFrame();
 
     // Update event detection (needs complete frame data)
-    state.event_detector.update(state.metrics_collector, frame_duration);
+    state.event_detector.update(state.metrics_collector, state.frame_duration);
 
     // Extract chaos event
     if (auto chaos_event = state.event_detector.getEvent(metrics::EventNames::Chaos)) {
@@ -347,7 +356,7 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     }
 
     // Boom detection: track max angular_causticness frame (with 0.3s offset)
-    auto boom = metrics::findBoomFrame(state.metrics_collector, frame_duration);
+    auto boom = metrics::findBoomFrame(state.metrics_collector, state.frame_duration);
     if (boom.frame >= 0) {
         state.boom_frame = boom.frame;
         state.boom_variance = boom.causticness;
@@ -1040,14 +1049,12 @@ void drawSimulationSection(AppState& state) {
         auto duration = static_cast<float>(state.config.simulation.duration_seconds);
         if (ImGui::SliderFloat("Duration (s)", &duration, 1.0f, 60.0f)) {
             state.config.simulation.duration_seconds = duration;
-            // Update analyzer frame_duration when config changes
-            state.causticness_analyzer.setFrameDuration(state.config.simulation.frameDuration());
+            state.updateFrameDuration();  // Update cached frame_duration
         }
         tooltip("Total simulation time in physical seconds");
 
         if (ImGui::SliderInt("Total Frames", &state.config.simulation.total_frames, 60, 3600)) {
-            // Update analyzer frame_duration when config changes
-            state.causticness_analyzer.setFrameDuration(state.config.simulation.frameDuration());
+            state.updateFrameDuration();  // Update cached frame_duration
         }
         tooltip("Number of frames to render");
 
