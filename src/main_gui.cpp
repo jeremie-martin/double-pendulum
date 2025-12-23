@@ -117,6 +117,7 @@ struct AppState {
     std::vector<Color> colors;
     metrics::MetricsCollector metrics_collector;
     metrics::EventDetector event_detector;
+    metrics::BoomAnalyzer boom_analyzer;
     metrics::CausticnessAnalyzer causticness_analyzer;
     MetricFlags metric_flags;
 
@@ -176,6 +177,7 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
     state.metrics_collector.reset();
     state.metrics_collector.registerStandardMetrics();
     state.metrics_collector.registerGPUMetrics();
+    state.boom_analyzer.reset();
     state.causticness_analyzer.reset();
 
     // Setup event detector
@@ -322,8 +324,9 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
         }
     }
 
-    // Run causticness analysis periodically after boom (every 30 frames)
+    // Run analyzers periodically after boom (every 30 frames)
     if (state.boom_frame && (state.current_frame % 30 == 0)) {
+        state.boom_analyzer.analyze(state.metrics_collector, state.event_detector);
         state.causticness_analyzer.analyze(state.metrics_collector, state.event_detector);
     }
 
@@ -1576,20 +1579,38 @@ int main(int argc, char* argv[]) {
         graph_size.y = std::max(100.0f, graph_size.y - 60.0f); // Leave room for score
         drawMetricGraph(state, graph_size);
 
-        // Display current and peak metrics
+        // Display current metrics
         ImGui::Separator();
         auto const* brightness_series = state.metrics_collector.getMetric(metrics::MetricNames::Brightness);
         auto const* contrast_series = state.metrics_collector.getMetric(metrics::MetricNames::ContrastStddev);
         double current_brightness = brightness_series && !brightness_series->empty() ? brightness_series->current() : 0.0;
         double current_contrast = contrast_series && !contrast_series->empty() ? contrast_series->current() : 0.0;
-        ImGui::Text("Current: Brightness %.3f  Contrast %.3f", current_brightness, current_contrast);
+        ImGui::Text("Current: Bright %.3f  Contrast %.3f", current_brightness, current_contrast);
 
-        // Display peak causticness from analyzer
-        if (state.causticness_analyzer.hasResults()) {
-            auto results = state.causticness_analyzer.toJSON();
-            double peak_causticness = results.value("peak_causticness", 0.0);
-            int peak_frame = results.value("peak_frame", -1);
-            ImGui::Text("Peak Causticness: %.4f (frame %d)", peak_causticness, peak_frame);
+        // Display analyzer scores
+        if (state.boom_analyzer.hasResults() || state.causticness_analyzer.hasResults()) {
+            ImGui::Separator();
+            ImGui::Text("Quality Scores:");
+
+            if (state.boom_analyzer.hasResults()) {
+                auto boom_results = state.boom_analyzer.toJSON();
+                double sharpness = boom_results.value("sharpness_ratio", 0.0);
+                std::string type = boom_results.value("boom_type", "unknown");
+                ImGui::Text("  Boom: sharpness=%.2f type=%s", sharpness, type.c_str());
+            }
+
+            if (state.causticness_analyzer.hasResults()) {
+                auto caustic_results = state.causticness_analyzer.toJSON();
+                double peak = caustic_results.value("peak_causticness", 0.0);
+                double avg = caustic_results.value("average_causticness", 0.0);
+                ImGui::Text("  Causticness: peak=%.2f avg=%.2f", peak, avg);
+            }
+
+            // Composite score
+            double boom_score = state.boom_analyzer.hasResults() ? state.boom_analyzer.score() : 0.0;
+            double caustic_score = state.causticness_analyzer.hasResults() ? state.causticness_analyzer.score() : 0.0;
+            double composite = (boom_score + caustic_score) / 2.0;
+            ImGui::Text("  Composite: %.2f", composite);
         }
 
         ImGui::End();
