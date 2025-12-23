@@ -114,12 +114,12 @@ struct DetectionParams {
     double boom_threshold = 0.1; // radians^2
     int boom_confirmation = 10;  // Consecutive frames above threshold
 
-    // "White" threshold: when variance exceeds this, full chaos/noise
-    double white_threshold = 700.0; // radians^2
-    int white_confirmation = 10;    // Consecutive frames above threshold
+    // "Chaos" threshold: when variance exceeds this, full chaos/noise (formerly "white")
+    double chaos_threshold = 700.0; // radians^2
+    int chaos_confirmation = 10;    // Consecutive frames above threshold
 
     // Early stopping
-    bool early_stop_after_white = false;
+    bool early_stop_after_chaos = false;
 };
 
 enum class OutputFormat { PNG, Video };

@@ -53,7 +53,7 @@ Simulation::Simulation(Config const& config) : config_(config), color_gen_(confi
     auto const& detect = config_.detection;
     event_detector_.addBoomCriteria(detect.boom_threshold, detect.boom_confirmation,
                                      metrics::MetricNames::Variance);
-    event_detector_.addChaosCriteria(detect.white_threshold, detect.white_confirmation,
+    event_detector_.addChaosCriteria(detect.chaos_threshold, detect.chaos_confirmation,
                                       metrics::MetricNames::Variance);
 }
 
@@ -400,7 +400,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
 
         // Early stop if chaos was newly detected and configured
         if (!had_chaos && event_detector_.isDetected(metrics::EventNames::Chaos) &&
-            config_.detection.early_stop_after_white) {
+            config_.detection.early_stop_after_chaos) {
             results.chaos_frame = event_detector_.getEvent(metrics::EventNames::Chaos)->frame;
             results.chaos_variance = event_detector_.getEvent(metrics::EventNames::Chaos)->value;
             results.frames_completed = frame + 1;

@@ -177,10 +177,24 @@ Config Config::load(std::string const& path) {
         if (auto detect = tbl["detection"].as_table()) {
             config.detection.boom_threshold = get_or(*detect, "boom_threshold", 0.1);
             config.detection.boom_confirmation = get_or(*detect, "boom_confirmation", 10);
-            config.detection.white_threshold = get_or(*detect, "white_threshold", 700.0);
-            config.detection.white_confirmation = get_or(*detect, "white_confirmation", 10);
-            config.detection.early_stop_after_white =
-                get_or(*detect, "early_stop_after_white", false);
+            // Support both "chaos" (new) and "white" (legacy) names
+            if (detect->contains("chaos_threshold")) {
+                config.detection.chaos_threshold = get_or(*detect, "chaos_threshold", 700.0);
+            } else {
+                config.detection.chaos_threshold = get_or(*detect, "white_threshold", 700.0);
+            }
+            if (detect->contains("chaos_confirmation")) {
+                config.detection.chaos_confirmation = get_or(*detect, "chaos_confirmation", 10);
+            } else {
+                config.detection.chaos_confirmation = get_or(*detect, "white_confirmation", 10);
+            }
+            if (detect->contains("early_stop_after_chaos")) {
+                config.detection.early_stop_after_chaos =
+                    get_or(*detect, "early_stop_after_chaos", false);
+            } else {
+                config.detection.early_stop_after_chaos =
+                    get_or(*detect, "early_stop_after_white", false);
+            }
         }
 
         // Output
@@ -376,12 +390,12 @@ bool Config::applyOverride(std::string const& key, std::string const& value) {
                 detection.boom_threshold = std::stod(value);
             } else if (param == "boom_confirmation") {
                 detection.boom_confirmation = std::stoi(value);
-            } else if (param == "white_threshold") {
-                detection.white_threshold = std::stod(value);
-            } else if (param == "white_confirmation") {
-                detection.white_confirmation = std::stoi(value);
-            } else if (param == "early_stop_after_white") {
-                detection.early_stop_after_white = (value == "true" || value == "1");
+            } else if (param == "chaos_threshold" || param == "white_threshold") {
+                detection.chaos_threshold = std::stod(value);
+            } else if (param == "chaos_confirmation" || param == "white_confirmation") {
+                detection.chaos_confirmation = std::stoi(value);
+            } else if (param == "early_stop_after_chaos" || param == "early_stop_after_white") {
+                detection.early_stop_after_chaos = (value == "true" || value == "1");
             } else {
                 std::cerr << "Unknown detection parameter: " << param << "\n";
                 return false;
@@ -539,9 +553,9 @@ void Config::save(std::string const& path) const {
     file << "[detection]\n";
     file << "boom_threshold = " << detection.boom_threshold << "\n";
     file << "boom_confirmation = " << detection.boom_confirmation << "\n";
-    file << "white_threshold = " << detection.white_threshold << "\n";
-    file << "white_confirmation = " << detection.white_confirmation << "\n";
-    file << "early_stop_after_white = " << (detection.early_stop_after_white ? "true" : "false")
+    file << "chaos_threshold = " << detection.chaos_threshold << "\n";
+    file << "chaos_confirmation = " << detection.chaos_confirmation << "\n";
+    file << "early_stop_after_chaos = " << (detection.early_stop_after_chaos ? "true" : "false")
          << "\n";
     file << "\n";
 

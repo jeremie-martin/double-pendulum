@@ -183,8 +183,8 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
     state.event_detector.addBoomCriteria(state.config.detection.boom_threshold,
                                           state.config.detection.boom_confirmation,
                                           metrics::MetricNames::Variance);
-    state.event_detector.addChaosCriteria(state.config.detection.white_threshold,
-                                           state.config.detection.white_confirmation,
+    state.event_detector.addChaosCriteria(state.config.detection.chaos_threshold,
+                                           state.config.detection.chaos_confirmation,
                                            metrics::MetricNames::Variance);
     state.event_detector.reset();
 
@@ -392,7 +392,7 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
 
             // Draw threshold lines
             double boom_line = state.config.detection.boom_threshold;
-            double chaos_line = state.config.detection.white_threshold;
+            double chaos_line = state.config.detection.chaos_threshold;
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 0.5f), 1.0f);
             ImPlot::PlotInfLines("##boom_thresh", &boom_line, 1, ImPlotInfLinesFlags_Horizontal);
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 0.5f), 1.0f);
@@ -1160,14 +1160,14 @@ void drawDetectionSection(AppState& state) {
         ImGui::SliderInt("Boom Confirm", &state.config.detection.boom_confirmation, 1, 30);
         tooltip("Consecutive frames above threshold to confirm boom");
 
-        auto white_thresh = static_cast<float>(state.config.detection.white_threshold);
-        if (ImGui::InputFloat("White Threshold", &white_thresh, 10.0f, 100.0f, "%.1f rad^2")) {
-            state.config.detection.white_threshold = white_thresh;
+        auto chaos_thresh = static_cast<float>(state.config.detection.chaos_threshold);
+        if (ImGui::InputFloat("Chaos Threshold", &chaos_thresh, 10.0f, 100.0f, "%.1f rad^2")) {
+            state.config.detection.chaos_threshold = chaos_thresh;
         }
-        tooltip("Variance threshold for full chaos (white noise)");
+        tooltip("Variance threshold for full chaos");
 
-        ImGui::SliderInt("White Confirm", &state.config.detection.white_confirmation, 1, 30);
-        tooltip("Consecutive frames above threshold to confirm white");
+        ImGui::SliderInt("Chaos Confirm", &state.config.detection.chaos_confirmation, 1, 30);
+        tooltip("Consecutive frames above threshold to confirm chaos");
     }
 }
 
