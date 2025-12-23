@@ -195,7 +195,11 @@ The `MetricsCollector` computes spread metrics every frame:
 - `angle1_mean`, `angle1_variance`: For debugging/analysis
 
 Spread is tracked and output in multiple places:
-- **variance.csv**: `frame,variance,max_value,spread_ratio` columns
+- **metrics.csv**: Canonical column order (from `simulation.cpp:saveMetricsCSV`):
+  ```
+  frame,variance,circular_spread,spread_ratio,angular_range,angular_causticness,brightness,coverage,total_energy
+  ```
+  Note: `circular_spread` is the uniformity metric (0=concentrated, 1=uniform)
 - **metadata.json**: `final_uniformity` in results section
 - **stdout**: Printed at end of simulation with uniformity and analyzer scores
 - **GUI**: Real-time display in Analysis panel with uniformity graphing
@@ -313,9 +317,9 @@ The GUI (`pendulum-gui`) provides real-time preview and analysis tools.
 | Feature | Description |
 |---------|-------------|
 | **Plot Modes** | Single Axis, Multi-Axis (grouped by scale), Normalized (0-1) |
-| **Metrics** | Variance, Brightness, Uniformity, Energy, Contrast, Edge, Causticness, Coverage |
+| **Metrics** | Variance, Brightness, Uniformity (circular_spread), Energy, Causticness, Coverage |
 | **Derivatives** | Per-metric "d" toggle to overlay rate of change |
-| **Quality Scores** | Progress bars for boom/causticness analyzers with collapsible details |
+| **Quality Scores** | Causticness-based quality score with peak clarity and post-boom sustain |
 
 ### Preview Settings
 
@@ -331,7 +335,7 @@ The GUI (`pendulum-gui`) provides real-time preview and analysis tools.
 |------|---------|
 | Y1 (Large) | Variance, Energy |
 | Y2 (0-1) | Brightness, Uniformity, Coverage |
-| Y3 (Medium) | Contrast, Edge Energy, Color Variance, Causticness |
+| Y3 (Medium) | Causticness |
 
 ## Dependencies
 
