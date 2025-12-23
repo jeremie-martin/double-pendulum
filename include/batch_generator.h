@@ -12,8 +12,38 @@
 #include <string>
 #include <vector>
 
-// Filter criteria for probe validation (config-level struct)
-// Maps to metrics::ProbeFilter for evaluation
+// =============================================================================
+// Filter Criteria for Batch Probe Validation
+// =============================================================================
+//
+// This is the config-level filter specification, parsed from TOML [filter] section.
+// It maps to metrics::ProbeFilter for actual evaluation.
+//
+// HOW IT WORKS:
+// 1. User specifies criteria in batch config TOML:
+//      [filter]
+//      min_boom_seconds = 8.0
+//      max_boom_seconds = 15.0
+//      min_uniformity = 0.9
+//      min_peak_clarity = 0.75
+//
+// 2. BatchConfig::load() parses these into a FilterCriteria struct
+//
+// 3. FilterCriteria::toProbeFilter() converts to metrics::ProbeFilter
+//
+// 4. During probe phase, filter.evaluate() determines pass/fail
+//
+// CRITERIA MAPPING:
+//   Config Field          → ProbeFilter Method           → What It Checks
+//   ─────────────────────────────────────────────────────────────────────
+//   require_boom          → addEventRequired("boom")     → Boom event exists
+//   min/max_boom_seconds  → addEventTiming("boom",...)   → Boom timing range
+//   min_uniformity        → addMetricThreshold(spread)   → Final uniformity value
+//   min_peak_clarity      → addScoreThreshold(...)       → Analyzer score
+//   min_post_boom_sustain → addScoreThreshold(...)       → Analyzer score
+//   require_valid_music   → (checked separately)         → Music drop > boom
+//
+// =============================================================================
 struct FilterCriteria {
     double min_boom_seconds = 0.0;   // Minimum boom time (0 = no minimum)
     double max_boom_seconds = 0.0;   // Maximum boom time (0 = no maximum)

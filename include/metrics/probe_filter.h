@@ -11,6 +11,39 @@
 
 namespace metrics {
 
+// =============================================================================
+// Probe Filter System
+// =============================================================================
+//
+// The ProbeFilter evaluates whether a simulation meets quality criteria.
+// It's used in two contexts:
+//
+// 1. BATCH GENERATION (batch_generator.cpp):
+//    - User specifies filter criteria in TOML config (FilterCriteria struct)
+//    - FilterCriteria::toProbeFilter() converts to ProbeFilter
+//    - BatchGenerator uses Simulation::runProbe() with fewer pendulums
+//    - ProbeFilter evaluates if the probe passes
+//    - Only passing probes proceed to full rendering
+//
+// 2. PROBE PIPELINE (probe_pipeline.cpp):
+//    - ProbePipeline wraps probe filtering with multi-phase support
+//    - Phase 1: Physics-only probe (fast, no GPU)
+//    - Phase 2: Low-res render probe (optional, with GPU metrics)
+//    - Filter evaluation happens at each phase via finalizePhase()
+//
+// EVALUATION FLOW:
+//    Criteria → ProbeFilter → evaluate(collector, events, scores) → FilterResult
+//
+// CRITERION TYPES:
+//    - Event: Require an event exists (e.g., boom detected)
+//    - EventTiming: Event must occur within time range
+//    - Metric: Final metric value must meet threshold (e.g., uniformity > 0.9)
+//    - Score: Analyzer score must meet threshold (e.g., peak_clarity > 0.75)
+//
+// IMPORTANT: Scores (from analyzers) are only available AFTER analyzers run.
+// Make sure to call runPostSimulationAnalysis() or equivalent before filtering.
+// =============================================================================
+
 // Result of filter evaluation
 struct FilterResult {
     bool passed = false;
