@@ -137,9 +137,10 @@ private:
     ProbeFilter phase2_filter_;
 
     // Detection parameters
-    double boom_threshold_ = 0.1;
-    int boom_confirmation_ = 10;
-    double chaos_threshold_ = 700.0;
+    // Note: boom_threshold_ and boom_confirmation_ are deprecated (boom uses max causticness)
+    double boom_threshold_ = 0.1;    // Unused, kept for API compatibility
+    int boom_confirmation_ = 10;     // Unused
+    double chaos_threshold_ = 700.0; // Used for chaos detection
     int chaos_confirmation_ = 10;
 
     // Internal state

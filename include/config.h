@@ -113,11 +113,13 @@ struct ColorParams {
 
 // Thresholds for detecting events from variance data
 struct DetectionParams {
-    // "Boom" threshold: when variance exceeds this, chaos has begun
-    double boom_threshold = 0.1; // radians^2
-    int boom_confirmation = 10;  // Consecutive frames above threshold
+    // DEPRECATED: boom_threshold and boom_confirmation are no longer used.
+    // Boom is now detected via max angular causticness in boom_detection.h
+    // Kept for config file backwards compatibility.
+    double boom_threshold = 0.1; // radians^2 (unused)
+    int boom_confirmation = 10;  // (unused)
 
-    // "Chaos" threshold: when variance exceeds this, full chaos/noise (formerly "white")
+    // "Chaos" threshold: when variance exceeds this, full chaos/noise
     double chaos_threshold = 700.0; // radians^2
     int chaos_confirmation = 10;    // Consecutive frames above threshold
 

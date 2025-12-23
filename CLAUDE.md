@@ -62,19 +62,38 @@ The unified metrics system in `include/metrics/` replaces the legacy variance/an
 |------|---------|
 | `metric_series.h` | Generic time series with derivative tracking, smoothing |
 | `metrics_collector.h` | Central hub for all metrics (physics + GPU) |
-| `event_detector.h` | Configurable event detection (boom, chaos) |
+| `event_detector.h` | Configurable event detection (chaos only; boom uses causticness) |
+| `boom_detection.h` | Utility for finding boom frame from max causticness |
 | `analyzer.h` | Base class for pluggable quality analyzers |
 | `boom_analyzer.h` | Boom quality scoring (sharpness, type) |
-| `causticness_analyzer.h` | Causticness evolution scoring |
+| `causticness_analyzer.h` | Causticness/peak clarity scoring |
 | `probe_filter.h` | Pass/fail decision logic for filtering |
 | `probe_pipeline.h` | Multi-phase probe system |
 
 ### Key Concepts
 
-- **Metric**: Raw time-series measurement (variance, brightness, edge_energy)
-- **Event**: Detected threshold crossing with confirmation (boom, chaos)
+- **Metric**: Raw time-series measurement (variance, brightness, causticness)
+- **Boom**: Detected from max angular causticness (not threshold crossing)
+- **Chaos**: Detected via EventDetector threshold crossing with confirmation
 - **Analyzer**: Component that computes quality scores from metrics
 - **Score**: Quality assessment for ranking/filtering (SimulationScore)
+
+### Boom Detection
+
+Boom is detected as the frame with maximum angular causticness, offset by 0.3s for better visual alignment:
+
+```cpp
+#include "metrics/boom_detection.h"
+
+// After simulation loop completes:
+auto boom = metrics::findBoomFrame(collector, frame_duration);
+if (boom.frame >= 0) {
+    // boom.frame, boom.seconds, boom.causticness are available
+
+    // Force event for BoomAnalyzer compatibility:
+    metrics::forceBoomEvent(event_detector, boom, variance_at_boom);
+}
+```
 
 ### Usage Example
 
@@ -82,15 +101,19 @@ The unified metrics system in `include/metrics/` replaces the legacy variance/an
 metrics::MetricsCollector collector;
 collector.registerStandardMetrics();
 
+// Only chaos uses threshold detection
 metrics::EventDetector detector;
-detector.addBoomCriteria(0.1, 10, metrics::MetricNames::Variance);
+detector.addChaosCriteria(0.1, 10, metrics::MetricNames::Variance);
 
 // In simulation loop:
 collector.beginFrame(frame);
-collector.updateFromPendulums(pendulums);
+collector.updateFromAngles(angle1s, angle2s);
 collector.setGPUMetrics(gpu_bundle);
 collector.endFrame();
 detector.update(collector, frame_duration);
+
+// After loop: detect boom from max causticness
+auto boom = metrics::findBoomFrame(collector, config.simulation.frameDuration());
 ```
 
 ## Common Modifications
@@ -160,6 +183,7 @@ The batch system supports a two-phase workflow for generating videos with qualit
 | `min_boom_seconds` | Boom must happen after this time |
 | `max_boom_seconds` | Boom must happen before this time |
 | `min_uniformity` | Minimum distribution uniformity (0=concentrated, 1=uniform, 0.9 recommended) |
+| `min_peak_clarity` | Minimum peak clarity score (0.5=equal peaks, 1.0=no competition, 0.75 recommended) |
 | `require_boom` | Reject simulations with no detectable boom |
 | `require_valid_music` | Fail if no music track has drop > boom time |
 
@@ -210,6 +234,7 @@ max_retries = 10         # Retry with new params if rejected
 min_boom_seconds = 8.0   # Boom between 8-15 seconds
 max_boom_seconds = 15.0
 min_uniformity = 0.9     # Minimum distribution uniformity
+min_peak_clarity = 0.75  # Reject simulations with competing peaks
 
 [physics_ranges]
 initial_angle1_deg = [140.0, 200.0]
