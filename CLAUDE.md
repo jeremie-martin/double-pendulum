@@ -31,6 +31,7 @@ C++20 double pendulum physics simulation with GPU-accelerated rendering. Simulat
 |------|---------|
 | `src/simulation.cpp` | Main simulation loop, coordinates physics + rendering |
 | `src/batch_generator.cpp` | Batch video generation with probe filtering |
+| `src/main_gui.cpp` | GUI application with real-time preview and analysis |
 | `src/gl_renderer.cpp` | GPU line rendering with GLSL shaders |
 | `src/headless_gl.cpp` | EGL context for headless GPU rendering |
 | `include/pendulum.h` | RK4 physics integration (Lagrangian mechanics) |
@@ -155,22 +156,22 @@ The batch system supports a two-phase workflow for generating videos with qualit
 |-----------|---------|
 | `min_boom_seconds` | Boom must happen after this time |
 | `max_boom_seconds` | Boom must happen before this time |
-| `min_spread_ratio` | Minimum fraction of pendulums above horizontal |
+| `min_uniformity` | Minimum distribution uniformity (0=concentrated, 1=uniform, 0.9 recommended) |
 | `require_boom` | Reject simulations with no detectable boom |
 | `require_valid_music` | Fail if no music track has drop > boom time |
 
-#### Spread Metrics
+#### Spread / Uniformity Metrics
 
 The `MetricsCollector` computes spread metrics every frame:
-- `spread_ratio`: Fraction of pendulums with angle1 in [-π/2, π/2] (above horizontal)
-- `circular_spread`: 1 - mean resultant length (0=concentrated, 1=uniform)
+- `uniformity` (CircularSpread): 1 - mean resultant length (0=concentrated, 1=uniform on disk). This is the preferred metric for filtering.
+- `spread_ratio`: Legacy metric - fraction of pendulums with angle1 in [-π/2, π/2] (above horizontal)
 - `angle1_mean`, `angle1_variance`: For debugging/analysis
 
 Spread is tracked and output in multiple places:
 - **variance.csv**: `frame,variance,max_value,spread_ratio` columns
-- **metadata.json**: `final_spread_ratio` in results section
-- **stdout**: Printed at end of simulation ("Spread: X% above horizontal")
-- **GUI**: Real-time display in Analysis panel, graphable in metric selector
+- **metadata.json**: `final_uniformity` in results section
+- **stdout**: Printed at end of simulation with uniformity and analyzer scores
+- **GUI**: Real-time display in Analysis panel with uniformity graphing
 - **Batch summary**: Spread column in completion table
 
 #### Color Presets
@@ -205,7 +206,7 @@ max_retries = 10         # Retry with new params if rejected
 [filter]
 min_boom_seconds = 8.0   # Boom between 8-15 seconds
 max_boom_seconds = 15.0
-min_spread_ratio = 0.3   # At least 30% above horizontal
+min_uniformity = 0.9     # Minimum distribution uniformity
 
 [physics_ranges]
 initial_angle1_deg = [140.0, 200.0]
@@ -221,6 +222,35 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
 # With GUI
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_GUI=ON && cmake --build build -j
 ```
+
+## GUI Application
+
+The GUI (`pendulum-gui`) provides real-time preview and analysis tools.
+
+### Analysis Panel Features
+
+| Feature | Description |
+|---------|-------------|
+| **Plot Modes** | Single Axis, Multi-Axis (grouped by scale), Normalized (0-1) |
+| **Metrics** | Variance, Brightness, Uniformity, Energy, Contrast, Edge, Causticness, Coverage |
+| **Derivatives** | Per-metric "d" toggle to overlay rate of change |
+| **Quality Scores** | Progress bars for boom/causticness analyzers with collapsible details |
+
+### Preview Settings
+
+| Setting | Description |
+|---------|-------------|
+| Physics Quality | Low/Medium/High/Ultra dropdown (replaces substeps) |
+| Preview Size | Resolution for real-time preview |
+| Pendulum Count | Number of pendulums in preview mode |
+
+### Plot Mode Axis Grouping (Multi-Axis mode)
+
+| Axis | Metrics |
+|------|---------|
+| Y1 (Large) | Variance, Energy |
+| Y2 (0-1) | Brightness, Uniformity, Coverage |
+| Y3 (Medium) | Contrast, Edge Energy, Color Variance, Causticness |
 
 ## Dependencies
 

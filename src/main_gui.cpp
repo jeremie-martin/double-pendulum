@@ -29,21 +29,44 @@ struct PreviewParams {
     int width = 540;
     int height = 540;
     int pendulum_count = 10000;
-    int substeps = 10;
+    PhysicsQuality physics_quality = PhysicsQuality::High;
+    double max_dt = 0.007;  // Computed from quality
+
+    // Compute substeps for a given frame duration
+    int substeps(double frame_dt) const {
+        return std::max(1, static_cast<int>(std::ceil(frame_dt / max_dt)));
+    }
 };
 
-// Graph metric flags for multi-select
+// Plot scaling mode for multi-axis support
+enum class PlotMode {
+    SingleAxis,   // All metrics on one Y-axis (auto-fit)
+    MultiAxis,    // Group by scale: Y1=large, Y2=normalized, Y3=medium
+    Normalized    // All metrics scaled to 0-1
+};
+
+// Graph metric flags for multi-select (with derivative toggles)
 struct MetricFlags {
     bool variance = true;
+    bool variance_deriv = false;
     bool brightness = false;
+    bool brightness_deriv = false;
     bool energy = false;
-    bool spread = false;
+    bool energy_deriv = false;
+    bool uniformity = false;  // Renamed from spread
+    bool uniformity_deriv = false;
     bool contrast_stddev = false;
+    bool contrast_stddev_deriv = false;
     bool contrast_range = false;
+    bool contrast_range_deriv = false;
     bool edge_energy = false;
+    bool edge_energy_deriv = false;
     bool color_variance = false;
+    bool color_variance_deriv = false;
     bool coverage = false;
+    bool coverage_deriv = false;
     bool causticness = false;
+    bool causticness_deriv = false;
 };
 
 // Export state (thread-safe)
@@ -270,11 +293,12 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     auto start = std::chrono::high_resolution_clock::now();
 
     int n = state.pendulums.size();
-    double dt = state.config.simulation.duration_seconds /
-                (state.config.simulation.total_frames * state.preview.substeps);
+    double frame_dt = state.config.simulation.duration_seconds / state.config.simulation.total_frames;
+    int substeps = state.preview.substeps(frame_dt);
+    double dt = frame_dt / substeps;
 
     // Physics step
-    for (int s = 0; s < state.preview.substeps; ++s) {
+    for (int s = 0; s < substeps; ++s) {
         for (int i = 0; i < n; ++i) {
             state.states[i] = state.pendulums[i].step(dt);
         }
@@ -357,6 +381,9 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     state.display_frame = state.current_frame;
 }
 
+// Static plot mode for persistence across frames
+static PlotMode s_plot_mode = PlotMode::MultiAxis;
+
 void drawMetricGraph(AppState& state, ImVec2 size) {
     auto* variance_series = state.metrics_collector.getMetric(metrics::MetricNames::Variance);
     auto* brightness_series = state.metrics_collector.getMetric(metrics::MetricNames::Brightness);
@@ -385,99 +412,301 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
     // Current frame marker (for dragging)
     double current_frame_d = static_cast<double>(state.display_frame);
 
+    // Helper to normalize a series to 0-1 range
+    auto normalizeData = [](std::vector<double> const& data) -> std::vector<double> {
+        if (data.empty()) return {};
+        double min_val = *std::min_element(data.begin(), data.end());
+        double max_val = *std::max_element(data.begin(), data.end());
+        double range = max_val - min_val;
+        if (range < 1e-10) range = 1.0;  // Avoid division by zero
+        std::vector<double> result(data.size());
+        for (size_t i = 0; i < data.size(); ++i) {
+            result[i] = (data[i] - min_val) / range;
+        }
+        return result;
+    };
+
     if (ImPlot::BeginPlot("##Metrics", size, ImPlotFlags_NoTitle)) {
-        ImPlot::SetupAxes("Frame", nullptr, ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-
-        // Plot variance
-        if (state.metric_flags.variance && !variance_values.empty()) {
-            ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.8f, 0.4f, 1.0f));
-            ImPlot::PlotLine("Variance", frames.data(), variance_values.data(), data_size);
-
-            // Draw threshold lines
-            double boom_line = state.config.detection.boom_threshold;
-            double chaos_line = state.config.detection.chaos_threshold;
-            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 0.5f), 1.0f);
-            ImPlot::PlotInfLines("##boom_thresh", &boom_line, 1, ImPlotInfLinesFlags_Horizontal);
-            ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 0.5f), 1.0f);
-            ImPlot::PlotInfLines("##chaos_thresh", &chaos_line, 1, ImPlotInfLinesFlags_Horizontal);
+        // Setup axes based on plot mode
+        if (s_plot_mode == PlotMode::MultiAxis) {
+            // Multi-axis: Y1=Large scale, Y2=Normalized (0-1), Y3=Medium scale
+            ImPlot::SetupAxes("Frame", "Large", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+            ImPlot::SetupAxis(ImAxis_Y2, "[0-1]", ImPlotAxisFlags_AuxDefault | ImPlotAxisFlags_AutoFit);
+            ImPlot::SetupAxis(ImAxis_Y3, "Med", ImPlotAxisFlags_AuxDefault | ImPlotAxisFlags_AutoFit);
+        } else if (s_plot_mode == PlotMode::Normalized) {
+            // Normalized mode: all metrics on 0-1 scale
+            ImPlot::SetupAxes("Frame", "[0-1]", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+            ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, 1.0, ImPlotCond_Always);
+        } else {
+            ImPlot::SetupAxes("Frame", nullptr, ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
         }
 
-        // Plot brightness
-        if (state.metric_flags.brightness && brightness_series && !brightness_series->empty()) {
+        // Plot variance (Y1 - large scale)
+        if (state.metric_flags.variance && !variance_values.empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
+            }
+            ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.8f, 0.4f, 1.0f));
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(variance_values);
+                ImPlot::PlotLine("Variance", frames.data(), normalized.data(), data_size);
+            } else {
+                ImPlot::PlotLine("Variance", frames.data(), variance_values.data(), data_size);
+
+                // Draw threshold lines (only in non-normalized modes)
+                double boom_line = state.config.detection.boom_threshold;
+                double chaos_line = state.config.detection.chaos_threshold;
+                ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 0.5f), 1.0f);
+                ImPlot::PlotInfLines("##boom_thresh", &boom_line, 1, ImPlotInfLinesFlags_Horizontal);
+                ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 0.5f), 1.0f);
+                ImPlot::PlotInfLines("##chaos_thresh", &chaos_line, 1, ImPlotInfLinesFlags_Horizontal);
+            }
+        }
+        // Plot variance derivative
+        if (state.metric_flags.variance_deriv && variance_series != nullptr && variance_series->size() > 1) {
+            auto derivs = variance_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.8f, 0.4f, 0.4f), 1.0f);
+            if (s_plot_mode == PlotMode::Normalized && !derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("Variance'", frames.data() + 1, normalized.data(), derivs.size());
+            } else if (!derivs.empty()) {
+                ImPlot::PlotLine("Variance'", frames.data() + 1, derivs.data(), derivs.size());
+            }
+        }
+
+        // Plot brightness (Y2 - normalized 0-1)
+        if (state.metric_flags.brightness && brightness_series != nullptr && !brightness_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
             auto const& brightness_values = brightness_series->values();
             ImPlot::SetNextLineStyle(ImVec4(0.8f, 0.8f, 0.4f, 1.0f));
-            ImPlot::PlotLine("Brightness", frames.data(), brightness_values.data(),
-                             brightness_values.size());
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(brightness_values);
+                ImPlot::PlotLine("Brightness", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("Brightness", frames.data(), brightness_values.data(),
+                                 brightness_values.size());
+            }
+        }
+        // Plot brightness derivative
+        if (state.metric_flags.brightness_deriv && brightness_series != nullptr && brightness_series->size() > 1) {
+            auto derivs = brightness_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.8f, 0.8f, 0.4f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("Brightness'", frames.data() + 1, normalized.data(), derivs.size());
+            }
         }
 
-        // Plot energy
-        if (state.metric_flags.energy && energy_series && !energy_series->empty()) {
+        // Plot energy (Y1 - large scale)
+        if (state.metric_flags.energy && energy_series != nullptr && !energy_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
+            }
             auto const& energy_values = energy_series->values();
             ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.6f, 1.0f, 1.0f));
-            ImPlot::PlotLine("Energy", frames.data(), energy_values.data(),
-                             energy_values.size());
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(energy_values);
+                ImPlot::PlotLine("Energy", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("Energy", frames.data(), energy_values.data(),
+                                 energy_values.size());
+            }
+        }
+        // Plot energy derivative
+        if (state.metric_flags.energy_deriv && energy_series != nullptr && energy_series->size() > 1) {
+            auto derivs = energy_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.6f, 1.0f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("Energy'", frames.data() + 1, normalized.data(), derivs.size());
+            }
         }
 
-        // Plot spread (circular spread - better metric)
-        auto const* circular_spread_series = state.metrics_collector.getMetric(metrics::MetricNames::CircularSpread);
-        if (state.metric_flags.spread && circular_spread_series && !circular_spread_series->empty()) {
-            // Raw circular spread (from metric series - single source of truth)
-            auto const& spread_values = circular_spread_series->values();
-            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.4f, 0.4f)); // Faint raw
-            ImPlot::PlotLine("Spread (raw)", frames.data(), spread_values.data(), spread_values.size());
+        // Plot uniformity (Y2 - normalized 0-1)
+        auto const* uniformity_series = state.metrics_collector.getMetric(metrics::MetricNames::CircularSpread);
+        if (state.metric_flags.uniformity && uniformity_series != nullptr && !uniformity_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            // Raw uniformity (from metric series - single source of truth)
+            auto const& uniformity_values = uniformity_series->values();
+            // Smoothed uniformity (5-frame window)
+            auto smoothed = uniformity_series->smoothedHistory(5);
 
-            // Smoothed circular spread (5-frame window)
-            auto smoothed = circular_spread_series->smoothedHistory(5);
-            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.4f, 1.0f), 2.0f); // Bold smoothed
-            ImPlot::PlotLine("Spread (smooth)", frames.data(), smoothed.data(), smoothed.size());
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized_raw = normalizeData(uniformity_values);
+                auto normalized_smooth = normalizeData(smoothed);
+                ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.4f, 0.4f));
+                ImPlot::PlotLine("Uniformity (raw)", frames.data(), normalized_raw.data(), normalized_raw.size());
+                ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.4f, 1.0f), 2.0f);
+                ImPlot::PlotLine("Uniformity", frames.data(), normalized_smooth.data(), normalized_smooth.size());
+            } else {
+                ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.4f, 0.4f)); // Faint raw
+                ImPlot::PlotLine("Uniformity (raw)", frames.data(), uniformity_values.data(), uniformity_values.size());
+                ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.4f, 1.0f), 2.0f); // Bold smoothed
+                ImPlot::PlotLine("Uniformity", frames.data(), smoothed.data(), smoothed.size());
+            }
+        }
+        // Plot uniformity derivative
+        if (state.metric_flags.uniformity_deriv && uniformity_series != nullptr && uniformity_series->size() > 1) {
+            auto derivs = uniformity_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.4f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("Uniformity'", frames.data() + 1, normalized.data(), derivs.size());
+            }
         }
 
-        // Plot contrast stddev
-        if (state.metric_flags.contrast_stddev && contrast_stddev_series && !contrast_stddev_series->empty()) {
+        // Plot contrast stddev (Y3 - medium scale)
+        if (state.metric_flags.contrast_stddev && contrast_stddev_series != nullptr && !contrast_stddev_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y3);
+            }
             auto const& contrast_stddev_values = contrast_stddev_series->values();
             ImPlot::SetNextLineStyle(ImVec4(0.8f, 0.4f, 0.8f, 1.0f));
-            ImPlot::PlotLine("Contrast StdDev", frames.data(), contrast_stddev_values.data(),
-                             contrast_stddev_values.size());
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(contrast_stddev_values);
+                ImPlot::PlotLine("Contrast StdDev", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("Contrast StdDev", frames.data(), contrast_stddev_values.data(),
+                                 contrast_stddev_values.size());
+            }
+        }
+        // Plot contrast stddev derivative
+        if (state.metric_flags.contrast_stddev_deriv && contrast_stddev_series != nullptr && contrast_stddev_series->size() > 1) {
+            auto derivs = contrast_stddev_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.8f, 0.4f, 0.8f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("Contrast StdDev'", frames.data() + 1, normalized.data(), derivs.size());
+            }
         }
 
-        // Plot contrast range
-        if (state.metric_flags.contrast_range && contrast_range_series && !contrast_range_series->empty()) {
+        // Plot contrast range (Y3 - medium scale)
+        if (state.metric_flags.contrast_range && contrast_range_series != nullptr && !contrast_range_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y3);
+            }
             auto const& contrast_range_values = contrast_range_series->values();
             ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.8f, 0.8f, 1.0f));
-            ImPlot::PlotLine("Contrast Range", frames.data(), contrast_range_values.data(),
-                             contrast_range_values.size());
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(contrast_range_values);
+                ImPlot::PlotLine("Contrast Range", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("Contrast Range", frames.data(), contrast_range_values.data(),
+                                 contrast_range_values.size());
+            }
+        }
+        // Plot contrast range derivative
+        if (state.metric_flags.contrast_range_deriv && contrast_range_series != nullptr && contrast_range_series->size() > 1) {
+            auto derivs = contrast_range_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.8f, 0.8f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("Contrast Range'", frames.data() + 1, normalized.data(), derivs.size());
+            }
         }
 
-        // Plot edge energy
-        if (state.metric_flags.edge_energy && edge_energy_series && !edge_energy_series->empty()) {
+        // Plot edge energy (Y3 - medium scale)
+        if (state.metric_flags.edge_energy && edge_energy_series != nullptr && !edge_energy_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y3);
+            }
             auto const& edge_energy_values = edge_energy_series->values();
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
-            ImPlot::PlotLine("Edge Energy", frames.data(), edge_energy_values.data(),
-                             edge_energy_values.size());
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(edge_energy_values);
+                ImPlot::PlotLine("Edge Energy", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("Edge Energy", frames.data(), edge_energy_values.data(),
+                                 edge_energy_values.size());
+            }
+        }
+        // Plot edge energy derivative
+        if (state.metric_flags.edge_energy_deriv && edge_energy_series != nullptr && edge_energy_series->size() > 1) {
+            auto derivs = edge_energy_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.4f, 0.4f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("Edge Energy'", frames.data() + 1, normalized.data(), derivs.size());
+            }
         }
 
-        // Plot color variance
-        if (state.metric_flags.color_variance && color_variance_series && !color_variance_series->empty()) {
+        // Plot color variance (Y3 - medium scale)
+        if (state.metric_flags.color_variance && color_variance_series != nullptr && !color_variance_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y3);
+            }
             auto const& color_variance_values = color_variance_series->values();
             ImPlot::SetNextLineStyle(ImVec4(0.4f, 1.0f, 0.4f, 1.0f));
-            ImPlot::PlotLine("Color Variance", frames.data(), color_variance_values.data(),
-                             color_variance_values.size());
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(color_variance_values);
+                ImPlot::PlotLine("Color Variance", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("Color Variance", frames.data(), color_variance_values.data(),
+                                 color_variance_values.size());
+            }
+        }
+        // Plot color variance derivative
+        if (state.metric_flags.color_variance_deriv && color_variance_series != nullptr && color_variance_series->size() > 1) {
+            auto derivs = color_variance_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.4f, 1.0f, 0.4f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("Color Variance'", frames.data() + 1, normalized.data(), derivs.size());
+            }
         }
 
-        // Plot coverage
-        if (state.metric_flags.coverage && coverage_series && !coverage_series->empty()) {
+        // Plot coverage (Y2 - normalized 0-1)
+        if (state.metric_flags.coverage && coverage_series != nullptr && !coverage_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
             auto const& coverage_values = coverage_series->values();
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.4f, 1.0f));
-            ImPlot::PlotLine("Coverage", frames.data(), coverage_values.data(),
-                             coverage_values.size());
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(coverage_values);
+                ImPlot::PlotLine("Coverage", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("Coverage", frames.data(), coverage_values.data(),
+                                 coverage_values.size());
+            }
+        }
+        // Plot coverage derivative
+        if (state.metric_flags.coverage_deriv && coverage_series != nullptr && coverage_series->size() > 1) {
+            auto derivs = coverage_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.4f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("Coverage'", frames.data() + 1, normalized.data(), derivs.size());
+            }
         }
 
-        // Plot causticness
-        if (state.metric_flags.causticness && causticness_series && !causticness_series->empty()) {
+        // Plot causticness (Y3 - medium scale)
+        if (state.metric_flags.causticness && causticness_series != nullptr && !causticness_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y3);
+            }
             auto const& causticness_values = causticness_series->values();
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.2f, 1.0f, 1.0f));
-            ImPlot::PlotLine("Causticness", frames.data(), causticness_values.data(),
-                             causticness_values.size());
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(causticness_values);
+                ImPlot::PlotLine("Causticness", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("Causticness", frames.data(), causticness_values.data(),
+                                 causticness_values.size());
+            }
+        }
+        // Plot causticness derivative
+        if (state.metric_flags.causticness_deriv && causticness_series != nullptr && causticness_series->size() > 1) {
+            auto derivs = causticness_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.2f, 1.0f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("Causticness'", frames.data() + 1, normalized.data(), derivs.size());
+            }
         }
 
         // Draw boom marker
@@ -698,8 +927,20 @@ void drawPreviewSection(AppState& state) {
         tooltip("Preview resolution (lower = faster)");
         state.preview.height = state.preview.width;
 
-        ImGui::SliderInt("Substeps", &state.preview.substeps, 1, 50);
-        tooltip("Physics substeps per frame (higher = more accurate)");
+        // Physics quality dropdown (replaces raw substeps)
+        const char* quality_names[] = {"Low", "Medium", "High", "Ultra"};
+        int quality_idx = static_cast<int>(state.preview.physics_quality);
+        if (ImGui::Combo("Physics Quality", &quality_idx, quality_names, 4)) {
+            state.preview.physics_quality = static_cast<PhysicsQuality>(quality_idx);
+            state.preview.max_dt = qualityToMaxDt(state.preview.physics_quality);
+        }
+        tooltip("Low=20ms, Medium=12ms, High=7ms, Ultra=3ms max timestep");
+
+        // Show computed values
+        double frame_dt = state.config.simulation.duration_seconds / state.config.simulation.total_frames;
+        int computed_substeps = state.preview.substeps(frame_dt);
+        ImGui::Text("Computed: substeps=%d, dt=%.2fms", computed_substeps,
+                    (frame_dt / computed_substeps) * 1000.0);
     }
 }
 
@@ -1233,12 +1474,12 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
     ImGui::Separator();
     auto* variance_s = state.metrics_collector.getMetric(metrics::MetricNames::Variance);
     double current_variance = variance_s ? variance_s->current() : 0.0;
-    ImGui::Text("Variance: %.4f", current_variance);
-    ImGui::Text("Spread:   %.1f%% above",
-                state.metrics_collector.getCurrentSpread().spread_ratio * 100);
+    ImGui::Text("Variance:   %.4f", current_variance);
+    ImGui::Text("Uniformity: %.2f (target: 0.9)",
+                state.metrics_collector.getCurrentSpread().circular_spread);
     auto* energy_s = state.metrics_collector.getMetric(metrics::MetricNames::TotalEnergy);
     double current_energy = energy_s ? energy_s->current() : 0.0;
-    ImGui::Text("Energy:   %.2f", current_energy);
+    ImGui::Text("Energy:     %.2f", current_energy);
 
     if (state.boom_frame.has_value()) {
         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Boom: frame %d (var=%.4f)",
@@ -1551,29 +1792,54 @@ int main(int argc, char* argv[]) {
         // Analysis graph with metric selector
         ImGui::Begin("Analysis");
 
-        // Metric selector (checkboxes in a compact row)
+        // Plot mode selector
+        const char* plot_mode_names[] = {"Single Axis", "Multi-Axis", "Normalized"};
+        ImGui::SetNextItemWidth(100);
+        ImGui::Combo("Scale", reinterpret_cast<int*>(&s_plot_mode), plot_mode_names, 3);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Single: All on one axis\nMulti: Y1=large, Y2=normalized, Y3=medium\nNormalized: All scaled 0-1");
+        }
+
+        // Metric selector with derivative toggles
+        // Helper lambda for metric checkbox with derivative toggle
+        auto metricWithDeriv = [](const char* label, bool* metric, bool* deriv, const char* id) {
+            ImGui::Checkbox(label, metric);
+            ImGui::SameLine(0, 2);
+            ImGui::PushStyleColor(ImGuiCol_Text, *deriv ? ImVec4(0.4f, 0.8f, 0.4f, 1.0f) : ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 0));
+            char btn_id[32];
+            snprintf(btn_id, sizeof(btn_id), "d##%s", id);
+            if (ImGui::SmallButton(btn_id)) {
+                *deriv = !*deriv;
+            }
+            ImGui::PopStyleVar();
+            ImGui::PopStyleColor();
+        };
+
         ImGui::Text("Metrics:");
         ImGui::SameLine();
-        ImGui::Checkbox("Var", &state.metric_flags.variance);
+        metricWithDeriv("Var", &state.metric_flags.variance, &state.metric_flags.variance_deriv, "var");
         ImGui::SameLine();
-        ImGui::Checkbox("Bright", &state.metric_flags.brightness);
+        metricWithDeriv("Bright", &state.metric_flags.brightness, &state.metric_flags.brightness_deriv, "bright");
         ImGui::SameLine();
-        ImGui::Checkbox("Spread", &state.metric_flags.spread);
+        metricWithDeriv("Unif", &state.metric_flags.uniformity, &state.metric_flags.uniformity_deriv, "unif");
         ImGui::SameLine();
-        ImGui::Checkbox("Edge", &state.metric_flags.edge_energy);
+        metricWithDeriv("Edge", &state.metric_flags.edge_energy, &state.metric_flags.edge_energy_deriv, "edge");
         ImGui::SameLine();
-        ImGui::Checkbox("Caustic", &state.metric_flags.causticness);
+        metricWithDeriv("Caustic", &state.metric_flags.causticness, &state.metric_flags.causticness_deriv, "caustic");
 
         // Second row
-        ImGui::Checkbox("Energy", &state.metric_flags.energy);
+        metricWithDeriv("Energy", &state.metric_flags.energy, &state.metric_flags.energy_deriv, "energy");
         ImGui::SameLine();
-        ImGui::Checkbox("Contr.Std", &state.metric_flags.contrast_stddev);
+        metricWithDeriv("Contr.Std", &state.metric_flags.contrast_stddev, &state.metric_flags.contrast_stddev_deriv, "cstd");
         ImGui::SameLine();
-        ImGui::Checkbox("Contr.Rng", &state.metric_flags.contrast_range);
+        metricWithDeriv("Contr.Rng", &state.metric_flags.contrast_range, &state.metric_flags.contrast_range_deriv, "crng");
         ImGui::SameLine();
-        ImGui::Checkbox("ColorVar", &state.metric_flags.color_variance);
+        metricWithDeriv("ColorVar", &state.metric_flags.color_variance, &state.metric_flags.color_variance_deriv, "cvar");
         ImGui::SameLine();
-        ImGui::Checkbox("Coverage", &state.metric_flags.coverage);
+        metricWithDeriv("Coverage", &state.metric_flags.coverage, &state.metric_flags.coverage_deriv, "cov");
 
         ImVec2 graph_size = ImGui::GetContentRegionAvail();
         graph_size.y = std::max(100.0f, graph_size.y - 60.0f); // Leave room for score
@@ -1587,30 +1853,95 @@ int main(int argc, char* argv[]) {
         double current_contrast = contrast_series && !contrast_series->empty() ? contrast_series->current() : 0.0;
         ImGui::Text("Current: Bright %.3f  Contrast %.3f", current_brightness, current_contrast);
 
-        // Display analyzer scores
+        // Display analyzer scores with enhanced details
         if (state.boom_analyzer.hasResults() || state.causticness_analyzer.hasResults()) {
             ImGui::Separator();
             ImGui::Text("Quality Scores:");
 
+            // Get scores
+            double boom_score = state.boom_analyzer.hasResults() ? state.boom_analyzer.score() : 0.0;
+            double caustic_score = state.causticness_analyzer.hasResults() ? state.causticness_analyzer.score() : 0.0;
+            double composite = (boom_score + caustic_score) / 2.0;
+
+            // Boom Analysis section
             if (state.boom_analyzer.hasResults()) {
                 auto boom_results = state.boom_analyzer.toJSON();
                 double sharpness = boom_results.value("sharpness_ratio", 0.0);
                 std::string type = boom_results.value("boom_type", "unknown");
-                ImGui::Text("  Boom: sharpness=%.2f type=%s", sharpness, type.c_str());
+                int peak_frame = boom_results.value("peak_derivative_frame", 0);
+
+                // Score with progress bar
+                ImGui::Text("Boom:");
+                ImGui::SameLine();
+                ImGui::ProgressBar(static_cast<float>(boom_score), ImVec2(80, 0));
+                ImGui::SameLine();
+                ImGui::Text("%.2f", boom_score);
+                ImGui::Text("  Type: %s | Sharpness: %.2f | Peak: frame %d", type.c_str(), sharpness, peak_frame);
+
+                // Collapsible details
+                if (ImGui::TreeNode("Boom Details")) {
+                    double peak_deriv = boom_results.value("peak_derivative", 0.0);
+                    double init_accel = boom_results.value("initial_acceleration", 0.0);
+                    double pre_boom_mean = boom_results.value("pre_boom_variance_mean", 0.0);
+                    double post_boom_max = boom_results.value("post_boom_variance_max", 0.0);
+                    int frames_to_peak = boom_results.value("frames_to_peak", 0);
+
+                    ImGui::Text("Peak derivative: %.3f", peak_deriv);
+                    ImGui::Text("Frames to peak: %d", frames_to_peak);
+                    ImGui::Text("Initial acceleration: %.4f", init_accel);
+                    ImGui::Text("Pre-boom variance mean: %.3f", pre_boom_mean);
+                    ImGui::Text("Post-boom variance max: %.3f", post_boom_max);
+                    ImGui::TreePop();
+                }
             }
 
+            // Causticness section
             if (state.causticness_analyzer.hasResults()) {
                 auto caustic_results = state.causticness_analyzer.toJSON();
                 double peak = caustic_results.value("peak_causticness", 0.0);
                 double avg = caustic_results.value("average_causticness", 0.0);
-                ImGui::Text("  Causticness: peak=%.2f avg=%.2f", peak, avg);
+                int peak_frame = caustic_results.value("peak_frame", 0);
+                double time_above = caustic_results.value("time_above_threshold", 0.0);
+
+                // Score with progress bar
+                ImGui::Text("Causticness:");
+                ImGui::SameLine();
+                ImGui::ProgressBar(static_cast<float>(caustic_score), ImVec2(80, 0));
+                ImGui::SameLine();
+                ImGui::Text("%.2f", caustic_score);
+
+                // Calculate peak time in seconds
+                double peak_seconds = static_cast<double>(peak_frame) / state.config.output.video_fps;
+                ImGui::Text("  Peak: %.1f @ %.1fs | Avg: %.1f | Time above: %.1fs", peak, peak_seconds, avg, time_above);
+
+                // Collapsible details
+                if (ImGui::TreeNode("Causticness Details")) {
+                    int frames_above = caustic_results.value("frames_above_threshold", 0);
+                    double post_boom_avg = caustic_results.value("post_boom_average", 0.0);
+                    double post_boom_peak = caustic_results.value("post_boom_peak", 0.0);
+                    double threshold = caustic_results.value("threshold", 0.0);
+
+                    ImGui::Text("Threshold: %.1f", threshold);
+                    ImGui::Text("Frames above threshold: %d", frames_above);
+                    ImGui::Text("Post-boom average: %.2f", post_boom_avg);
+                    ImGui::Text("Post-boom peak: %.2f", post_boom_peak);
+                    ImGui::TreePop();
+                }
             }
 
-            // Composite score
-            double boom_score = state.boom_analyzer.hasResults() ? state.boom_analyzer.score() : 0.0;
-            double caustic_score = state.causticness_analyzer.hasResults() ? state.causticness_analyzer.score() : 0.0;
-            double composite = (boom_score + caustic_score) / 2.0;
-            ImGui::Text("  Composite: %.2f", composite);
+            // Composite score bar
+            ImGui::Separator();
+            ImGui::Text("COMPOSITE:");
+            ImGui::SameLine();
+            // Color the progress bar based on score
+            ImVec4 bar_color = composite < 0.4f ? ImVec4(0.8f, 0.2f, 0.2f, 1.0f) :
+                               composite < 0.7f ? ImVec4(0.8f, 0.8f, 0.2f, 1.0f) :
+                                                  ImVec4(0.2f, 0.8f, 0.2f, 1.0f);
+            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, bar_color);
+            ImGui::ProgressBar(static_cast<float>(composite), ImVec2(100, 0));
+            ImGui::PopStyleColor();
+            ImGui::SameLine();
+            ImGui::Text("%.2f", composite);
         }
 
         ImGui::End();

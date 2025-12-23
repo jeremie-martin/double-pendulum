@@ -34,7 +34,7 @@ struct SimulationResults {
     double boom_variance = 0.0;
     std::optional<int> chaos_frame;  // Renamed from white_frame
     double chaos_variance = 0.0;     // Renamed from white_variance
-    double final_spread_ratio = 0.0; // Fraction of pendulums above horizontal at end
+    double final_uniformity = 0.0;   // Distribution uniformity (0=concentrated, 1=uniform on disk)
     TimingStats timing;
     std::vector<double> variance_history;
     std::vector<metrics::SpreadMetrics> spread_history;

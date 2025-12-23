@@ -197,7 +197,7 @@ ProbePhaseResults ProbePipeline::buildResults(ProbeFilter const& filter) {
         results.final_variance = variance_series->current();
     }
 
-    results.final_spread_ratio = collector_.getSpreadRatio();
+    results.final_uniformity = collector_.getUniformity();
 
     // Get scores
     results.scores = getScores();

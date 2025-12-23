@@ -13,6 +13,28 @@ A high-performance C++ simulation of chaotic double pendulum dynamics with GPU-a
 - **Music Sync**: Automatic music muxing with beat-drop alignment to chaos onset
 - **GUI Preview**: Real-time interactive preview with ImGui
 - **Headless Mode**: EGL-based rendering for servers without display
+- **Metrics System**: Real-time quality analysis with pluggable analyzers
+
+## Metrics & Quality Scoring
+
+The simulation tracks metrics for quality assessment and batch filtering:
+
+| Metric | Description |
+|--------|-------------|
+| **Variance** | Angular spread of pendulums (triggers boom/chaos events) |
+| **Uniformity** | Distribution uniformity on disk (0=concentrated, 1=uniform) |
+| **Causticness** | Visual quality from edge sharpness and color variation |
+| **Brightness/Contrast** | GPU-computed frame statistics |
+
+**Events detected:**
+- **Boom**: Chaos onset (pendulums start diverging)
+- **Chaos**: Full chaotic state (high variance plateau)
+
+**Quality scores** (0-1) from pluggable analyzers:
+- **Boom Analyzer**: Sharpness, peak timing, type classification
+- **Causticness Analyzer**: Peak/average causticness, time above threshold
+
+See `CLAUDE.md` for detailed architecture and developer documentation.
 
 ## Building
 

@@ -50,7 +50,7 @@ end = 1.0                      # Range end [0, 1]
 boom_threshold = 1.5           # radians^2
 boom_confirmation = 10         # Consecutive frames above threshold
 
-# White: when variance exceeds this (full chaos/noise)
+# Chaos: when variance exceeds this (full chaos/noise)
 chaos_threshold = 500.0        # radians^2
 chaos_confirmation = 10        # Consecutive frames above threshold
 
@@ -60,7 +60,7 @@ early_stop_after_chaos = false
 [filter]
 min_boom_seconds = 8.0   # Boom between 8-15 seconds
 max_boom_seconds = 15.0
-min_spread_ratio = 0.3   # At least 30% above horizontal
+min_uniformity = 0.9     # Minimum distribution uniformity (0=concentrated, 1=uniform on disk)
 
 [output]
 format = "png"                 # "png" or "video"

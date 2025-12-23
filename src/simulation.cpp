@@ -158,7 +158,7 @@ void Simulation::saveMetadata(SimulationResults const& results) {
         out << "    \"chaos_frame\": null,\n";
         out << "    \"chaos_variance\": null,\n";
     }
-    out << "    \"final_spread_ratio\": " << results.final_spread_ratio << "\n";
+    out << "    \"final_uniformity\": " << results.final_uniformity << "\n";
     out << "  },\n";
     out << "  \"timing\": {\n";
     out << "    \"total_seconds\": " << results.timing.total_seconds << ",\n";
@@ -472,7 +472,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         results.variance_history = variance_series->values();
     }
     results.spread_history = metrics_collector_.getSpreadHistory();
-    results.final_spread_ratio = metrics_collector_.getSpreadRatio();
+    results.final_uniformity = metrics_collector_.getUniformity();
 
     // Run analyzers to compute quality scores
     boom_analyzer_.analyze(metrics_collector_, event_detector_);
@@ -550,8 +550,22 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
                   << *results.chaos_frame << ", var=" << std::setprecision(4)
                   << results.chaos_variance << ")\n";
     }
-    std::cout << "Spread:      " << std::setprecision(2) << (results.final_spread_ratio * 100)
-              << "% above horizontal\n";
+    std::cout << "Uniformity:  " << std::setprecision(2) << results.final_uniformity
+              << " (target: 0.9)\n";
+
+    // Display analyzer scores
+    if (boom_analyzer_.hasResults()) {
+        auto const& quality = boom_analyzer_.toJSON();
+        std::cout << "Boom score:  " << std::setprecision(2) << boom_analyzer_.score()
+                  << " (sharpness=" << quality.value("sharpness_ratio", 0.0)
+                  << ", type=" << quality.value("boom_type", "unknown") << ")\n";
+    }
+    if (causticness_analyzer_.hasResults()) {
+        auto const& metrics = causticness_analyzer_.toJSON();
+        std::cout << "Causticness: " << std::setprecision(2) << causticness_analyzer_.score()
+                  << " (peak=" << metrics.value("peak_causticness", 0.0)
+                  << ", avg=" << metrics.value("average_causticness", 0.0) << ")\n";
+    }
 
     std::cout << "\nOutput: " << output_path << "\n";
 
@@ -647,7 +661,7 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
             results.final_variance = variance_series->current();
         }
     }
-    results.final_spread_ratio = metrics_collector_.getSpreadRatio();
+    results.final_uniformity = metrics_collector_.getUniformity();
 
     // Scores from analyzers
     if (boom_analyzer_.hasResults()) {

@@ -114,8 +114,13 @@ BatchConfig BatchConfig::load(std::string const& path) {
             if (auto max_boom = filter->get("max_boom_seconds")) {
                 config.filter.max_boom_seconds = max_boom->value<double>().value_or(0.0);
             }
-            if (auto min_spread = filter->get("min_spread_ratio")) {
-                config.filter.min_spread_ratio = min_spread->value<double>().value_or(0.0);
+            // Support both new (min_uniformity) and legacy (min_spread_ratio) names
+            if (auto min_unif = filter->get("min_uniformity")) {
+                config.filter.min_uniformity = min_unif->value<double>().value_or(0.0);
+            } else if (auto min_spread = filter->get("min_spread_ratio")) {
+                // Legacy support - convert spread_ratio threshold to approximate uniformity
+                // Note: these metrics are different, so this is just for compatibility
+                config.filter.min_uniformity = min_spread->value<double>().value_or(0.0);
             }
             if (auto req_boom = filter->get("require_boom")) {
                 config.filter.require_boom = req_boom->value<bool>().value_or(true);
@@ -353,7 +358,7 @@ bool BatchGenerator::generateOne(int index) {
 
                 if (passes) {
                     std::cout << "OK (boom=" << std::setprecision(2) << result.boom_seconds
-                              << "s, spread=" << std::setprecision(2) << result.final_spread_ratio
+                              << "s, uniformity=" << std::setprecision(2) << result.final_uniformity
                               << ")\n";
                     probe_retries = retry;
                     found_valid = true;
@@ -445,10 +450,10 @@ bool BatchGenerator::generateOne(int index) {
         double simulation_speed = config.simulation.duration_seconds / video_duration;
 
         // Track result and create symlink
-        // Use actual simulation spread (more accurate than probe spread)
+        // Use actual simulation uniformity (more accurate than probe uniformity)
         RunResult result{
             video_name, final_video_path,           true,          results.boom_frame, boom_seconds,
-            duration,   results.final_spread_ratio, probe_retries, simulation_speed};
+            duration,   results.final_uniformity, probe_retries, simulation_speed};
         progress_.results.push_back(result);
         progress_.completed_ids.push_back(video_name);
 
@@ -549,10 +554,10 @@ std::pair<bool, metrics::ProbePhaseResults> BatchGenerator::runProbe(Config cons
     metrics::MetricsCollector collector;
     collector.registerStandardMetrics();
 
-    // Push final spread ratio as a single-point metric for filter evaluation
-    if (results.final_spread_ratio > 0.0) {
+    // Push final uniformity as a single-point metric for filter evaluation
+    if (results.final_uniformity > 0.0) {
         collector.beginFrame(0);
-        collector.setMetric(metrics::MetricNames::SpreadRatio, results.final_spread_ratio);
+        collector.setMetric(metrics::MetricNames::CircularSpread, results.final_uniformity);
         collector.endFrame();
     }
 
@@ -719,10 +724,10 @@ void BatchGenerator::printSummary() const {
             std::cout << std::setw(6) << "-" << "  ";
         }
 
-        // Spread ratio
-        if (r.success && r.final_spread_ratio > 0) {
+        // Uniformity
+        if (r.success && r.final_uniformity > 0) {
             std::cout << std::right << std::fixed << std::setprecision(2) << std::setw(6)
-                      << r.final_spread_ratio << "  ";
+                      << r.final_uniformity << "  ";
         } else {
             std::cout << std::setw(6) << "-" << "  ";
         }

@@ -217,6 +217,10 @@ double MetricsCollector::getSpreadRatio() const {
     return current_spread_.spread_ratio;
 }
 
+double MetricsCollector::getUniformity() const {
+    return current_spread_.circular_spread;
+}
+
 double MetricsCollector::getBrightness() const {
     auto* series = getMetric(MetricNames::Brightness);
     return series ? series->current() : 0.0;

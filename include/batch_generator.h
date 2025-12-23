@@ -17,13 +17,13 @@
 struct FilterCriteria {
     double min_boom_seconds = 0.0; // Minimum boom time (0 = no minimum)
     double max_boom_seconds = 0.0; // Maximum boom time (0 = no maximum)
-    double min_spread_ratio = 0.0; // Minimum spread ratio (0 = no requirement)
+    double min_uniformity = 0.0;   // Minimum uniformity (0 = no requirement, 0.9 recommended)
     bool require_boom = true;      // Reject simulations with no detectable boom
     bool require_valid_music = true; // Fail if no music track has drop > boom time
 
     // Check if filtering is enabled (any non-default values)
     bool isEnabled() const {
-        return min_boom_seconds > 0.0 || max_boom_seconds > 0.0 || min_spread_ratio > 0.0 ||
+        return min_boom_seconds > 0.0 || max_boom_seconds > 0.0 || min_uniformity > 0.0 ||
                require_boom;
     }
 
@@ -38,8 +38,8 @@ struct FilterCriteria {
                                   min_boom_seconds > 0.0 ? min_boom_seconds : 0.0,
                                   max_boom_seconds > 0.0 ? max_boom_seconds : 1e9);
         }
-        if (min_spread_ratio > 0.0) {
-            filter.addMetricThreshold(metrics::MetricNames::SpreadRatio, min_spread_ratio);
+        if (min_uniformity > 0.0) {
+            filter.addMetricThreshold(metrics::MetricNames::CircularSpread, min_uniformity);
         }
         return filter;
     }
@@ -98,7 +98,7 @@ struct RunResult {
     std::optional<int> boom_frame;
     double boom_seconds = 0.0;
     double duration_seconds = 0.0;
-    double final_spread_ratio = 0.0;  // Spread at end of simulation
+    double final_uniformity = 0.0;    // Uniformity at end of simulation (0=concentrated, 1=uniform)
     int probe_retries = 0;            // Number of probe retries before success
     double simulation_speed = 1.0;    // Real-time multiplier (physics_time / video_time)
 };

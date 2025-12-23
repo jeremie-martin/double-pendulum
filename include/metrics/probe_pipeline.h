@@ -50,7 +50,7 @@ struct ProbePhaseResults {
 
     // Final metrics
     double final_variance = 0.0;
-    double final_spread_ratio = 0.0;
+    double final_uniformity = 0.0;  // Distribution uniformity (0=concentrated, 1=uniform)
 
     // Scores from analyzers
     SimulationScore scores;

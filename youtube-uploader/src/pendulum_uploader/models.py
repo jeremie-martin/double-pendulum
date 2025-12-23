@@ -41,9 +41,9 @@ class SimulationResults(BaseModel):
     frames_completed: int
     boom_frame: Optional[int] = None
     boom_variance: Optional[float] = None
-    white_frame: Optional[int] = None
-    white_variance: Optional[float] = None
-    final_spread_ratio: float = 0.0  # Fraction of pendulums above horizontal
+    chaos_frame: Optional[int] = None
+    chaos_variance: Optional[float] = None
+    final_uniformity: float = 0.0  # Distribution uniformity on disk (0=concentrated, 1=uniform)
 
     def boom_seconds(self, config: SimulationConfig) -> Optional[float]:
         """Calculate boom time in seconds."""

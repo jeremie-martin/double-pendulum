@@ -111,7 +111,8 @@ public:
 
     // Convenience accessors for common metrics
     double getVariance() const;
-    double getSpreadRatio() const;
+    double getSpreadRatio() const;  // Legacy: fraction above horizontal
+    double getUniformity() const;   // Preferred: circular spread (0=concentrated, 1=uniform)
     double getBrightness() const;
     double getCoverage() const;
 
