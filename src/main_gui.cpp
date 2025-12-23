@@ -196,6 +196,11 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
     state.boom_analyzer.reset();
     state.causticness_analyzer.reset();
 
+    // Set frame duration for analyzers (once at init, not every frame)
+    double frame_duration = state.config.simulation.duration_seconds /
+                            state.config.simulation.total_frames;
+    state.causticness_analyzer.setFrameDuration(frame_duration);
+
     // Setup event detector
     state.event_detector.clearCriteria();
     state.event_detector.addBoomCriteria(state.config.detection.boom_threshold,
@@ -321,11 +326,29 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     double frame_duration = state.config.simulation.duration_seconds /
                             state.config.simulation.total_frames;
 
-    // Update event detection
-    state.event_detector.update(state.metrics_collector, frame_duration);
+    auto sim_end = std::chrono::high_resolution_clock::now();
+    state.sim_time_ms = std::chrono::duration<double, std::milli>(sim_end - start).count();
 
-    // End frame metrics collection
+    // Save to frame history (if under limit)
+    if (static_cast<int>(state.frame_history.size()) < state.max_history_frames) {
+        state.frame_history.push_back(state.states);
+    }
+
+    // Render (needed before endFrame to get GPU metrics)
+    renderFrame(state, renderer);
+
+    // Update metrics collector with GPU stats after rendering but BEFORE endFrame
+    metrics::GPUMetricsBundle gpu_metrics;
+    gpu_metrics.max_value = renderer.lastMax();
+    gpu_metrics.brightness = renderer.lastBrightness();
+    gpu_metrics.coverage = renderer.lastCoverage();
+    state.metrics_collector.setGPUMetrics(gpu_metrics);
+
+    // End frame metrics collection (after ALL metrics including GPU are set)
     state.metrics_collector.endFrame();
+
+    // Update event detection (needs complete frame data)
+    state.event_detector.update(state.metrics_collector, frame_duration);
 
     // Extract chaos event
     if (auto chaos_event = state.event_detector.getEvent(metrics::EventNames::Chaos)) {
@@ -341,8 +364,9 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
         if (!values.empty()) {
             auto max_it = std::max_element(values.begin(), values.end());
             int max_frame = static_cast<int>(std::distance(values.begin(), max_it));
-            // Update boom_frame to track the peak
-            state.boom_frame = max_frame;
+            // Apply 0.3s offset for consistency with other executables
+            int offset_frames = static_cast<int>(0.3 / frame_duration);
+            state.boom_frame = std::max(0, max_frame - offset_frames);
             state.boom_variance = *max_it;
         }
     }
@@ -350,27 +374,8 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     // Run analyzers periodically after boom (every 30 frames)
     if (state.boom_frame && (state.current_frame % 30 == 0)) {
         state.boom_analyzer.analyze(state.metrics_collector, state.event_detector);
-        state.causticness_analyzer.setFrameDuration(frame_duration);
         state.causticness_analyzer.analyze(state.metrics_collector, state.event_detector);
     }
-
-    auto sim_end = std::chrono::high_resolution_clock::now();
-    state.sim_time_ms = std::chrono::duration<double, std::milli>(sim_end - start).count();
-
-    // Save to frame history (if under limit)
-    if (static_cast<int>(state.frame_history.size()) < state.max_history_frames) {
-        state.frame_history.push_back(state.states);
-    }
-
-    // Render
-    renderFrame(state, renderer);
-
-    // Update metrics collector with GPU stats after rendering
-    metrics::GPUMetricsBundle gpu_metrics;
-    gpu_metrics.max_value = renderer.lastMax();
-    gpu_metrics.brightness = renderer.lastBrightness();
-    gpu_metrics.coverage = renderer.lastCoverage();
-    state.metrics_collector.setGPUMetrics(gpu_metrics);
 
     state.current_frame++;
     state.display_frame = state.current_frame;

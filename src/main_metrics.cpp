@@ -148,12 +148,15 @@ int computePhysicsMetrics(Options const& opts,
     // Print results
     std::cout << "\nResults:\n";
 
-    // Boom detection: use max angular_causticness frame
-    if (auto* caustic_series = collector.getMetric(metrics::MetricNames::AngularCausticness)) {
+    // Boom detection: use max angular_causticness frame with 0.3s offset
+    if (auto const* caustic_series = collector.getMetric(metrics::MetricNames::AngularCausticness)) {
         auto const& values = caustic_series->values();
         if (!values.empty()) {
             auto max_it = std::max_element(values.begin(), values.end());
-            int boom_frame = static_cast<int>(std::distance(values.begin(), max_it));
+            int max_frame = static_cast<int>(std::distance(values.begin(), max_it));
+            // Apply 0.3s offset for consistency with other executables
+            int offset_frames = static_cast<int>(0.3 / frame_duration);
+            int boom_frame = std::max(0, max_frame - offset_frames);
             double boom_seconds = boom_frame * frame_duration;
             std::cout << "  Boom: frame " << boom_frame << " ("
                       << std::fixed << std::setprecision(2) << boom_seconds << "s)"
@@ -248,6 +251,9 @@ int computeGPUMetrics(Options const& opts,
     detector.addBoomCriteria(config.detection.boom_threshold,
                              config.detection.boom_confirmation,
                              metrics::MetricNames::Variance);
+    detector.addChaosCriteria(config.detection.chaos_threshold,
+                              config.detection.chaos_confirmation,
+                              metrics::MetricNames::Variance);
 
     double const frame_duration =
         config.simulation.duration_seconds / reader.frameCount();
@@ -333,31 +339,41 @@ int computeGPUMetrics(Options const& opts,
     // Run analyzers
     metrics::BoomAnalyzer boom_analyzer;
     metrics::CausticnessAnalyzer causticness_analyzer;
+    causticness_analyzer.setFrameDuration(frame_duration);
     boom_analyzer.analyze(collector, detector);
     causticness_analyzer.analyze(collector, detector);
 
     // Print results
     std::cout << "\nResults:\n";
 
-    if (auto boom = detector.getEvent(metrics::EventNames::Boom)) {
-        double boom_seconds = boom->frame * frame_duration;
-        std::cout << "  Boom: frame " << boom->frame << " ("
-                  << std::fixed << std::setprecision(2) << boom_seconds << "s)\n";
+    // Boom detection: use max angular_causticness frame with 0.3s offset
+    if (auto const* caustic_series = collector.getMetric(metrics::MetricNames::AngularCausticness)) {
+        auto const& values = caustic_series->values();
+        if (!values.empty()) {
+            auto max_it = std::max_element(values.begin(), values.end());
+            int max_frame = static_cast<int>(std::distance(values.begin(), max_it));
+            // Apply 0.3s offset for consistency with other executables
+            int offset_frames = static_cast<int>(0.3 / frame_duration);
+            int boom_frame = std::max(0, max_frame - offset_frames);
+            double boom_seconds = boom_frame * frame_duration;
+            std::cout << "  Boom: frame " << boom_frame << " ("
+                      << std::fixed << std::setprecision(2) << boom_seconds << "s)"
+                      << ", causticness=" << std::setprecision(4) << *max_it << "\n";
+        }
     }
-
-    std::cout << "  Peak angular causticness: " << std::fixed << std::setprecision(4)
-              << (collector.getMetric(metrics::MetricNames::AngularCausticness)
-                      ? collector.getMetric(metrics::MetricNames::AngularCausticness)->max()
-                      : 0.0)
-              << "\n";
 
     if (boom_analyzer.hasResults()) {
         std::cout << "  Boom score: " << std::fixed << std::setprecision(3)
                   << boom_analyzer.score() << "\n";
     }
     if (causticness_analyzer.hasResults()) {
+        auto const& metrics = causticness_analyzer.getMetrics();
         std::cout << "  Causticness score: " << std::fixed << std::setprecision(3)
                   << causticness_analyzer.score() << "\n";
+        std::cout << "  Peak clarity: " << std::fixed << std::setprecision(3)
+                  << metrics.peak_clarity_score << "\n";
+        std::cout << "  Post-boom sustain: " << std::fixed << std::setprecision(3)
+                  << metrics.post_boom_area_normalized << "\n";
     }
 
     // Export metrics

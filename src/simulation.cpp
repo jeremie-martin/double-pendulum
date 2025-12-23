@@ -636,6 +636,8 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
 
     // Reset metrics and event detector for fresh probe
     metrics_collector_.reset();
+    metrics_collector_.registerStandardMetrics();
+    // Note: GPU metrics not registered since probe doesn't render
     event_detector_.reset();
 
     // Time per frame for event timing
