@@ -19,44 +19,6 @@ using Duration = std::chrono::duration<double>;
 
 namespace {
 
-// Compute causticness score from per-frame metrics
-// Samples at 0.5s intervals after boom, favors high contrast with moderate brightness
-SimulationScore computeScore(std::vector<FrameAnalysis> const& analysis,
-                             std::optional<int> boom_frame, int fps) {
-    SimulationScore score;
-    if (!boom_frame || analysis.empty() || fps <= 0) {
-        return score;
-    }
-
-    // Sample at 0.0s, 0.5s, 1.0s, ..., 5.0s after boom
-    int frames_per_sample = fps / 2; // 0.5s intervals
-    int max_samples = 11;            // 0.0 to 5.0
-
-    for (int i = 0; i < max_samples; ++i) {
-        int frame = *boom_frame + i * frames_per_sample;
-        if (frame >= static_cast<int>(analysis.size()))
-            break;
-
-        double causticness = analysis[frame].causticness();
-
-        score.samples.push_back(causticness);
-        if (causticness > score.peak_causticness) {
-            score.peak_causticness = causticness;
-            score.best_frame = frame;
-        }
-    }
-
-    if (!score.samples.empty()) {
-        double sum = 0.0;
-        for (double s : score.samples) {
-            sum += s;
-        }
-        score.average_causticness = sum / score.samples.size();
-    }
-
-    return score;
-}
-
 void savePNGFile(char const* path, uint8_t const* data, int width, int height) {
     FILE* fp = fopen(path, "wb");
     if (!fp)
@@ -82,7 +44,17 @@ void savePNGFile(char const* path, uint8_t const* data, int width, int height) {
 }
 } // namespace
 
-Simulation::Simulation(Config const& config) : config_(config), color_gen_(config.color) {}
+Simulation::Simulation(Config const& config) : config_(config), color_gen_(config.color) {
+    // Register standard metrics
+    metrics_collector_.registerStandardMetrics();
+
+    // Setup event detection from config
+    auto const& detect = config_.detection;
+    event_detector_.addBoomCriteria(detect.boom_threshold, detect.boom_confirmation,
+                                     metrics::MetricNames::Variance);
+    event_detector_.addChaosCriteria(detect.white_threshold, detect.white_confirmation,
+                                      metrics::MetricNames::Variance);
+}
 
 Simulation::~Simulation() {
     renderer_.shutdown();
@@ -178,12 +150,12 @@ void Simulation::saveMetadata(SimulationResults const& results) {
         out << "    \"boom_seconds\": null,\n";
         out << "    \"boom_variance\": null,\n";
     }
-    if (results.white_frame) {
-        out << "    \"white_frame\": " << *results.white_frame << ",\n";
-        out << "    \"white_variance\": " << results.white_variance << ",\n";
+    if (results.chaos_frame) {
+        out << "    \"chaos_frame\": " << *results.chaos_frame << ",\n";
+        out << "    \"chaos_variance\": " << results.chaos_variance << ",\n";
     } else {
-        out << "    \"white_frame\": null,\n";
-        out << "    \"white_variance\": null,\n";
+        out << "    \"chaos_frame\": null,\n";
+        out << "    \"chaos_variance\": null,\n";
     }
     out << "    \"final_spread_ratio\": " << results.final_spread_ratio << "\n";
     out << "  },\n";
@@ -194,20 +166,17 @@ void Simulation::saveMetadata(SimulationResults const& results) {
     out << "    \"io_seconds\": " << results.timing.io_seconds << "\n";
     out << "  }";
 
-    // Add score section if computed
-    if (!results.score.samples.empty()) {
+    // Add scores section if any scores computed
+    if (!results.score.empty()) {
         out << ",\n";
-        out << "  \"score\": {\n";
-        out << "    \"peak_causticness\": " << results.score.peak_causticness << ",\n";
-        out << "    \"average_causticness\": " << results.score.average_causticness << ",\n";
-        out << "    \"best_frame\": " << results.score.best_frame << ",\n";
-        out << "    \"samples\": [";
-        for (size_t i = 0; i < results.score.samples.size(); ++i) {
-            if (i > 0)
-                out << ", ";
-            out << results.score.samples[i];
+        out << "  \"scores\": {\n";
+        bool first = true;
+        for (auto const& [name, value] : results.score.scores) {
+            if (!first) out << ",\n";
+            out << "    \"" << name << "\": " << value;
+            first = false;
         }
-        out << "]\n";
+        out << "\n";
         out << "  }\n";
     } else {
         out << "\n";
@@ -216,44 +185,49 @@ void Simulation::saveMetadata(SimulationResults const& results) {
     out << "}\n";
 }
 
-void Simulation::saveVarianceCSV(std::vector<double> const& variance,
-                                 std::vector<float> const& max_values,
-                                 std::vector<SpreadMetrics> const& spread) {
-    std::ofstream out(run_directory_ + "/variance.csv");
-    if (!out)
-        return;
-
-    out << "frame,variance,max_value,spread_ratio\n";
-    out << std::fixed << std::setprecision(6);
-    for (size_t i = 0; i < variance.size(); ++i) {
-        out << i << "," << variance[i];
-        if (i < max_values.size()) {
-            out << "," << max_values[i];
-        } else {
-            out << ",";
-        }
-        if (i < spread.size()) {
-            out << "," << spread[i].spread_ratio;
-        }
-        out << "\n";
-    }
-}
-
-void Simulation::saveAnalysisCSV(std::vector<FrameAnalysis> const& analysis) {
-    std::ofstream out(run_directory_ + "/analysis.csv");
+void Simulation::saveMetricsCSV() {
+    std::ofstream out(run_directory_ + "/metrics.csv");
     if (!out) {
         return;
     }
 
-    out << "frame,variance,max_value,brightness,contrast_stddev,contrast_range,"
+    // Get all metric series
+    auto* variance = metrics_collector_.getMetric(metrics::MetricNames::Variance);
+    auto* brightness = metrics_collector_.getMetric(metrics::MetricNames::Brightness);
+    auto* contrast_stddev = metrics_collector_.getMetric(metrics::MetricNames::ContrastStddev);
+    auto* contrast_range = metrics_collector_.getMetric(metrics::MetricNames::ContrastRange);
+    auto* edge_energy = metrics_collector_.getMetric(metrics::MetricNames::EdgeEnergy);
+    auto* color_variance = metrics_collector_.getMetric(metrics::MetricNames::ColorVariance);
+    auto* coverage = metrics_collector_.getMetric(metrics::MetricNames::Coverage);
+    auto* peak_median = metrics_collector_.getMetric(metrics::MetricNames::PeakMedianRatio);
+    auto* causticness = metrics_collector_.getMetric(metrics::MetricNames::Causticness);
+    auto* total_energy = metrics_collector_.getMetric(metrics::MetricNames::TotalEnergy);
+    auto spread_history = metrics_collector_.getSpreadHistory();
+
+    // Determine number of frames
+    size_t frame_count = variance ? variance->size() : 0;
+    if (frame_count == 0) return;
+
+    // Write header
+    out << "frame,variance,spread_ratio,brightness,contrast_stddev,contrast_range,"
         << "edge_energy,color_variance,coverage,peak_median_ratio,causticness,total_energy\n";
     out << std::fixed << std::setprecision(6);
-    for (size_t i = 0; i < analysis.size(); ++i) {
-        auto const& a = analysis[i];
-        out << i << "," << a.variance << "," << a.max_value << "," << a.brightness << ","
-            << a.contrast_stddev << "," << a.contrast_range << "," << a.edge_energy << ","
-            << a.color_variance << "," << a.coverage << "," << a.peak_median_ratio << ","
-            << a.causticness() << "," << a.total_energy << "\n";
+
+    // Write data
+    for (size_t i = 0; i < frame_count; ++i) {
+        out << i;
+        out << "," << (variance && i < variance->size() ? variance->at(i) : 0.0);
+        out << "," << (i < spread_history.size() ? spread_history[i].spread_ratio : 0.0);
+        out << "," << (brightness && i < brightness->size() ? brightness->at(i) : 0.0);
+        out << "," << (contrast_stddev && i < contrast_stddev->size() ? contrast_stddev->at(i) : 0.0);
+        out << "," << (contrast_range && i < contrast_range->size() ? contrast_range->at(i) : 0.0);
+        out << "," << (edge_energy && i < edge_energy->size() ? edge_energy->at(i) : 0.0);
+        out << "," << (color_variance && i < color_variance->size() ? color_variance->at(i) : 0.0);
+        out << "," << (coverage && i < coverage->size() ? coverage->at(i) : 0.0);
+        out << "," << (peak_median && i < peak_median->size() ? peak_median->at(i) : 0.0);
+        out << "," << (causticness && i < causticness->size() ? causticness->at(i) : 0.0);
+        out << "," << (total_energy && i < total_energy->size() ? total_energy->at(i) : 0.0);
+        out << "\n";
     }
 }
 
@@ -330,8 +304,12 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
 
     SimulationResults results;
 
-    // Detection thresholds from config
-    auto const& detect = config_.detection;
+    // Frame duration for event timing
+    double const frame_duration = config_.simulation.duration_seconds / total_frames;
+
+    // Reset metrics for fresh run
+    metrics_collector_.reset();
+    event_detector_.reset();
 
     // Main simulation loop (streaming mode)
     bool early_stopped = false;
@@ -341,7 +319,10 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         stepPendulums(pendulums, states, substeps, dt, thread_count);
         physics_time += Clock::now() - physics_start;
 
-        // Track variance and spread (always enabled - cheap operation)
+        // Begin frame for metrics collection
+        metrics_collector_.beginFrame(frame);
+
+        // Track variance and spread via new metrics system
         std::vector<double> angle1s, angle2s;
         angle1s.reserve(pendulum_count);
         angle2s.reserve(pendulum_count);
@@ -349,27 +330,40 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
             angle1s.push_back(state.th1); // First pendulum angle (for spread)
             angle2s.push_back(state.th2); // Second pendulum angle (for variance)
         }
-        variance_tracker_.updateWithSpread(angle2s, angle1s);
+        metrics_collector_.updateFromAngles(angle1s, angle2s);
 
-        // Extended analysis (when enabled - includes energy computation)
+        // Extended analysis: compute total energy if enabled
         if (config_.analysis.enabled) {
-            analysis_tracker_.update(pendulums, 0.0f, 0.0f); // GPU stats updated after render
+            double total_energy = 0.0;
+            for (auto const& p : pendulums) {
+                total_energy += p.totalEnergy();
+            }
+            metrics_collector_.setMetric(metrics::MetricNames::TotalEnergy, total_energy);
         }
 
-        // Update detection results using shared utility
-        bool had_white = results.white_frame.has_value();
-        VarianceUtils::ThresholdResults detection{results.boom_frame, results.boom_variance,
-                                                  results.white_frame, results.white_variance};
-        VarianceUtils::updateDetection(detection, variance_tracker_, detect.boom_threshold,
-                                       detect.boom_confirmation, detect.white_threshold,
-                                       detect.white_confirmation);
-        results.boom_frame = detection.boom_frame;
-        results.boom_variance = detection.boom_variance;
-        results.white_frame = detection.white_frame;
-        results.white_variance = detection.white_variance;
+        // Update event detection
+        bool had_chaos = event_detector_.isDetected(metrics::EventNames::Chaos);
+        event_detector_.update(metrics_collector_, frame_duration);
 
-        // Early stop if white was newly detected and configured
-        if (!had_white && results.white_frame.has_value() && detect.early_stop_after_white) {
+        // End frame metrics collection
+        metrics_collector_.endFrame();
+
+        // Extract events for results
+        if (auto boom_event = event_detector_.getEvent(metrics::EventNames::Boom)) {
+            if (boom_event->detected() && !results.boom_frame) {
+                results.boom_frame = boom_event->frame;
+                results.boom_variance = boom_event->value;
+            }
+        }
+        if (auto chaos_event = event_detector_.getEvent(metrics::EventNames::Chaos)) {
+            if (chaos_event->detected() && !results.chaos_frame) {
+                results.chaos_frame = chaos_event->frame;
+                results.chaos_variance = chaos_event->value;
+            }
+        }
+
+        // Early stop if chaos was newly detected and configured
+        if (!had_chaos && results.chaos_frame.has_value() && config_.detection.early_stop_after_white) {
             results.frames_completed = frame + 1;
             early_stopped = true;
             break;
@@ -403,18 +397,18 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
                              config_.post_process.normalization, pendulum_count);
         max_values.push_back(renderer_.lastMax());
 
-        // Update analysis with GPU stats (brightness, contrast, causticness metrics)
+        // Update metrics with GPU stats (brightness, contrast, causticness metrics)
         if (config_.analysis.enabled) {
-            AnalysisTracker::GPUMetrics metrics;
-            metrics.max_value = renderer_.lastMax();
-            metrics.brightness = renderer_.lastBrightness();
-            metrics.contrast_stddev = renderer_.lastContrastStddev();
-            metrics.contrast_range = renderer_.lastContrastRange();
-            metrics.edge_energy = renderer_.lastEdgeEnergy();
-            metrics.color_variance = renderer_.lastColorVariance();
-            metrics.coverage = renderer_.lastCoverage();
-            metrics.peak_median_ratio = renderer_.lastPeakMedianRatio();
-            analysis_tracker_.updateGPUStats(metrics);
+            metrics::GPUMetricsBundle gpu_metrics;
+            gpu_metrics.max_value = renderer_.lastMax();
+            gpu_metrics.brightness = renderer_.lastBrightness();
+            gpu_metrics.contrast_stddev = renderer_.lastContrastStddev();
+            gpu_metrics.contrast_range = renderer_.lastContrastRange();
+            gpu_metrics.edge_energy = renderer_.lastEdgeEnergy();
+            gpu_metrics.color_variance = renderer_.lastColorVariance();
+            gpu_metrics.coverage = renderer_.lastCoverage();
+            gpu_metrics.peak_median_ratio = renderer_.lastPeakMedianRatio();
+            metrics_collector_.setGPUMetrics(gpu_metrics);
         }
 
         render_time += Clock::now() - render_start;
@@ -453,27 +447,31 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     results.timing.render_seconds = render_time.count();
     results.timing.io_seconds = io_time.count();
 
-    results.variance_history = variance_tracker_.getHistory();
-    results.spread_history = variance_tracker_.getSpreadHistory();
-    results.final_spread_ratio = variance_tracker_.getFinalSpread().spread_ratio;
+    // Extract metrics history
+    if (auto* variance_series = metrics_collector_.getMetric(metrics::MetricNames::Variance)) {
+        results.variance_history = variance_series->values();
+    }
+    results.spread_history = metrics_collector_.getSpreadHistory();
+    results.final_spread_ratio = metrics_collector_.getSpreadRatio();
 
-    // Compute quality score from analysis metrics
-    if (config_.analysis.enabled && !analysis_tracker_.getHistory().empty()) {
-        results.score = computeScore(analysis_tracker_.getHistory(), results.boom_frame,
-                                     config_.output.video_fps);
+    // Run analyzers to compute quality scores
+    boom_analyzer_.analyze(metrics_collector_, event_detector_);
+    causticness_analyzer_.analyze(metrics_collector_, event_detector_);
+
+    // Aggregate scores
+    if (boom_analyzer_.hasResults()) {
+        results.score.set(metrics::ScoreNames::Boom, boom_analyzer_.score());
+    }
+    if (causticness_analyzer_.hasResults()) {
+        results.score.set(metrics::ScoreNames::Causticness, causticness_analyzer_.score());
     }
 
-    // Save metadata, config copy, and statistics
+    // Save metadata, config copy, and metrics
     saveMetadata(results);
     if (!config_path.empty()) {
         saveConfigCopy(config_path);
     }
-    // Save extended analysis or basic variance depending on mode
-    if (config_.analysis.enabled && !analysis_tracker_.getHistory().empty()) {
-        saveAnalysisCSV(analysis_tracker_.getHistory());
-    } else if (!results.variance_history.empty()) {
-        saveVarianceCSV(results.variance_history, max_values, results.spread_history);
-    }
+    saveMetricsCSV();
 
     // Store output paths in results
     results.output_directory = run_directory_;
@@ -492,7 +490,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     // Print results
     std::cout << "\n\n";
     if (early_stopped) {
-        std::cout << "=== Simulation Stopped Early (white detected) ===\n";
+        std::cout << "=== Simulation Stopped Early (chaos detected) ===\n";
     } else {
         std::cout << "=== Simulation Complete ===\n";
     }
@@ -520,18 +518,17 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
               << std::setw(4) << (results.timing.io_seconds / results.timing.total_seconds * 100)
               << "%)\n";
 
-    double const frame_duration = config_.simulation.duration_seconds / total_frames;
     if (results.boom_frame) {
         double boom_seconds = *results.boom_frame * frame_duration;
         std::cout << "Boom:        " << std::setprecision(2) << boom_seconds << "s (frame "
                   << *results.boom_frame << ", var=" << std::setprecision(4)
                   << results.boom_variance << ")\n";
     }
-    if (results.white_frame) {
-        double white_seconds = *results.white_frame * frame_duration;
-        std::cout << "White:       " << std::setprecision(2) << white_seconds << "s (frame "
-                  << *results.white_frame << ", var=" << std::setprecision(4)
-                  << results.white_variance << ")\n";
+    if (results.chaos_frame) {
+        double chaos_seconds = *results.chaos_frame * frame_duration;
+        std::cout << "Chaos:       " << std::setprecision(2) << chaos_seconds << "s (frame "
+                  << *results.chaos_frame << ", var=" << std::setprecision(4)
+                  << results.chaos_variance << ")\n";
     }
     std::cout << "Spread:      " << std::setprecision(2) << (results.final_spread_ratio * 100)
               << "% above horizontal\n";
@@ -541,11 +538,11 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     return results;
 }
 
-ProbeResults Simulation::runProbe(ProgressCallback progress) {
+metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
     // Physics-only simulation for parameter evaluation
     // No GL, no rendering, no I/O - just physics + variance/spread tracking
 
-    ProbeResults results;
+    metrics::ProbePhaseResults results;
 
     int const pendulum_count = config_.simulation.pendulum_count;
     int const total_frames = config_.simulation.total_frames;
@@ -565,20 +562,20 @@ ProbeResults Simulation::runProbe(ProgressCallback progress) {
     // Allocate state buffer
     std::vector<PendulumState> states(pendulum_count);
 
-    // Reset variance tracker
-    variance_tracker_.reset();
+    // Reset metrics and event detector for fresh probe
+    metrics_collector_.reset();
+    event_detector_.reset();
 
-    // Detection thresholds from config
-    auto const& detect = config_.detection;
-    VarianceUtils::ThresholdResults detection;
-
-    // Time per frame for boom_seconds calculation
+    // Time per frame for event timing
     double const frame_duration = config_.simulation.duration_seconds / total_frames;
 
     // Main physics loop
     for (int frame = 0; frame < total_frames; ++frame) {
         // Step physics
         stepPendulums(pendulums, states, substeps, dt, thread_count);
+
+        // Begin frame for metrics collection
+        metrics_collector_.beginFrame(frame);
 
         // Extract angles for variance and spread tracking
         std::vector<double> angle1s, angle2s;
@@ -589,20 +586,14 @@ ProbeResults Simulation::runProbe(ProgressCallback progress) {
             angle2s.push_back(state.th2);
         }
 
-        // Update variance and spread tracking
-        variance_tracker_.updateWithSpread(angle2s, angle1s);
+        // Update metrics collector with angles
+        metrics_collector_.updateFromAngles(angle1s, angle2s);
 
-        // Update boom/white detection
-        VarianceUtils::updateDetection(detection, variance_tracker_, detect.boom_threshold,
-                                       detect.boom_confirmation, detect.white_threshold,
-                                       detect.white_confirmation);
+        // Update event detection
+        event_detector_.update(metrics_collector_, frame_duration);
 
-        // Store boom info as soon as detected
-        if (detection.boom_frame.has_value() && !results.boom_frame.has_value()) {
-            results.boom_frame = detection.boom_frame;
-            results.boom_variance = detection.boom_variance;
-            results.boom_seconds = *detection.boom_frame * frame_duration;
-        }
+        // End frame metrics collection
+        metrics_collector_.endFrame();
 
         results.frames_completed = frame + 1;
 
@@ -612,15 +603,43 @@ ProbeResults Simulation::runProbe(ProgressCallback progress) {
         }
     }
 
-    // Populate final results
-    results.success = true;
-    results.final_variance = variance_tracker_.getCurrentVariance();
+    // Run analyzers
+    boom_analyzer_.analyze(metrics_collector_, event_detector_);
+    causticness_analyzer_.analyze(metrics_collector_, event_detector_);
 
-    // Get final spread metrics
-    SpreadMetrics const& spread = variance_tracker_.getFinalSpread();
-    results.final_spread_ratio = spread.spread_ratio;
-    results.angle1_mean = spread.angle1_mean;
-    results.angle1_variance = spread.angle1_variance;
+    // Populate results from event detector
+    if (auto boom_event = event_detector_.getEvent(metrics::EventNames::Boom)) {
+        if (boom_event->detected()) {
+            results.boom_frame = boom_event->frame;
+            results.boom_seconds = boom_event->seconds;
+        }
+    }
+    if (auto chaos_event = event_detector_.getEvent(metrics::EventNames::Chaos)) {
+        if (chaos_event->detected()) {
+            results.chaos_frame = chaos_event->frame;
+            results.chaos_seconds = chaos_event->seconds;
+        }
+    }
+
+    // Final metrics
+    if (auto* variance_series = metrics_collector_.getMetric(metrics::MetricNames::Variance)) {
+        if (!variance_series->empty()) {
+            results.final_variance = variance_series->current();
+        }
+    }
+    results.final_spread_ratio = metrics_collector_.getSpreadRatio();
+
+    // Scores from analyzers
+    if (boom_analyzer_.hasResults()) {
+        results.scores.set(metrics::ScoreNames::Boom, boom_analyzer_.score());
+        results.boom_quality = boom_analyzer_.getQuality();
+    }
+    if (causticness_analyzer_.hasResults()) {
+        results.scores.set(metrics::ScoreNames::Causticness, causticness_analyzer_.score());
+    }
+
+    results.completed = true;
+    results.passed_filter = true;  // No filter applied in basic probe
 
     return results;
 }

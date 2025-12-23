@@ -3,6 +3,7 @@
 #include "color.h"
 #include "config.h"
 
+#include <algorithm>
 #include <cmath>
 
 // Visible light spectrum wavelength to RGB conversion

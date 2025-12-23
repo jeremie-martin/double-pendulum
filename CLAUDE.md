@@ -31,8 +31,7 @@ C++20 double pendulum physics simulation with GPU-accelerated rendering. Simulat
 | `include/pendulum.h` | RK4 physics integration (Lagrangian mechanics) |
 | `include/config.h` | TOML config parsing, all parameters |
 | `include/batch_generator.h` | Batch config, filter criteria, probe filter |
-| `include/variance_tracker.h` | Chaos detection via angle variance + spread metrics |
-| `include/probe_results.h` | Results struct for probe-only simulations |
+| `include/metrics/` | Unified metrics system (see Metrics System below) |
 
 ## Rendering Pipeline
 
@@ -45,6 +44,45 @@ C++20 double pendulum physics simulation with GPU-accelerated rendering. Simulat
    - Contrast adjustment
    - Gamma correction
 4. **Output**: Read back RGB8 → PNG or FFmpeg
+
+## Metrics System
+
+The unified metrics system in `include/metrics/` replaces the legacy variance/analysis trackers:
+
+| File | Purpose |
+|------|---------|
+| `metric_series.h` | Generic time series with derivative tracking, smoothing |
+| `metrics_collector.h` | Central hub for all metrics (physics + GPU) |
+| `event_detector.h` | Configurable event detection (boom, chaos) |
+| `analyzer.h` | Base class for pluggable quality analyzers |
+| `boom_analyzer.h` | Boom quality scoring (sharpness, type) |
+| `causticness_analyzer.h` | Causticness evolution scoring |
+| `probe_filter.h` | Pass/fail decision logic for filtering |
+| `probe_pipeline.h` | Multi-phase probe system |
+
+### Key Concepts
+
+- **Metric**: Raw time-series measurement (variance, brightness, edge_energy)
+- **Event**: Detected threshold crossing with confirmation (boom, chaos)
+- **Analyzer**: Component that computes quality scores from metrics
+- **Score**: Quality assessment for ranking/filtering (SimulationScore)
+
+### Usage Example
+
+```cpp
+metrics::MetricsCollector collector;
+collector.registerStandardMetrics();
+
+metrics::EventDetector detector;
+detector.addBoomCriteria(0.1, 10, metrics::MetricNames::Variance);
+
+// In simulation loop:
+collector.beginFrame(frame);
+collector.updateFromPendulums(pendulums);
+collector.setGPUMetrics(gpu_bundle);
+collector.endFrame();
+detector.update(collector, frame_duration);
+```
 
 ## Common Modifications
 
@@ -66,14 +104,20 @@ C++20 double pendulum physics simulation with GPU-accelerated rendering. Simulat
 
 ### Add new filter criterion for batch probing
 1. Add field to `FilterCriteria` struct in `include/batch_generator.h`
-2. Add check in `ProbeFilter::passes()` method
-3. Add reason string in `ProbeFilter::rejectReason()`
+2. Add criterion to `FilterCriteria::toProbeFilter()` method
+3. Add check in `metrics::ProbeFilter::passes()` method in `include/metrics/probe_filter.h`
 4. Add TOML parsing in `BatchConfig::load()` in `src/batch_generator.cpp`
 
-### Add new spread/analysis metric
-1. Add field to `SpreadMetrics` struct in `include/variance_tracker.h`
-2. Compute in `computeSpread()` function
-3. Access via `VarianceTracker::getFinalSpread()` or `getSpreadHistory()`
+### Add new analysis metric
+1. Add field to `SpreadMetrics` struct in `include/metrics/metrics_collector.h`
+2. Compute in `MetricsCollector::computeSpread()` method
+3. Register metric in `MetricsCollector::registerStandardMetrics()`
+4. Access via `MetricsCollector::getMetric()` or `getSpreadHistory()`
+
+### Add new analyzer for quality scoring
+1. Create new analyzer class inheriting from `metrics::Analyzer` in `include/metrics/`
+2. Implement `name()`, `analyze()`, `score()`, `toJSON()`, `reset()`, `hasResults()`
+3. Add to simulation or batch generator as needed
 
 ### Physics Quality System
 The simulation uses a `physics_quality` setting that maps to maximum timestep (`max_dt`):
@@ -112,8 +156,9 @@ The batch system supports a two-phase workflow for generating videos with qualit
 
 #### Spread Metrics
 
-The `VarianceTracker` computes spread metrics every frame:
+The `MetricsCollector` computes spread metrics every frame:
 - `spread_ratio`: Fraction of pendulums with angle1 in [-π/2, π/2] (above horizontal)
+- `circular_spread`: 1 - mean resultant length (0=concentrated, 1=uniform)
 - `angle1_mean`, `angle1_variance`: For debugging/analysis
 
 Spread is tracked and output in multiple places:

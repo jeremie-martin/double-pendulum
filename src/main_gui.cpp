@@ -1,11 +1,13 @@
-#include "analysis_tracker.h"
 #include "color_scheme.h"
 #include "config.h"
 #include "gl_renderer.h"
+#include "metrics/boom_analyzer.h"
+#include "metrics/causticness_analyzer.h"
+#include "metrics/event_detector.h"
+#include "metrics/metrics_collector.h"
 #include "pendulum.h"
 #include "preset_library.h"
 #include "simulation.h"
-#include "variance_tracker.h"
 
 #include <GL/glew.h>
 #include <SDL2/SDL.h>
@@ -113,8 +115,9 @@ struct AppState {
     std::vector<Pendulum> pendulums;
     std::vector<PendulumState> states;
     std::vector<Color> colors;
-    VarianceTracker variance_tracker;
-    AnalysisTracker analysis_tracker;
+    metrics::MetricsCollector metrics_collector;
+    metrics::EventDetector event_detector;
+    metrics::CausticnessAnalyzer causticness_analyzer;
     MetricFlags metric_flags;
 
     // Frame history for timeline scrubbing
@@ -132,8 +135,8 @@ struct AppState {
     // Detection results
     std::optional<int> boom_frame;
     double boom_variance = 0.0;
-    std::optional<int> white_frame;
-    double white_variance = 0.0;
+    std::optional<int> chaos_frame;  // Renamed from white_frame
+    double chaos_variance = 0.0;
 
     // Timing
     double fps = 0.0;
@@ -169,9 +172,23 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
         state.colors[i] = color_gen.getColorForIndex(i, n);
     }
 
-    state.variance_tracker.reset();
+    // Reset metrics system
+    state.metrics_collector.reset();
+    state.metrics_collector.registerStandardMetrics();
+    state.causticness_analyzer.reset();
+
+    // Setup event detector
+    state.event_detector.clearCriteria();
+    state.event_detector.addBoomCriteria(state.config.detection.boom_threshold,
+                                          state.config.detection.boom_confirmation,
+                                          metrics::MetricNames::Variance);
+    state.event_detector.addChaosCriteria(state.config.detection.white_threshold,
+                                           state.config.detection.white_confirmation,
+                                           metrics::MetricNames::Variance);
+    state.event_detector.reset();
+
     state.boom_frame.reset();
-    state.white_frame.reset();
+    state.chaos_frame.reset();
     state.current_frame = 0;
     state.display_frame = 0;
     state.scrubbing = false;
@@ -260,7 +277,10 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
         }
     }
 
-    // Track variance and spread
+    // Begin frame for metrics collection
+    state.metrics_collector.beginFrame(state.current_frame);
+
+    // Track variance and spread via new metrics system
     std::vector<double> angle1s, angle2s;
     angle1s.reserve(n);
     angle2s.reserve(n);
@@ -268,22 +288,43 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
         angle1s.push_back(s.th1);
         angle2s.push_back(s.th2);
     }
-    state.variance_tracker.updateWithSpread(angle2s, angle1s);
+    state.metrics_collector.updateFromAngles(angle1s, angle2s);
 
-    // Extended analysis tracking (includes energy and brightness)
-    state.analysis_tracker.update(state.pendulums, 0.0f, 0.0f);
+    // Compute total energy for extended analysis
+    double total_energy = 0.0;
+    for (auto const& p : state.pendulums) {
+        total_energy += p.totalEnergy();
+    }
+    state.metrics_collector.setMetric(metrics::MetricNames::TotalEnergy, total_energy);
 
-    // Update detection using shared utility
-    VarianceUtils::ThresholdResults detection{state.boom_frame, state.boom_variance,
-                                              state.white_frame, state.white_variance};
-    VarianceUtils::updateDetection(
-        detection, state.variance_tracker, state.config.detection.boom_threshold,
-        state.config.detection.boom_confirmation, state.config.detection.white_threshold,
-        state.config.detection.white_confirmation);
-    state.boom_frame = detection.boom_frame;
-    state.boom_variance = detection.boom_variance;
-    state.white_frame = detection.white_frame;
-    state.white_variance = detection.white_variance;
+    // Frame duration for event timing
+    double frame_duration = state.config.simulation.duration_seconds /
+                            state.config.simulation.total_frames;
+
+    // Update event detection
+    state.event_detector.update(state.metrics_collector, frame_duration);
+
+    // End frame metrics collection
+    state.metrics_collector.endFrame();
+
+    // Extract events for state
+    if (auto boom_event = state.event_detector.getEvent(metrics::EventNames::Boom)) {
+        if (boom_event->detected() && !state.boom_frame) {
+            state.boom_frame = boom_event->frame;
+            state.boom_variance = boom_event->value;
+        }
+    }
+    if (auto chaos_event = state.event_detector.getEvent(metrics::EventNames::Chaos)) {
+        if (chaos_event->detected() && !state.chaos_frame) {
+            state.chaos_frame = chaos_event->frame;
+            state.chaos_variance = chaos_event->value;
+        }
+    }
+
+    // Run causticness analysis periodically after boom (every 30 frames)
+    if (state.boom_frame && (state.current_frame % 30 == 0)) {
+        state.causticness_analyzer.analyze(state.metrics_collector, state.event_detector);
+    }
 
     auto sim_end = std::chrono::high_resolution_clock::now();
     state.sim_time_ms = std::chrono::duration<double, std::milli>(sim_end - start).count();
@@ -296,33 +337,41 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     // Render
     renderFrame(state, renderer);
 
-    // Update analysis tracker with GPU stats after rendering
-    AnalysisTracker::GPUMetrics metrics;
-    metrics.max_value = renderer.lastMax();
-    metrics.brightness = renderer.lastBrightness();
-    metrics.contrast_stddev = renderer.lastContrastStddev();
-    metrics.contrast_range = renderer.lastContrastRange();
-    metrics.edge_energy = renderer.lastEdgeEnergy();
-    metrics.color_variance = renderer.lastColorVariance();
-    metrics.coverage = renderer.lastCoverage();
-    metrics.peak_median_ratio = renderer.lastPeakMedianRatio();
-    state.analysis_tracker.updateGPUStats(metrics);
+    // Update metrics collector with GPU stats after rendering
+    metrics::GPUMetricsBundle gpu_metrics;
+    gpu_metrics.max_value = renderer.lastMax();
+    gpu_metrics.brightness = renderer.lastBrightness();
+    gpu_metrics.contrast_stddev = renderer.lastContrastStddev();
+    gpu_metrics.contrast_range = renderer.lastContrastRange();
+    gpu_metrics.edge_energy = renderer.lastEdgeEnergy();
+    gpu_metrics.color_variance = renderer.lastColorVariance();
+    gpu_metrics.coverage = renderer.lastCoverage();
+    gpu_metrics.peak_median_ratio = renderer.lastPeakMedianRatio();
+    state.metrics_collector.setGPUMetrics(gpu_metrics);
 
     state.current_frame++;
     state.display_frame = state.current_frame;
 }
 
 void drawMetricGraph(AppState& state, ImVec2 size) {
-    auto const& analysis = state.analysis_tracker.getHistory();
-    auto const& variance_history = state.variance_tracker.getHistory();
-    auto const& spread_history = state.variance_tracker.getSpreadHistory();
+    auto* variance_series = state.metrics_collector.getMetric(metrics::MetricNames::Variance);
+    auto* brightness_series = state.metrics_collector.getMetric(metrics::MetricNames::Brightness);
+    auto* energy_series = state.metrics_collector.getMetric(metrics::MetricNames::TotalEnergy);
+    auto* causticness_series = state.metrics_collector.getMetric(metrics::MetricNames::Causticness);
+    auto* contrast_stddev_series = state.metrics_collector.getMetric(metrics::MetricNames::ContrastStddev);
+    auto* contrast_range_series = state.metrics_collector.getMetric(metrics::MetricNames::ContrastRange);
+    auto* edge_energy_series = state.metrics_collector.getMetric(metrics::MetricNames::EdgeEnergy);
+    auto* color_variance_series = state.metrics_collector.getMetric(metrics::MetricNames::ColorVariance);
+    auto* coverage_series = state.metrics_collector.getMetric(metrics::MetricNames::Coverage);
+    auto const& spread_history = state.metrics_collector.getSpreadHistory();
 
-    if (variance_history.empty()) {
+    if (!variance_series || variance_series->empty()) {
         ImGui::Text("No data yet");
         return;
     }
 
-    size_t data_size = variance_history.size();
+    size_t data_size = variance_series->size();
+    auto const& variance_values = variance_series->values();
 
     // Create frame index array for x-axis
     std::vector<double> frames(data_size);
@@ -337,52 +386,49 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
         ImPlot::SetupAxes("Frame", nullptr, ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
 
         // Plot variance
-        if (state.metric_flags.variance && !variance_history.empty()) {
+        if (state.metric_flags.variance && !variance_values.empty()) {
             ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.8f, 0.4f, 1.0f));
-            ImPlot::PlotLine("Variance", frames.data(), variance_history.data(), data_size);
+            ImPlot::PlotLine("Variance", frames.data(), variance_values.data(), data_size);
 
             // Draw threshold lines
             double boom_line = state.config.detection.boom_threshold;
-            double white_line = state.config.detection.white_threshold;
+            double chaos_line = state.config.detection.white_threshold;
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 0.5f), 1.0f);
             ImPlot::PlotInfLines("##boom_thresh", &boom_line, 1, ImPlotInfLinesFlags_Horizontal);
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 0.5f), 1.0f);
-            ImPlot::PlotInfLines("##white_thresh", &white_line, 1, ImPlotInfLinesFlags_Horizontal);
+            ImPlot::PlotInfLines("##chaos_thresh", &chaos_line, 1, ImPlotInfLinesFlags_Horizontal);
         }
 
         // Plot brightness
-        if (state.metric_flags.brightness && !analysis.empty()) {
-            std::vector<double> data(analysis.size());
-            for (size_t i = 0; i < analysis.size(); ++i) {
-                data[i] = analysis[i].brightness;
-            }
+        if (state.metric_flags.brightness && brightness_series && !brightness_series->empty()) {
+            auto const& brightness_values = brightness_series->values();
             ImPlot::SetNextLineStyle(ImVec4(0.8f, 0.8f, 0.4f, 1.0f));
-            ImPlot::PlotLine("Brightness", frames.data(), data.data(), data.size());
+            ImPlot::PlotLine("Brightness", frames.data(), brightness_values.data(),
+                             brightness_values.size());
         }
 
         // Plot energy
-        if (state.metric_flags.energy && !analysis.empty()) {
-            std::vector<double> data(analysis.size());
-            for (size_t i = 0; i < analysis.size(); ++i) {
-                data[i] = analysis[i].total_energy;
-            }
+        if (state.metric_flags.energy && energy_series && !energy_series->empty()) {
+            auto const& energy_values = energy_series->values();
             ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.6f, 1.0f, 1.0f));
-            ImPlot::PlotLine("Energy", frames.data(), data.data(), data.size());
+            ImPlot::PlotLine("Energy", frames.data(), energy_values.data(),
+                             energy_values.size());
         }
 
         // Plot spread (circular spread - better metric)
         if (state.metric_flags.spread && !spread_history.empty()) {
             // Raw circular spread
-            std::vector<double> data(spread_history.size());
+            std::vector<double> spread_data(spread_history.size());
             for (size_t i = 0; i < spread_history.size(); ++i) {
-                data[i] = spread_history[i].circular_spread;
+                spread_data[i] = spread_history[i].circular_spread;
             }
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.4f, 0.4f)); // Faint raw
-            ImPlot::PlotLine("Spread (raw)", frames.data(), data.data(), data.size());
+            ImPlot::PlotLine("Spread (raw)", frames.data(), spread_data.data(), spread_data.size());
 
             // Smoothed circular spread (5-frame window)
-            auto smoothed = state.variance_tracker.getSmoothedCircularSpread(5);
-            if (!smoothed.empty()) {
+            auto const* circular_spread_series = state.metrics_collector.getMetric(metrics::MetricNames::CircularSpread);
+            if (circular_spread_series && !circular_spread_series->empty()) {
+                auto smoothed = circular_spread_series->smoothedHistory(5);
                 ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.4f, 1.0f), 2.0f); // Bold smoothed
                 ImPlot::PlotLine("Spread (smooth)", frames.data(), smoothed.data(),
                                  smoothed.size());
@@ -390,63 +436,51 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
         }
 
         // Plot contrast stddev
-        if (state.metric_flags.contrast_stddev && !analysis.empty()) {
-            std::vector<double> data(analysis.size());
-            for (size_t i = 0; i < analysis.size(); ++i) {
-                data[i] = analysis[i].contrast_stddev;
-            }
+        if (state.metric_flags.contrast_stddev && contrast_stddev_series && !contrast_stddev_series->empty()) {
+            auto const& contrast_stddev_values = contrast_stddev_series->values();
             ImPlot::SetNextLineStyle(ImVec4(0.8f, 0.4f, 0.8f, 1.0f));
-            ImPlot::PlotLine("Contrast StdDev", frames.data(), data.data(), data.size());
+            ImPlot::PlotLine("Contrast StdDev", frames.data(), contrast_stddev_values.data(),
+                             contrast_stddev_values.size());
         }
 
         // Plot contrast range
-        if (state.metric_flags.contrast_range && !analysis.empty()) {
-            std::vector<double> data(analysis.size());
-            for (size_t i = 0; i < analysis.size(); ++i) {
-                data[i] = analysis[i].contrast_range;
-            }
+        if (state.metric_flags.contrast_range && contrast_range_series && !contrast_range_series->empty()) {
+            auto const& contrast_range_values = contrast_range_series->values();
             ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.8f, 0.8f, 1.0f));
-            ImPlot::PlotLine("Contrast Range", frames.data(), data.data(), data.size());
+            ImPlot::PlotLine("Contrast Range", frames.data(), contrast_range_values.data(),
+                             contrast_range_values.size());
         }
 
         // Plot edge energy
-        if (state.metric_flags.edge_energy && !analysis.empty()) {
-            std::vector<double> data(analysis.size());
-            for (size_t i = 0; i < analysis.size(); ++i) {
-                data[i] = analysis[i].edge_energy;
-            }
+        if (state.metric_flags.edge_energy && edge_energy_series && !edge_energy_series->empty()) {
+            auto const& edge_energy_values = edge_energy_series->values();
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
-            ImPlot::PlotLine("Edge Energy", frames.data(), data.data(), data.size());
+            ImPlot::PlotLine("Edge Energy", frames.data(), edge_energy_values.data(),
+                             edge_energy_values.size());
         }
 
         // Plot color variance
-        if (state.metric_flags.color_variance && !analysis.empty()) {
-            std::vector<double> data(analysis.size());
-            for (size_t i = 0; i < analysis.size(); ++i) {
-                data[i] = analysis[i].color_variance;
-            }
+        if (state.metric_flags.color_variance && color_variance_series && !color_variance_series->empty()) {
+            auto const& color_variance_values = color_variance_series->values();
             ImPlot::SetNextLineStyle(ImVec4(0.4f, 1.0f, 0.4f, 1.0f));
-            ImPlot::PlotLine("Color Variance", frames.data(), data.data(), data.size());
+            ImPlot::PlotLine("Color Variance", frames.data(), color_variance_values.data(),
+                             color_variance_values.size());
         }
 
         // Plot coverage
-        if (state.metric_flags.coverage && !analysis.empty()) {
-            std::vector<double> data(analysis.size());
-            for (size_t i = 0; i < analysis.size(); ++i) {
-                data[i] = analysis[i].coverage;
-            }
+        if (state.metric_flags.coverage && coverage_series && !coverage_series->empty()) {
+            auto const& coverage_values = coverage_series->values();
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.4f, 1.0f));
-            ImPlot::PlotLine("Coverage", frames.data(), data.data(), data.size());
+            ImPlot::PlotLine("Coverage", frames.data(), coverage_values.data(),
+                             coverage_values.size());
         }
 
         // Plot causticness
-        if (state.metric_flags.causticness && !analysis.empty()) {
-            std::vector<double> data(analysis.size());
-            for (size_t i = 0; i < analysis.size(); ++i) {
-                data[i] = analysis[i].causticness();
-            }
+        if (state.metric_flags.causticness && causticness_series && !causticness_series->empty()) {
+            auto const& causticness_values = causticness_series->values();
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.2f, 1.0f, 1.0f));
-            ImPlot::PlotLine("Causticness", frames.data(), data.data(), data.size());
+            ImPlot::PlotLine("Causticness", frames.data(), causticness_values.data(),
+                             causticness_values.size());
         }
 
         // Draw boom marker
@@ -456,11 +490,11 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
             ImPlot::PlotInfLines("##boom", &boom_x, 1);
         }
 
-        // Draw white marker
-        if (state.white_frame.has_value()) {
-            double white_x = static_cast<double>(*state.white_frame);
+        // Draw chaos marker
+        if (state.chaos_frame.has_value()) {
+            double chaos_x = static_cast<double>(*state.chaos_frame);
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), 2.0f);
-            ImPlot::PlotInfLines("##white", &white_x, 1);
+            ImPlot::PlotInfLines("##chaos", &chaos_x, 1);
         }
 
         // Draggable current frame marker
@@ -1200,19 +1234,22 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
 
     // Analysis metrics
     ImGui::Separator();
-    ImGui::Text("Variance: %.4f", state.variance_tracker.getCurrentVariance());
+    auto* variance_s = state.metrics_collector.getMetric(metrics::MetricNames::Variance);
+    double current_variance = variance_s ? variance_s->current() : 0.0;
+    ImGui::Text("Variance: %.4f", current_variance);
     ImGui::Text("Spread:   %.1f%% above",
-                state.variance_tracker.getCurrentSpread().spread_ratio * 100);
-    auto const& current = state.analysis_tracker.getCurrent();
-    ImGui::Text("Energy:   %.2f", current.total_energy);
+                state.metrics_collector.getCurrentSpread().spread_ratio * 100);
+    auto* energy_s = state.metrics_collector.getMetric(metrics::MetricNames::TotalEnergy);
+    double current_energy = energy_s ? energy_s->current() : 0.0;
+    ImGui::Text("Energy:   %.2f", current_energy);
 
     if (state.boom_frame.has_value()) {
         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Boom: frame %d (var=%.4f)",
                            *state.boom_frame, state.boom_variance);
     }
-    if (state.white_frame.has_value()) {
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "White: frame %d (var=%.4f)",
-                           *state.white_frame, state.white_variance);
+    if (state.chaos_frame.has_value()) {
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "Chaos: frame %d (var=%.4f)",
+                           *state.chaos_frame, state.chaos_variance);
     }
 
     ImGui::Separator();
@@ -1307,10 +1344,10 @@ void drawTimeline(AppState& state, GLRenderer& renderer) {
         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Boom at frame %d (%.1f%%)",
                            *state.boom_frame, boom_pos * 100);
     }
-    if (state.white_frame.has_value() && *state.white_frame < history_size) {
-        float white_pos = static_cast<float>(*state.white_frame) / max_frame;
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "White at frame %d (%.1f%%)",
-                           *state.white_frame, white_pos * 100);
+    if (state.chaos_frame.has_value() && *state.chaos_frame < history_size) {
+        float chaos_pos = static_cast<float>(*state.chaos_frame) / max_frame;
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "Chaos at frame %d (%.1f%%)",
+                           *state.chaos_frame, chaos_pos * 100);
     }
 }
 
@@ -1547,23 +1584,18 @@ int main(int argc, char* argv[]) {
 
         // Display current and peak metrics
         ImGui::Separator();
-        auto const& current = state.analysis_tracker.getCurrent();
-        ImGui::Text("Current: Brightness %.3f  Contrast %.3f", current.brightness,
-                    current.contrast_stddev);
+        auto const* brightness_series = state.metrics_collector.getMetric(metrics::MetricNames::Brightness);
+        auto const* contrast_series = state.metrics_collector.getMetric(metrics::MetricNames::ContrastStddev);
+        double current_brightness = brightness_series && !brightness_series->empty() ? brightness_series->current() : 0.0;
+        double current_contrast = contrast_series && !contrast_series->empty() ? contrast_series->current() : 0.0;
+        ImGui::Text("Current: Brightness %.3f  Contrast %.3f", current_brightness, current_contrast);
 
-        // Calculate peak causticness from history
-        if (!state.analysis_tracker.getHistory().empty() && state.boom_frame) {
-            auto const& history = state.analysis_tracker.getHistory();
-            double peak_causticness = 0.0;
-            int best_frame = -1;
-            for (size_t i = *state.boom_frame; i < history.size(); ++i) {
-                double causticness = history[i].causticness();
-                if (causticness > peak_causticness) {
-                    peak_causticness = causticness;
-                    best_frame = static_cast<int>(i);
-                }
-            }
-            ImGui::Text("Peak Causticness: %.4f (frame %d)", peak_causticness, best_frame);
+        // Display peak causticness from analyzer
+        if (state.causticness_analyzer.hasResults()) {
+            auto results = state.causticness_analyzer.toJSON();
+            double peak_causticness = results.value("peak_causticness", 0.0);
+            int peak_frame = results.value("peak_frame", -1);
+            ImGui::Text("Peak Causticness: %.4f (frame %d)", peak_causticness, peak_frame);
         }
 
         ImGui::End();

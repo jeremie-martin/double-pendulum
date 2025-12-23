@@ -30,7 +30,7 @@ physics_quality = "high"
 [render]
 width = 1080
 height = 1080
-thread_count = 0               # 0 = auto-detect hardware concurrency
+thread_count = 16               # 0 = auto-detect hardware concurrency
 
 [post_process]
 # Standard post-processing pipeline: normalize -> exposure -> tone_map -> contrast -> gamma

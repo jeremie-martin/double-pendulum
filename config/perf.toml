@@ -9,10 +9,10 @@ initial_angle1_deg = 52
 initial_angle2_deg = 152.0
 
 [simulation]
-pendulum_count = 100000
+pendulum_count = 50000
 angle_variation_deg = 0.1
-duration_seconds = 20.0
-total_frames = 150
+duration_seconds = 15.0
+total_frames = 100
 physics_quality = "high"     # "low", "medium", "high", "ultra"
 # max_dt = 0.05            # Alternative: specify max timestep directly
 

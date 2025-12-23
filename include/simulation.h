@@ -1,13 +1,15 @@
 #pragma once
 
-#include "analysis_tracker.h"
 #include "color_scheme.h"
 #include "config.h"
 #include "gl_renderer.h"
 #include "headless_gl.h"
+#include "metrics/boom_analyzer.h"
+#include "metrics/causticness_analyzer.h"
+#include "metrics/event_detector.h"
+#include "metrics/metrics_collector.h"
+#include "metrics/probe_pipeline.h"
 #include "pendulum.h"
-#include "probe_results.h"
-#include "variance_tracker.h"
 #include "video_writer.h"
 
 #include <functional>
@@ -25,28 +27,20 @@ struct TimingStats {
     double io_seconds = 0.0;
 };
 
-// Scoring results for quality ranking
-struct SimulationScore {
-    double peak_causticness = 0.0;    // Maximum causticness value observed
-    double average_causticness = 0.0; // Average over sample points
-    int best_frame = -1;              // Frame with peak causticness
-    std::vector<double> samples;      // Causticness at 0.5s intervals after boom
-};
-
 // Simulation results
 struct SimulationResults {
     int frames_completed = 0;
     std::optional<int> boom_frame;
     double boom_variance = 0.0;
-    std::optional<int> white_frame;
-    double white_variance = 0.0;
+    std::optional<int> chaos_frame;  // Renamed from white_frame
+    double chaos_variance = 0.0;     // Renamed from white_variance
     double final_spread_ratio = 0.0; // Fraction of pendulums above horizontal at end
     TimingStats timing;
     std::vector<double> variance_history;
-    std::vector<SpreadMetrics> spread_history;
+    std::vector<metrics::SpreadMetrics> spread_history;
     std::string output_directory; // Where video/frames were saved
     std::string video_path;       // Full path to video (if format is video)
-    SimulationScore score;        // Quality score for ranking
+    metrics::SimulationScore score;  // Quality scores from analyzers
 };
 
 class Simulation {
@@ -62,15 +56,17 @@ public:
     // Run probe simulation (physics only, no rendering)
     // Used for quick parameter evaluation before committing to full render
     // Much faster than run() since it skips GL initialization and all I/O
-    ProbeResults runProbe(ProgressCallback progress = nullptr);
+    metrics::ProbePhaseResults runProbe(ProgressCallback progress = nullptr);
 
 private:
     Config config_;
     HeadlessGL gl_;
     GLRenderer renderer_;
     ColorSchemeGenerator color_gen_;
-    VarianceTracker variance_tracker_;
-    AnalysisTracker analysis_tracker_;
+    metrics::MetricsCollector metrics_collector_;
+    metrics::EventDetector event_detector_;
+    metrics::BoomAnalyzer boom_analyzer_;
+    metrics::CausticnessAnalyzer causticness_analyzer_;
     std::string run_directory_;
 
     void initializePendulums(std::vector<Pendulum>& pendulums);
@@ -84,7 +80,5 @@ private:
     std::string createRunDirectory();
     void saveConfigCopy(std::string const& config_path);
     void saveMetadata(SimulationResults const& results);
-    void saveVarianceCSV(std::vector<double> const& variance, std::vector<float> const& max_values,
-                         std::vector<SpreadMetrics> const& spread);
-    void saveAnalysisCSV(std::vector<FrameAnalysis> const& analysis);
+    void saveMetricsCSV();
 };

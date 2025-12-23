@@ -22,6 +22,18 @@ find_package(PNG REQUIRED)
 # EGL is required for headless GPU rendering
 find_library(EGL_LIBRARY EGL REQUIRED)
 
+# Metrics library sources (new unified metrics system)
+set(METRICS_SOURCES
+    src/metrics/metric_series.cpp
+    src/metrics/metrics_collector.cpp
+    src/metrics/event_detector.cpp
+    src/metrics/boom_analyzer.cpp
+    src/metrics/causticness_analyzer.cpp
+    src/metrics/metrics_view.cpp
+    src/metrics/probe_filter.cpp
+    src/metrics/probe_pipeline.cpp
+)
+
 # Main executable (CLI with GPU rendering)
 add_executable(pendulum
     src/main.cpp
@@ -33,6 +45,7 @@ add_executable(pendulum
     src/preset_library.cpp
     src/headless_gl.cpp
     src/gl_renderer.cpp
+    ${METRICS_SOURCES}
 )
 
 target_include_directories(pendulum PRIVATE
@@ -67,6 +80,7 @@ if(BUILD_GUI)
         src/preset_library.cpp
         src/gl_renderer.cpp
         src/headless_gl.cpp
+        ${METRICS_SOURCES}
         external/imgui/imgui.cpp
         external/imgui/imgui_draw.cpp
         external/imgui/imgui_tables.cpp

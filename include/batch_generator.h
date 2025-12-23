@@ -1,9 +1,10 @@
 #pragma once
 
 #include "config.h"
+#include "metrics/probe_filter.h"
+#include "metrics/probe_pipeline.h"
 #include "music_manager.h"
 #include "preset_library.h"
-#include "probe_results.h"
 
 #include <filesystem>
 #include <optional>
@@ -11,8 +12,8 @@
 #include <string>
 #include <vector>
 
-// Filter criteria for probe validation
-// Used to reject simulations with unsuitable parameters before full rendering
+// Filter criteria for probe validation (config-level struct)
+// Maps to metrics::ProbeFilter for evaluation
 struct FilterCriteria {
     double min_boom_seconds = 0.0; // Minimum boom time (0 = no minimum)
     double max_boom_seconds = 0.0; // Maximum boom time (0 = no maximum)
@@ -25,71 +26,23 @@ struct FilterCriteria {
         return min_boom_seconds > 0.0 || max_boom_seconds > 0.0 || min_spread_ratio > 0.0 ||
                require_boom;
     }
-};
 
-// Evaluates probe results against filter criteria
-class ProbeFilter {
-public:
-    explicit ProbeFilter(FilterCriteria const& criteria) : criteria_(criteria) {}
-
-    // Check if probe results pass all filter criteria
-    bool passes(ProbeResults const& results) const {
-        // Check boom requirement
-        if (criteria_.require_boom && !results.boom_frame.has_value()) {
-            return false;
+    // Convert to metrics::ProbeFilter
+    metrics::ProbeFilter toProbeFilter() const {
+        metrics::ProbeFilter filter;
+        if (require_boom) {
+            filter.addEventRequired(metrics::EventNames::Boom);
         }
-
-        // Check boom time range
-        if (results.boom_frame.has_value()) {
-            if (criteria_.min_boom_seconds > 0.0 &&
-                results.boom_seconds < criteria_.min_boom_seconds) {
-                return false;
-            }
-            if (criteria_.max_boom_seconds > 0.0 &&
-                results.boom_seconds > criteria_.max_boom_seconds) {
-                return false;
-            }
+        if (min_boom_seconds > 0.0 || max_boom_seconds > 0.0) {
+            filter.addEventTiming(metrics::EventNames::Boom,
+                                  min_boom_seconds > 0.0 ? min_boom_seconds : 0.0,
+                                  max_boom_seconds > 0.0 ? max_boom_seconds : 1e9);
         }
-
-        // Check spread ratio
-        if (criteria_.min_spread_ratio > 0.0 &&
-            results.final_spread_ratio < criteria_.min_spread_ratio) {
-            return false;
+        if (min_spread_ratio > 0.0) {
+            filter.addMetricThreshold(metrics::MetricNames::SpreadRatio, min_spread_ratio);
         }
-
-        return true;
+        return filter;
     }
-
-    // Get human-readable rejection reason
-    std::string rejectReason(ProbeResults const& results) const {
-        if (criteria_.require_boom && !results.boom_frame.has_value()) {
-            return "no boom detected";
-        }
-
-        if (results.boom_frame.has_value()) {
-            if (criteria_.min_boom_seconds > 0.0 &&
-                results.boom_seconds < criteria_.min_boom_seconds) {
-                return "boom too early (" + std::to_string(results.boom_seconds) + "s < " +
-                       std::to_string(criteria_.min_boom_seconds) + "s)";
-            }
-            if (criteria_.max_boom_seconds > 0.0 &&
-                results.boom_seconds > criteria_.max_boom_seconds) {
-                return "boom too late (" + std::to_string(results.boom_seconds) + "s > " +
-                       std::to_string(criteria_.max_boom_seconds) + "s)";
-            }
-        }
-
-        if (criteria_.min_spread_ratio > 0.0 &&
-            results.final_spread_ratio < criteria_.min_spread_ratio) {
-            return "spread too low (" + std::to_string(results.final_spread_ratio) + " < " +
-                   std::to_string(criteria_.min_spread_ratio) + ")";
-        }
-
-        return "unknown";
-    }
-
-private:
-    FilterCriteria criteria_;
 };
 
 // Batch configuration loaded from TOML
@@ -180,7 +133,7 @@ private:
     std::mt19937 rng_;
     std::filesystem::path batch_dir_;
     BatchProgress progress_;
-    ProbeFilter filter_;
+    metrics::ProbeFilter filter_;
 
     // Setup batch directory
     void setupBatchDirectory();
@@ -193,7 +146,7 @@ private:
 
     // Run probe simulation and check if it passes filter criteria
     // Returns pair of (passes, probe_results)
-    std::pair<bool, ProbeResults> runProbe(Config const& config);
+    std::pair<bool, metrics::ProbePhaseResults> runProbe(Config const& config);
 
     // Pick a random music track (legacy, doesn't check boom timing)
     std::optional<MusicTrack> pickMusicTrack();

@@ -26,8 +26,8 @@ initial_velocity2 = [-0.5, 0.5]
 
 [filter]
 min_boom_seconds = 8.0    # Boom must happen after this time
-max_boom_seconds = 15.0   # Boom must happen before this time
-min_spread_ratio = 0.4    # At least 40% of pendulums above horizontal
+max_boom_seconds = 14.0   # Boom must happen before this time
+min_spread_ratio = 0.45    # At least 45% of pendulums above horizontal
 require_boom = true       # Reject simulations with no detectable boom
 require_valid_music = true # Fail if no music track has drop > boom time
 

@@ -214,7 +214,7 @@ BatchProgress BatchProgress::load(std::filesystem::path const& path) {
 }
 
 BatchGenerator::BatchGenerator(BatchConfig const& config)
-    : config_(config), rng_(std::random_device{}()), filter_(config.filter) {}
+    : config_(config), rng_(std::random_device{}()), filter_(config.filter.toProbeFilter()) {}
 
 void BatchGenerator::setupBatchDirectory() {
     // Create timestamp-based batch directory
@@ -329,7 +329,7 @@ bool BatchGenerator::generateOne(int index) {
     try {
         Config config;
         int probe_retries = 0;
-        ProbeResults probe_result;
+        metrics::ProbePhaseResults probe_result;
 
         // Phase 1: Probe validation (if enabled)
         if (config_.probe_enabled) {
@@ -359,7 +359,7 @@ bool BatchGenerator::generateOne(int index) {
                     found_valid = true;
                     break;
                 } else {
-                    std::cout << "REJECT: " << filter_.rejectReason(result) << "\n";
+                    std::cout << "REJECT: " << result.rejection_reason << "\n";
                 }
             }
 
@@ -524,7 +524,7 @@ Config BatchGenerator::generateRandomConfig() {
     return config;
 }
 
-std::pair<bool, ProbeResults> BatchGenerator::runProbe(Config const& config) {
+std::pair<bool, metrics::ProbePhaseResults> BatchGenerator::runProbe(Config const& config) {
     // Create a modified config for probing (fewer pendulums, faster settings)
     Config probe_config = config;
     probe_config.simulation.pendulum_count = config_.probe_pendulum_count;
@@ -542,12 +542,38 @@ std::pair<bool, ProbeResults> BatchGenerator::runProbe(Config const& config) {
 
     // Run probe simulation (physics only, no rendering)
     Simulation sim(probe_config);
-    ProbeResults results = sim.runProbe();
+    metrics::ProbePhaseResults results = sim.runProbe();
 
-    // Check if results pass filter criteria
-    bool passes = filter_.passes(results);
+    // Create a dummy collector and event detector to evaluate filter
+    // (filter evaluation needs these even though results already have key data)
+    metrics::MetricsCollector collector;
+    collector.registerStandardMetrics();
 
-    return {passes, results};
+    // Push final spread ratio as a single-point metric for filter evaluation
+    if (results.final_spread_ratio > 0.0) {
+        collector.beginFrame(0);
+        collector.setMetric(metrics::MetricNames::SpreadRatio, results.final_spread_ratio);
+        collector.endFrame();
+    }
+
+    metrics::EventDetector events;
+    // Add detected events to the detector for filter evaluation
+    if (results.boom_frame) {
+        events.addBoomCriteria(0.0, 0, metrics::MetricNames::Variance);
+        // Force the event to be detected with the right timing
+        metrics::DetectedEvent boom_event;
+        boom_event.frame = *results.boom_frame;
+        boom_event.seconds = results.boom_seconds;
+        boom_event.value = results.final_variance;
+        events.forceEvent(metrics::EventNames::Boom, boom_event);
+    }
+
+    // Evaluate filter
+    auto filter_result = filter_.evaluate(collector, events, results.scores);
+    results.passed_filter = filter_result.passed;
+    results.rejection_reason = filter_result.reason;
+
+    return {filter_result.passed, results};
 }
 
 std::optional<MusicTrack> BatchGenerator::pickMusicTrack() {

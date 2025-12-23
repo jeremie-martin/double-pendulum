@@ -11,6 +11,114 @@
       "title": "Bones - Imagine Dragons",
       "filepath": "tracks/bones.aac",
       "drop_time_ms": 29625
+    },
+    {
+      "id": "los-voltaje",
+      "title": "LOS VOLTAJE",
+      "filepath": "tracks/20251222-124532-01-LOS VOLTAJE.webm",
+      "drop_time_ms": 57965
+    },
+    {
+      "id": "luna-bala-slowed",
+      "title": "LUNA BALA (Slowed)",
+      "filepath": "tracks/20251222-124532-02-LUNA BALA (Slowed).webm",
+      "drop_time_ms": 60930
+    },
+    {
+      "id": "montagem-tomada-slowed",
+      "title": "MONTAGEM TOMADA (Slowed)",
+      "filepath": "tracks/20251222-124532-03-MONTAGEM TOMADA (Slowed).webm",
+      "drop_time_ms": 61502
+    },
+    {
+      "id": "amor-na-praia",
+      "title": "Amor Na Praia",
+      "filepath": "tracks/20251222-124532-04-Amor Na Praia.webm",
+      "drop_time_ms": 68675
+    },
+    {
+      "id": "los-voltaje-slowed",
+      "title": "LOS VOLTAJE (Slowed)",
+      "filepath": "tracks/20251222-124532-05-LOS VOLTAJE (Slowed).webm",
+      "drop_time_ms": 61284
+    },
+    {
+      "id": "funk-estranho-super-slowed",
+      "title": "FUNK ESTRANHO (SUPER SLOWED)",
+      "filepath": "tracks/20251222-124532-06-FUNK ESTRANHO (SUPER SLOWED).webm",
+      "drop_time_ms": 9266
+    },
+    {
+      "id": "passo-bem-solto-slowed",
+      "title": "PASSO BEM SOLTO (Slowed)",
+      "filepath": "tracks/20251222-124532-07-PASSO BEM SOLTO (Slowed).webm",
+      "drop_time_ms": 16580
+    },
+    {
+      "id": "mxzi-montagem-tomada-extended",
+      "title": "MXZI - MONTAGEM TOMADA [EXTENDED]",
+      "filepath": "tracks/20251222-124532-08-MXZI - MONTAGEM TOMADA [EXTENDED].webm",
+      "drop_time_ms": 132970
+    },
+    {
+      "id": "luna-bala",
+      "title": "LUNA BALA",
+      "filepath": "tracks/20251222-124532-09-LUNA BALA.webm",
+      "drop_time_ms": 51569
+    },
+    {
+      "id": "montagem-tomada-super-slowed",
+      "title": "MONTAGEM TOMADA (Super Slowed)",
+      "filepath": "tracks/20251222-124532-10-MONTAGEM TOMADA (Super Slowed).webm",
+      "drop_time_ms": 69009
+    },
+    {
+      "id": "passo-bem-solto",
+      "title": "PASSO BEM SOLTO",
+      "filepath": "tracks/20251222-124532-11-PASSO BEM SOLTO.webm",
+      "drop_time_ms": 14775
+    },
+    {
+      "id": "los-voltaje-ultra-slowed",
+      "title": "LOS VOLTAJE (Ultra Slowed)",
+      "filepath": "tracks/20251222-124532-12-LOS VOLTAJE (Ultra Slowed).webm",
+      "drop_time_ms": 10646
+    },
+    {
+      "id": "passo-bem-solto-super-slowed",
+      "title": "PASSO BEM SOLTO (Super Slowed)",
+      "filepath": "tracks/20251222-124532-13-PASSO BEM SOLTO (Super Slowed).webm",
+      "drop_time_ms": 17572
+    },
+    {
+      "id": "funk-do-bounce-super-slowed",
+      "title": "FUNK DO BOUNCE (Super Slowed)",
+      "filepath": "tracks/20251222-124532-14-FUNK DO BOUNCE (Super Slowed).webm",
+      "drop_time_ms": 21938
+    },
+    {
+      "id": "derniere-danse-x-montagem-coral-full-mashup-original-mix",
+      "title": "Derniere danse X Montagem Coral full mashup (Original mix)",
+      "filepath": "tracks/20251222-124532-15-Derniere danse X Montagem Coral full mashup (Original mix).webm",
+      "drop_time_ms": 90307
+    },
+    {
+      "id": "andromeda-montagem-coma",
+      "title": "ANDROMEDA - MONTAGEM COMA",
+      "filepath": "tracks/20251222-124532-16-ANDROMEDA - MONTAGEM COMA.webm",
+      "drop_time_ms": 9086
+    },
+    {
+      "id": "no-batidao",
+      "title": "NO BATID\u00c3O",
+      "filepath": "tracks/20251222-124532-17-NO BATID\u00c3O.webm",
+      "drop_time_ms": 15669
+    },
+    {
+      "id": "no-batidao-slowed",
+      "title": "NO BATID\u00c3O (Slowed)",
+      "filepath": "tracks/20251222-124532-18-NO BATID\u00c3O (Slowed).webm",
+      "drop_time_ms": 18919
     }
   ]
 }
