@@ -175,6 +175,7 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
     // Reset metrics system
     state.metrics_collector.reset();
     state.metrics_collector.registerStandardMetrics();
+    state.metrics_collector.registerGPUMetrics();
     state.causticness_analyzer.reset();
 
     // Setup event detector

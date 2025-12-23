@@ -45,8 +45,9 @@ void savePNGFile(char const* path, uint8_t const* data, int width, int height) {
 } // namespace
 
 Simulation::Simulation(Config const& config) : config_(config), color_gen_(config.color) {
-    // Register standard metrics
+    // Register all metrics (physics + GPU)
     metrics_collector_.registerStandardMetrics();
+    metrics_collector_.registerGPUMetrics();
 
     // Setup event detection from config
     auto const& detect = config_.detection;
@@ -332,42 +333,14 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         }
         metrics_collector_.updateFromAngles(angle1s, angle2s);
 
-        // Extended analysis: compute total energy if enabled
-        if (config_.analysis.enabled) {
-            double total_energy = 0.0;
-            for (auto const& p : pendulums) {
-                total_energy += p.totalEnergy();
-            }
-            metrics_collector_.setMetric(metrics::MetricNames::TotalEnergy, total_energy);
+        // Compute total energy (physics metric)
+        double total_energy = 0.0;
+        for (auto const& p : pendulums) {
+            total_energy += p.totalEnergy();
         }
+        metrics_collector_.setMetric(metrics::MetricNames::TotalEnergy, total_energy);
 
-        // Update event detection
-        bool had_chaos = event_detector_.isDetected(metrics::EventNames::Chaos);
-        event_detector_.update(metrics_collector_, frame_duration);
-
-        // End frame metrics collection
-        metrics_collector_.endFrame();
-
-        // Extract events for results
-        if (auto boom_event = event_detector_.getEvent(metrics::EventNames::Boom)) {
-            if (boom_event->detected() && !results.boom_frame) {
-                results.boom_frame = boom_event->frame;
-                results.boom_variance = boom_event->value;
-            }
-        }
-        if (auto chaos_event = event_detector_.getEvent(metrics::EventNames::Chaos)) {
-            if (chaos_event->detected() && !results.chaos_frame) {
-                results.chaos_frame = chaos_event->frame;
-                results.chaos_variance = chaos_event->value;
-            }
-        }
-
-        // Early stop if chaos was newly detected and configured
-        if (!had_chaos && results.chaos_frame.has_value() && config_.detection.early_stop_after_white) {
-            results.frames_completed = frame + 1;
-            early_stopped = true;
-            break;
-        }
+        // NOTE: endFrame() and event detection happen AFTER rendering to include GPU metrics
 
         // Render timing (GPU)
         auto render_start = Clock::now();
@@ -397,8 +370,8 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
                              config_.post_process.normalization, pendulum_count);
         max_values.push_back(renderer_.lastMax());
 
-        // Update metrics with GPU stats (brightness, contrast, causticness metrics)
-        if (config_.analysis.enabled) {
+        // Update metrics with GPU stats (always collected - metrics are central)
+        {
             metrics::GPUMetricsBundle gpu_metrics;
             gpu_metrics.max_value = renderer_.lastMax();
             gpu_metrics.brightness = renderer_.lastBrightness();
@@ -409,6 +382,32 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
             gpu_metrics.coverage = renderer_.lastCoverage();
             gpu_metrics.peak_median_ratio = renderer_.lastPeakMedianRatio();
             metrics_collector_.setGPUMetrics(gpu_metrics);
+        }
+
+        // End frame metrics collection (after ALL metrics including GPU are set)
+        metrics_collector_.endFrame();
+
+        // Update event detection (needs complete frame data)
+        bool had_chaos = event_detector_.isDetected(metrics::EventNames::Chaos);
+        event_detector_.update(metrics_collector_, frame_duration);
+
+        // Early stop if chaos was newly detected and configured
+        if (!had_chaos && event_detector_.isDetected(metrics::EventNames::Chaos) &&
+            config_.detection.early_stop_after_white) {
+            results.chaos_frame = event_detector_.getEvent(metrics::EventNames::Chaos)->frame;
+            results.chaos_variance = event_detector_.getEvent(metrics::EventNames::Chaos)->value;
+            results.frames_completed = frame + 1;
+            early_stopped = true;
+            // Still need to write this frame
+            render_time += Clock::now() - render_start;
+            auto io_start = Clock::now();
+            if (config_.output.format == OutputFormat::Video) {
+                video_writer->writeFrame(rgb_buffer.data());
+            } else {
+                savePNG(rgb_buffer, width, height, frame);
+            }
+            io_time += Clock::now() - io_start;
+            break;
         }
 
         render_time += Clock::now() - render_start;
@@ -446,6 +445,20 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     results.timing.physics_seconds = physics_time.count();
     results.timing.render_seconds = render_time.count();
     results.timing.io_seconds = io_time.count();
+
+    // Extract detected events
+    if (auto boom_event = event_detector_.getEvent(metrics::EventNames::Boom)) {
+        if (boom_event->detected()) {
+            results.boom_frame = boom_event->frame;
+            results.boom_variance = boom_event->value;
+        }
+    }
+    if (auto chaos_event = event_detector_.getEvent(metrics::EventNames::Chaos)) {
+        if (chaos_event->detected()) {
+            results.chaos_frame = chaos_event->frame;
+            results.chaos_variance = chaos_event->value;
+        }
+    }
 
     // Extract metrics history
     if (auto* variance_series = metrics_collector_.getMetric(metrics::MetricNames::Variance)) {
