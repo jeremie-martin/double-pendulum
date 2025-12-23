@@ -364,7 +364,6 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
     auto* edge_energy_series = state.metrics_collector.getMetric(metrics::MetricNames::EdgeEnergy);
     auto* color_variance_series = state.metrics_collector.getMetric(metrics::MetricNames::ColorVariance);
     auto* coverage_series = state.metrics_collector.getMetric(metrics::MetricNames::Coverage);
-    auto const& spread_history = state.metrics_collector.getSpreadHistory();
 
     if (!variance_series || variance_series->empty()) {
         ImGui::Text("No data yet");
@@ -417,23 +416,17 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
         }
 
         // Plot spread (circular spread - better metric)
-        if (state.metric_flags.spread && !spread_history.empty()) {
-            // Raw circular spread
-            std::vector<double> spread_data(spread_history.size());
-            for (size_t i = 0; i < spread_history.size(); ++i) {
-                spread_data[i] = spread_history[i].circular_spread;
-            }
+        auto const* circular_spread_series = state.metrics_collector.getMetric(metrics::MetricNames::CircularSpread);
+        if (state.metric_flags.spread && circular_spread_series && !circular_spread_series->empty()) {
+            // Raw circular spread (from metric series - single source of truth)
+            auto const& spread_values = circular_spread_series->values();
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.4f, 0.4f)); // Faint raw
-            ImPlot::PlotLine("Spread (raw)", frames.data(), spread_data.data(), spread_data.size());
+            ImPlot::PlotLine("Spread (raw)", frames.data(), spread_values.data(), spread_values.size());
 
             // Smoothed circular spread (5-frame window)
-            auto const* circular_spread_series = state.metrics_collector.getMetric(metrics::MetricNames::CircularSpread);
-            if (circular_spread_series && !circular_spread_series->empty()) {
-                auto smoothed = circular_spread_series->smoothedHistory(5);
-                ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.4f, 1.0f), 2.0f); // Bold smoothed
-                ImPlot::PlotLine("Spread (smooth)", frames.data(), smoothed.data(),
-                                 smoothed.size());
-            }
+            auto smoothed = circular_spread_series->smoothedHistory(5);
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.4f, 1.0f), 2.0f); // Bold smoothed
+            ImPlot::PlotLine("Spread (smooth)", frames.data(), smoothed.data(), smoothed.size());
         }
 
         // Plot contrast stddev
