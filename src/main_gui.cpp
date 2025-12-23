@@ -395,8 +395,8 @@ double getMetricAtFrame(metrics::MetricsCollector const& collector,
     return values[idx];
 }
 
-// Draw a simplified variance-only graph for the compact Analysis panel
-void drawSimpleVarianceGraph(AppState& state, ImVec2 size) {
+// Draw analysis graph with selected metrics (no derivatives, simpler than full Metrics panel)
+void drawAnalysisGraph(AppState& state, ImVec2 size) {
     auto* variance_series = state.metrics_collector.getMetric(metrics::MetricNames::Variance);
     if (!variance_series || variance_series->empty()) {
         ImGui::Text("No data yet");
@@ -404,7 +404,6 @@ void drawSimpleVarianceGraph(AppState& state, ImVec2 size) {
     }
 
     size_t data_size = variance_series->size();
-    auto const& variance_values = variance_series->values();
 
     std::vector<double> frames(data_size);
     for (size_t i = 0; i < data_size; ++i) {
@@ -413,36 +412,96 @@ void drawSimpleVarianceGraph(AppState& state, ImVec2 size) {
 
     double current_frame_d = static_cast<double>(state.display_frame);
 
-    if (ImPlot::BeginPlot("##SimpleVar", size, ImPlotFlags_NoTitle)) {
-        ImPlot::SetupAxes("Frame", "Variance", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+    // Metric colors
+    const ImVec4 color_variance(0.4f, 0.8f, 0.4f, 1.0f);
+    const ImVec4 color_brightness(0.9f, 0.7f, 0.2f, 1.0f);
+    const ImVec4 color_uniformity(0.2f, 0.6f, 0.9f, 1.0f);
+    const ImVec4 color_causticness(0.9f, 0.3f, 0.5f, 1.0f);
+    const ImVec4 color_energy(0.6f, 0.4f, 0.8f, 1.0f);
 
-        // Plot variance
-        ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), 2.0f);
-        ImPlot::PlotLine("Variance", frames.data(), variance_values.data(), data_size);
+    if (ImPlot::BeginPlot("##Analysis", size, ImPlotFlags_NoTitle)) {
+        // Use multi-axis: Y1 for large scale (variance, energy), Y2 for normalized (0-1)
+        ImPlot::SetupAxes("Frame", "Value", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+        ImPlot::SetupAxis(ImAxis_Y2, "[0-1]", ImPlotAxisFlags_AuxDefault | ImPlotAxisFlags_AutoFit);
 
-        // Threshold lines
-        double boom_line = state.config.detection.boom_threshold;
-        double chaos_line = state.config.detection.chaos_threshold;
-        ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 0.5f), 1.0f);
-        ImPlot::PlotInfLines("##boom", &boom_line, 1, ImPlotInfLinesFlags_Horizontal);
-        ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 0.5f), 1.0f);
-        ImPlot::PlotInfLines("##chaos", &chaos_line, 1, ImPlotInfLinesFlags_Horizontal);
+        // Plot variance (Y1 - large scale)
+        if (state.metric_flags.variance) {
+            auto const& values = variance_series->values();
+            ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
+            ImPlot::SetNextLineStyle(color_variance, 2.0f);
+            ImPlot::PlotLine("Variance", frames.data(), values.data(), data_size);
 
-        // Boom marker
+            // Threshold lines only when variance is shown
+            double boom_line = state.config.detection.boom_threshold;
+            double chaos_line = state.config.detection.chaos_threshold;
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 0.5f), 1.0f);
+            ImPlot::PlotInfLines("##boom", &boom_line, 1, ImPlotInfLinesFlags_Horizontal);
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 0.5f), 1.0f);
+            ImPlot::PlotInfLines("##chaos", &chaos_line, 1, ImPlotInfLinesFlags_Horizontal);
+        }
+
+        // Plot energy (Y1 - large scale)
+        if (state.metric_flags.energy) {
+            auto* series = state.metrics_collector.getMetric(metrics::MetricNames::TotalEnergy);
+            if (series && !series->empty()) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
+                ImPlot::SetNextLineStyle(color_energy, 2.0f);
+                ImPlot::PlotLine("Energy", frames.data(), series->values().data(),
+                                std::min(data_size, series->size()));
+            }
+        }
+
+        // Plot brightness (Y2 - normalized)
+        if (state.metric_flags.brightness) {
+            auto* series = state.metrics_collector.getMetric(metrics::MetricNames::Brightness);
+            if (series && !series->empty()) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+                ImPlot::SetNextLineStyle(color_brightness, 2.0f);
+                ImPlot::PlotLine("Brightness", frames.data(), series->values().data(),
+                                std::min(data_size, series->size()));
+            }
+        }
+
+        // Plot uniformity (Y2 - normalized)
+        if (state.metric_flags.uniformity) {
+            auto* series = state.metrics_collector.getMetric(metrics::MetricNames::CircularSpread);
+            if (series && !series->empty()) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+                ImPlot::SetNextLineStyle(color_uniformity, 2.0f);
+                ImPlot::PlotLine("Uniformity", frames.data(), series->values().data(),
+                                std::min(data_size, series->size()));
+            }
+        }
+
+        // Plot causticness (Y2 - normalized, typically 0-100 but we'll use Y2)
+        if (state.metric_flags.causticness) {
+            auto* series = state.metrics_collector.getMetric(metrics::MetricNames::Causticness);
+            if (series && !series->empty()) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);  // Causticness can be large
+                ImPlot::SetNextLineStyle(color_causticness, 2.0f);
+                ImPlot::PlotLine("Causticness", frames.data(), series->values().data(),
+                                std::min(data_size, series->size()));
+            }
+        }
+
+        // Boom marker (vertical line)
         if (state.boom_frame.has_value()) {
             double boom_x = static_cast<double>(*state.boom_frame);
+            ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), 2.0f);
             ImPlot::PlotInfLines("##boom_marker", &boom_x, 1);
         }
 
-        // Chaos marker
+        // Chaos marker (vertical line)
         if (state.chaos_frame.has_value()) {
             double chaos_x = static_cast<double>(*state.chaos_frame);
+            ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), 2.0f);
             ImPlot::PlotInfLines("##chaos_marker", &chaos_x, 1);
         }
 
         // Draggable current frame marker
+        ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
         ImPlot::SetNextLineStyle(ImVec4(0.0f, 0.8f, 1.0f, 1.0f), 2.0f);
         if (ImPlot::DragLineX(0, &current_frame_d, ImVec4(0.0f, 0.8f, 1.0f, 1.0f))) {
             state.display_frame =
@@ -1848,23 +1907,51 @@ int main(int argc, char* argv[]) {
                      preview_size, ImVec2(0, 0), ImVec2(1, 1));
         ImGui::End();
 
-        // Simplified Analysis panel - variance graph + quality scores
+        // Analysis panel - metric graph with simple selectors
         ImGui::Begin("Analysis");
 
-        // Simple variance graph (main focus)
+        // Simple metric checkboxes (no derivatives)
+        ImGui::Text("Show:");
+        ImGui::SameLine();
+        ImGui::Checkbox("Var", &state.metric_flags.variance);
+        ImGui::SameLine();
+        ImGui::Checkbox("Bright", &state.metric_flags.brightness);
+        ImGui::SameLine();
+        ImGui::Checkbox("Unif", &state.metric_flags.uniformity);
+        ImGui::SameLine();
+        ImGui::Checkbox("Caustic", &state.metric_flags.causticness);
+        ImGui::SameLine();
+        ImGui::Checkbox("Energy", &state.metric_flags.energy);
+
+        // Graph with selected metrics
         ImVec2 graph_size = ImGui::GetContentRegionAvail();
-        graph_size.y = std::max(100.0f, graph_size.y - 180.0f);  // Leave room for scores
-        drawSimpleVarianceGraph(state, graph_size);
+        graph_size.y = std::max(100.0f, graph_size.y);
+        drawAnalysisGraph(state, graph_size);
 
-        // Quality scores (prominent)
+        ImGui::End();
+
+        // Quality Scores window (separate)
+        ImGui::Begin("Quality");
+
         if (state.boom_analyzer.hasResults() || state.causticness_analyzer.hasResults()) {
-            ImGui::Separator();
-            ImGui::Text("Quality:");
-
             // Get scores
             double boom_score = state.boom_analyzer.hasResults() ? state.boom_analyzer.score() : 0.0;
             double caustic_score = state.causticness_analyzer.hasResults() ? state.causticness_analyzer.score() : 0.0;
             double composite = (boom_score + caustic_score) / 2.0;
+
+            // Composite score at top (most important)
+            ImVec4 bar_color = composite < 0.4f ? ImVec4(0.8f, 0.2f, 0.2f, 1.0f) :
+                               composite < 0.7f ? ImVec4(0.8f, 0.8f, 0.2f, 1.0f) :
+                                                  ImVec4(0.2f, 0.8f, 0.2f, 1.0f);
+            ImGui::Text("Composite:");
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, bar_color);
+            ImGui::ProgressBar(static_cast<float>(composite), ImVec2(100, 0));
+            ImGui::PopStyleColor();
+            ImGui::SameLine();
+            ImGui::Text("%.2f", composite);
+
+            ImGui::Separator();
 
             // Boom Analysis section
             if (state.boom_analyzer.hasResults()) {
@@ -1873,7 +1960,6 @@ int main(int argc, char* argv[]) {
                 std::string type = boom_results.value("boom_type", "unknown");
                 int peak_frame = boom_results.value("peak_derivative_frame", 0);
 
-                // Score with progress bar
                 ImGui::Text("Boom:");
                 ImGui::SameLine();
                 ImGui::ProgressBar(static_cast<float>(boom_score), ImVec2(80, 0));
@@ -1881,7 +1967,6 @@ int main(int argc, char* argv[]) {
                 ImGui::Text("%.2f", boom_score);
                 ImGui::Text("  Type: %s | Sharpness: %.2f | Peak: frame %d", type.c_str(), sharpness, peak_frame);
 
-                // Collapsible details
                 if (ImGui::TreeNode("Boom Details")) {
                     double peak_deriv = boom_results.value("peak_derivative", 0.0);
                     double init_accel = boom_results.value("initial_acceleration", 0.0);
@@ -1906,18 +1991,15 @@ int main(int argc, char* argv[]) {
                 int peak_frame = caustic_results.value("peak_frame", 0);
                 double time_above = caustic_results.value("time_above_threshold", 0.0);
 
-                // Score with progress bar
                 ImGui::Text("Causticness:");
                 ImGui::SameLine();
                 ImGui::ProgressBar(static_cast<float>(caustic_score), ImVec2(80, 0));
                 ImGui::SameLine();
                 ImGui::Text("%.2f", caustic_score);
 
-                // Calculate peak time in seconds
                 double peak_seconds = static_cast<double>(peak_frame) / state.config.output.video_fps;
                 ImGui::Text("  Peak: %.1f @ %.1fs | Avg: %.1f | Time above: %.1fs", peak, peak_seconds, avg, time_above);
 
-                // Collapsible details
                 if (ImGui::TreeNode("Causticness Details")) {
                     int frames_above = caustic_results.value("frames_above_threshold", 0);
                     double post_boom_avg = caustic_results.value("post_boom_average", 0.0);
@@ -1931,20 +2013,9 @@ int main(int argc, char* argv[]) {
                     ImGui::TreePop();
                 }
             }
-
-            // Composite score bar
-            ImGui::Separator();
-            ImGui::Text("COMPOSITE:");
-            ImGui::SameLine();
-            // Color the progress bar based on score
-            ImVec4 bar_color = composite < 0.4f ? ImVec4(0.8f, 0.2f, 0.2f, 1.0f) :
-                               composite < 0.7f ? ImVec4(0.8f, 0.8f, 0.2f, 1.0f) :
-                                                  ImVec4(0.2f, 0.8f, 0.2f, 1.0f);
-            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, bar_color);
-            ImGui::ProgressBar(static_cast<float>(composite), ImVec2(100, 0));
-            ImGui::PopStyleColor();
-            ImGui::SameLine();
-            ImGui::Text("%.2f", composite);
+        } else {
+            ImGui::TextDisabled("No quality data yet");
+            ImGui::TextDisabled("Run simulation to analyze");
         }
 
         ImGui::End();
