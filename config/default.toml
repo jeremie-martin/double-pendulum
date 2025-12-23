@@ -46,9 +46,7 @@ start = 0.0                    # Range start [0, 1]
 end = 1.0                      # Range end [0, 1]
 
 [detection]
-# Boom: when pendulums start diverging (chaos onset)
-boom_threshold = 1.5           # radians^2
-boom_confirmation = 10         # Consecutive frames above threshold
+# Note: Boom is detected via max angular causticness (see boom_detection.h)
 
 # Chaos: when variance exceeds this (full chaos/noise)
 chaos_threshold = 500.0        # radians^2

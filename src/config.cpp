@@ -554,9 +554,8 @@ void Config::save(std::string const& path) const {
     file << "\n";
 
     // Detection section
+    // Note: boom_threshold and boom_confirmation are deprecated (boom uses max causticness)
     file << "[detection]\n";
-    file << "boom_threshold = " << detection.boom_threshold << "\n";
-    file << "boom_confirmation = " << detection.boom_confirmation << "\n";
     file << "chaos_threshold = " << detection.chaos_threshold << "\n";
     file << "chaos_confirmation = " << detection.chaos_confirmation << "\n";
     file << "early_stop_after_chaos = " << (detection.early_stop_after_chaos ? "true" : "false")
