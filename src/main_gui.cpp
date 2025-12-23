@@ -782,9 +782,10 @@ void drawColorSection(AppState& state) {
         drawColorRamp(state.config.color, ramp_width, 24.0f);
 
         // Scheme selector (this determines which presets are shown)
-        const char* schemes[] = {"Spectrum", "Rainbow", "Heat", "Cool", "Monochrome"};
+        const char* schemes[] = {"Spectrum", "Rainbow", "Heat", "Cool", "Monochrome",
+                                 "Plasma", "Viridis", "Inferno", "Sunset"};
         int scheme_idx = static_cast<int>(state.config.color.scheme);
-        if (ImGui::Combo("Scheme", &scheme_idx, schemes, 5)) {
+        if (ImGui::Combo("Scheme", &scheme_idx, schemes, 9)) {
             state.config.color.scheme = static_cast<ColorScheme>(scheme_idx);
             color_changed = true;
             // Clear loaded preset when scheme changes (it's no longer valid)

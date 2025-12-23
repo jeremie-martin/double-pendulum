@@ -121,6 +121,14 @@ public:
             return getCoolColor(mapped_t);
         case ColorScheme::Monochrome:
             return getMonochromeColor(mapped_t);
+        case ColorScheme::Plasma:
+            return getPlasmaColor(mapped_t);
+        case ColorScheme::Viridis:
+            return getViridisColor(mapped_t);
+        case ColorScheme::Inferno:
+            return getInfernoColor(mapped_t);
+        case ColorScheme::Sunset:
+            return getSunsetColor(mapped_t);
         default:
             return getSpectrumColor(mapped_t);
         }
@@ -177,5 +185,73 @@ private:
         // Just varying intensity of white
         float v = 0.3f + 0.7f * t;
         return {v, v, v};
+    }
+
+    Color getPlasmaColor(float t) const {
+        // Attempt at matplotlib's Plasma colormap approximation
+        // purple -> magenta -> orange -> yellow
+        float r = 0.050f + 0.850f * t + 0.100f * std::sin(t * 3.14159f);
+        float g = 0.030f + 0.700f * t * t;
+        float b = 0.530f + 0.470f * std::sin((1.0f - t) * 3.14159f * 0.5f);
+        return {std::clamp(r, 0.0f, 1.0f), std::clamp(g, 0.0f, 1.0f), std::clamp(b, 0.0f, 1.0f)};
+    }
+
+    Color getViridisColor(float t) const {
+        // Attempt at matplotlib's Viridis colormap approximation
+        // purple -> teal -> green -> yellow
+        float r = 0.267f + 0.004f * t + 0.329f * t * t + 0.400f * t * t * t;
+        float g = 0.004f + 0.873f * t - 0.377f * t * t;
+        float b = 0.329f + 0.420f * t - 0.749f * t * t;
+        return {std::clamp(r, 0.0f, 1.0f), std::clamp(g, 0.0f, 1.0f), std::clamp(b, 0.0f, 1.0f)};
+    }
+
+    Color getInfernoColor(float t) const {
+        // Attempt at matplotlib's Inferno colormap approximation
+        // black -> purple -> red -> orange -> yellow
+        float r, g, b;
+        if (t < 0.25f) {
+            float s = t / 0.25f;
+            r = 0.0f + 0.3f * s;
+            g = 0.0f;
+            b = 0.1f + 0.3f * s;
+        } else if (t < 0.5f) {
+            float s = (t - 0.25f) / 0.25f;
+            r = 0.3f + 0.5f * s;
+            g = 0.0f + 0.1f * s;
+            b = 0.4f - 0.2f * s;
+        } else if (t < 0.75f) {
+            float s = (t - 0.5f) / 0.25f;
+            r = 0.8f + 0.2f * s;
+            g = 0.1f + 0.4f * s;
+            b = 0.2f - 0.2f * s;
+        } else {
+            float s = (t - 0.75f) / 0.25f;
+            r = 1.0f;
+            g = 0.5f + 0.5f * s;
+            b = 0.0f + 0.3f * s;
+        }
+        return {r, g, b};
+    }
+
+    Color getSunsetColor(float t) const {
+        // Orange -> Pink -> Purple -> Blue
+        float r, g, b;
+        if (t < 0.33f) {
+            float s = t / 0.33f;
+            r = 1.0f;
+            g = 0.6f - 0.3f * s;
+            b = 0.2f + 0.4f * s;
+        } else if (t < 0.67f) {
+            float s = (t - 0.33f) / 0.34f;
+            r = 1.0f - 0.3f * s;
+            g = 0.3f - 0.1f * s;
+            b = 0.6f + 0.2f * s;
+        } else {
+            float s = (t - 0.67f) / 0.33f;
+            r = 0.7f - 0.5f * s;
+            g = 0.2f + 0.1f * s;
+            b = 0.8f + 0.2f * s;
+        }
+        return {r, g, b};
     }
 };

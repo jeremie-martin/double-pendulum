@@ -100,7 +100,7 @@ struct PostProcessParams {
     NormalizationMode normalization = NormalizationMode::PerFrame;
 };
 
-enum class ColorScheme { Spectrum, Rainbow, Heat, Cool, Monochrome };
+enum class ColorScheme { Spectrum, Rainbow, Heat, Cool, Monochrome, Plasma, Viridis, Inferno, Sunset };
 
 struct ColorParams {
     ColorScheme scheme = ColorScheme::Spectrum;

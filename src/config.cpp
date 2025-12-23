@@ -19,6 +19,14 @@ ColorScheme parseColorScheme(std::string const& str) {
         return ColorScheme::Cool;
     if (str == "monochrome")
         return ColorScheme::Monochrome;
+    if (str == "plasma")
+        return ColorScheme::Plasma;
+    if (str == "viridis")
+        return ColorScheme::Viridis;
+    if (str == "inferno")
+        return ColorScheme::Inferno;
+    if (str == "sunset")
+        return ColorScheme::Sunset;
     std::cerr << "Unknown color scheme: " << str << ", using spectrum\n";
     return ColorScheme::Spectrum;
 }
@@ -426,6 +434,10 @@ std::string colorSchemeToString(ColorScheme scheme) {
     case ColorScheme::Heat: return "heat";
     case ColorScheme::Cool: return "cool";
     case ColorScheme::Monochrome: return "monochrome";
+    case ColorScheme::Plasma: return "plasma";
+    case ColorScheme::Viridis: return "viridis";
+    case ColorScheme::Inferno: return "inferno";
+    case ColorScheme::Sunset: return "sunset";
     }
     return "spectrum";
 }
