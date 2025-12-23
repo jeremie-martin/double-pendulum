@@ -31,7 +31,7 @@ end = 1.0
 
 [detection]
 boom_threshold = 1.5
-white_threshold = 500
+chaos_threshold = 500
 
 [output]
 format = "video"
