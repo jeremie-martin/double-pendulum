@@ -8,6 +8,7 @@
 #include "metrics/boom_analyzer.h"
 #include "metrics/boom_detection.h"
 #include "metrics/causticness_analyzer.h"
+#include "metrics/metrics_init.h"
 
 #include <chrono>
 #include <cmath>
@@ -95,17 +96,17 @@ int computePhysicsMetrics(Options const& opts,
 
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    metrics::MetricsCollector collector;
-    collector.registerStandardMetrics();
-
-    // Only chaos uses threshold detection; boom uses max causticness
-    metrics::EventDetector detector;
-    detector.addChaosCriteria(config.detection.chaos_threshold,
-                              config.detection.chaos_confirmation,
-                              metrics::MetricNames::Variance);
-
+    // Initialize metrics system using common helper (physics-only, no GPU)
     double const frame_duration =
         config.simulation.duration_seconds / reader.frameCount();
+    metrics::MetricsCollector collector;
+    metrics::EventDetector detector;
+    metrics::BoomAnalyzer boom_analyzer;
+    metrics::CausticnessAnalyzer causticness_analyzer;
+    metrics::initializeMetricsSystem(
+        collector, detector, causticness_analyzer,
+        config.detection.chaos_threshold, config.detection.chaos_confirmation,
+        frame_duration, /*with_gpu=*/false, boom_analyzer);
 
     std::vector<double> angle1s, angle2s;
 
@@ -136,26 +137,9 @@ int computePhysicsMetrics(Options const& opts,
 
     std::cout << "  Processing time: " << duration_ms << " ms\n";
 
-    // Detect boom using max causticness (before running analyzers)
-    auto boom = metrics::findBoomFrame(collector, frame_duration);
-    if (boom.frame >= 0) {
-        // Force boom event for analyzers
-        double variance_at_boom = 0.0;
-        if (auto const* var_series = collector.getMetric(metrics::MetricNames::Variance)) {
-            if (boom.frame < static_cast<int>(var_series->size())) {
-                variance_at_boom = var_series->at(boom.frame);
-            }
-        }
-        metrics::forceBoomEvent(detector, boom, variance_at_boom);
-    }
-
-    // Run analyzers
-    metrics::BoomAnalyzer boom_analyzer;
-    metrics::CausticnessAnalyzer causticness_analyzer;
-    causticness_analyzer.setFrameDuration(frame_duration);
-
-    boom_analyzer.analyze(collector, detector);
-    causticness_analyzer.analyze(collector, detector);
+    // Run post-simulation analysis (boom detection + analyzers)
+    auto boom = metrics::runPostSimulationAnalysis(
+        collector, detector, boom_analyzer, causticness_analyzer, frame_duration);
 
     // Print results
     std::cout << "\nResults:\n";
@@ -246,18 +230,17 @@ int computeGPUMetrics(Options const& opts,
 
     ColorSchemeGenerator color_gen(config.color);
 
-    metrics::MetricsCollector collector;
-    collector.registerStandardMetrics();
-    collector.registerGPUMetrics();
-
-    // Only chaos uses threshold detection; boom uses max causticness
-    metrics::EventDetector detector;
-    detector.addChaosCriteria(config.detection.chaos_threshold,
-                              config.detection.chaos_confirmation,
-                              metrics::MetricNames::Variance);
-
+    // Initialize metrics system using common helper (with GPU)
     double const frame_duration =
         config.simulation.duration_seconds / reader.frameCount();
+    metrics::MetricsCollector collector;
+    metrics::EventDetector detector;
+    metrics::BoomAnalyzer boom_analyzer;
+    metrics::CausticnessAnalyzer causticness_analyzer;
+    metrics::initializeMetricsSystem(
+        collector, detector, causticness_analyzer,
+        config.detection.chaos_threshold, config.detection.chaos_confirmation,
+        frame_duration, /*with_gpu=*/true, boom_analyzer);
 
     std::cout << "Re-rendering " << reader.frameCount() << " frames at "
               << config.render.width << "x" << config.render.height << "...\n";
@@ -337,25 +320,9 @@ int computeGPUMetrics(Options const& opts,
     std::cout << "  FPS: " << std::fixed << std::setprecision(1)
               << (static_cast<double>(total_frames) / duration_s) << "\n";
 
-    // Detect boom using max causticness (before running analyzers)
-    auto boom = metrics::findBoomFrame(collector, frame_duration);
-    if (boom.frame >= 0) {
-        // Force boom event for analyzers
-        double variance_at_boom = 0.0;
-        if (auto const* var_series = collector.getMetric(metrics::MetricNames::Variance)) {
-            if (boom.frame < static_cast<int>(var_series->size())) {
-                variance_at_boom = var_series->at(boom.frame);
-            }
-        }
-        metrics::forceBoomEvent(detector, boom, variance_at_boom);
-    }
-
-    // Run analyzers
-    metrics::BoomAnalyzer boom_analyzer;
-    metrics::CausticnessAnalyzer causticness_analyzer;
-    causticness_analyzer.setFrameDuration(frame_duration);
-    boom_analyzer.analyze(collector, detector);
-    causticness_analyzer.analyze(collector, detector);
+    // Run post-simulation analysis (boom detection + analyzers)
+    auto boom = metrics::runPostSimulationAnalysis(
+        collector, detector, boom_analyzer, causticness_analyzer, frame_duration);
 
     // Print results
     std::cout << "\nResults:\n";

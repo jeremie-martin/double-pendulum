@@ -6,6 +6,7 @@
 #include "metrics/causticness_analyzer.h"
 #include "metrics/event_detector.h"
 #include "metrics/metrics_collector.h"
+#include "metrics/metrics_init.h"
 #include "pendulum.h"
 #include "preset_library.h"
 #include "simulation.h"
@@ -190,25 +191,14 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
         state.colors[i] = color_gen.getColorForIndex(i, n);
     }
 
-    // Reset metrics system
-    state.metrics_collector.reset();
-    state.metrics_collector.registerStandardMetrics();
-    state.metrics_collector.registerGPUMetrics();
-    state.boom_analyzer.reset();
-    state.causticness_analyzer.reset();
-
-    // Set frame duration for analyzers (once at init, not every frame)
+    // Initialize metrics system using common helper
     double frame_duration = state.config.simulation.frameDuration();
-    state.causticness_analyzer.setFrameDuration(frame_duration);
-
-    // Setup event detector
-    // Note: Boom is detected via max causticness, not threshold crossing
-    // Only chaos uses the EventDetector threshold mechanism
-    state.event_detector.clearCriteria();
-    state.event_detector.addChaosCriteria(state.config.detection.chaos_threshold,
-                                           state.config.detection.chaos_confirmation,
-                                           metrics::MetricNames::Variance);
-    state.event_detector.reset();
+    metrics::resetMetricsSystem(state.metrics_collector, state.event_detector,
+                                state.boom_analyzer, state.causticness_analyzer);
+    metrics::initializeMetricsSystem(
+        state.metrics_collector, state.event_detector, state.causticness_analyzer,
+        state.config.detection.chaos_threshold, state.config.detection.chaos_confirmation,
+        frame_duration, /*with_gpu=*/true, state.boom_analyzer);
 
     state.boom_frame.reset();
     state.chaos_frame.reset();
