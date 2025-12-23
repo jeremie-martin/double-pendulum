@@ -384,6 +384,77 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
 // Static plot mode for persistence across frames
 static PlotMode s_plot_mode = PlotMode::MultiAxis;
 
+// Helper to get metric value at a specific frame (for timeline scrubbing)
+double getMetricAtFrame(metrics::MetricsCollector const& collector,
+                        std::string const& name, int frame) {
+    auto const* series = collector.getMetric(name);
+    if (!series || series->empty()) return 0.0;
+    if (frame < 0) return 0.0;
+    auto const& values = series->values();
+    size_t idx = std::min(static_cast<size_t>(frame), values.size() - 1);
+    return values[idx];
+}
+
+// Draw a simplified variance-only graph for the compact Analysis panel
+void drawSimpleVarianceGraph(AppState& state, ImVec2 size) {
+    auto* variance_series = state.metrics_collector.getMetric(metrics::MetricNames::Variance);
+    if (!variance_series || variance_series->empty()) {
+        ImGui::Text("No data yet");
+        return;
+    }
+
+    size_t data_size = variance_series->size();
+    auto const& variance_values = variance_series->values();
+
+    std::vector<double> frames(data_size);
+    for (size_t i = 0; i < data_size; ++i) {
+        frames[i] = static_cast<double>(i);
+    }
+
+    double current_frame_d = static_cast<double>(state.display_frame);
+
+    if (ImPlot::BeginPlot("##SimpleVar", size, ImPlotFlags_NoTitle)) {
+        ImPlot::SetupAxes("Frame", "Variance", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+
+        // Plot variance
+        ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), 2.0f);
+        ImPlot::PlotLine("Variance", frames.data(), variance_values.data(), data_size);
+
+        // Threshold lines
+        double boom_line = state.config.detection.boom_threshold;
+        double chaos_line = state.config.detection.chaos_threshold;
+        ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 0.5f), 1.0f);
+        ImPlot::PlotInfLines("##boom", &boom_line, 1, ImPlotInfLinesFlags_Horizontal);
+        ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 0.5f), 1.0f);
+        ImPlot::PlotInfLines("##chaos", &chaos_line, 1, ImPlotInfLinesFlags_Horizontal);
+
+        // Boom marker
+        if (state.boom_frame.has_value()) {
+            double boom_x = static_cast<double>(*state.boom_frame);
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), 2.0f);
+            ImPlot::PlotInfLines("##boom_marker", &boom_x, 1);
+        }
+
+        // Chaos marker
+        if (state.chaos_frame.has_value()) {
+            double chaos_x = static_cast<double>(*state.chaos_frame);
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), 2.0f);
+            ImPlot::PlotInfLines("##chaos_marker", &chaos_x, 1);
+        }
+
+        // Draggable current frame marker
+        ImPlot::SetNextLineStyle(ImVec4(0.0f, 0.8f, 1.0f, 1.0f), 2.0f);
+        if (ImPlot::DragLineX(0, &current_frame_d, ImVec4(0.0f, 0.8f, 1.0f, 1.0f))) {
+            state.display_frame =
+                std::clamp(static_cast<int>(current_frame_d), 0, static_cast<int>(data_size) - 1);
+            state.scrubbing = true;
+            state.needs_redraw = true;
+        }
+
+        ImPlot::EndPlot();
+    }
+}
+
 void drawMetricGraph(AppState& state, ImVec2 size) {
     auto* variance_series = state.metrics_collector.getMetric(metrics::MetricNames::Variance);
     auto* brightness_series = state.metrics_collector.getMetric(metrics::MetricNames::Brightness);
@@ -1470,24 +1541,12 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
     ImGui::Text("Sim: %.2f ms", state.sim_time_ms);
     ImGui::Text("Render: %.2f ms", state.render_time_ms);
 
-    // Analysis metrics
-    ImGui::Separator();
-    auto* variance_s = state.metrics_collector.getMetric(metrics::MetricNames::Variance);
-    double current_variance = variance_s ? variance_s->current() : 0.0;
-    ImGui::Text("Variance:   %.4f", current_variance);
-    ImGui::Text("Uniformity: %.2f (target: 0.9)",
-                state.metrics_collector.getCurrentSpread().circular_spread);
-    auto* energy_s = state.metrics_collector.getMetric(metrics::MetricNames::TotalEnergy);
-    double current_energy = energy_s ? energy_s->current() : 0.0;
-    ImGui::Text("Energy:     %.2f", current_energy);
-
+    // Event status
     if (state.boom_frame.has_value()) {
-        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Boom: frame %d (var=%.4f)",
-                           *state.boom_frame, state.boom_variance);
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Boom: frame %d", *state.boom_frame);
     }
     if (state.chaos_frame.has_value()) {
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "Chaos: frame %d (var=%.4f)",
-                           *state.chaos_frame, state.chaos_variance);
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "Chaos: frame %d", *state.chaos_frame);
     }
 
     ImGui::Separator();
@@ -1789,74 +1848,18 @@ int main(int argc, char* argv[]) {
                      preview_size, ImVec2(0, 0), ImVec2(1, 1));
         ImGui::End();
 
-        // Analysis graph with metric selector
+        // Simplified Analysis panel - variance graph + quality scores
         ImGui::Begin("Analysis");
 
-        // Plot mode selector
-        const char* plot_mode_names[] = {"Single Axis", "Multi-Axis", "Normalized"};
-        ImGui::SetNextItemWidth(100);
-        ImGui::Combo("Scale", reinterpret_cast<int*>(&s_plot_mode), plot_mode_names, 3);
-        ImGui::SameLine();
-        ImGui::TextDisabled("(?)");
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Single: All on one axis\nMulti: Y1=large, Y2=normalized, Y3=medium\nNormalized: All scaled 0-1");
-        }
-
-        // Metric selector with derivative toggles
-        // Helper lambda for metric checkbox with derivative toggle
-        auto metricWithDeriv = [](const char* label, bool* metric, bool* deriv, const char* id) {
-            ImGui::Checkbox(label, metric);
-            ImGui::SameLine(0, 2);
-            ImGui::PushStyleColor(ImGuiCol_Text, *deriv ? ImVec4(0.4f, 0.8f, 0.4f, 1.0f) : ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 0));
-            char btn_id[32];
-            snprintf(btn_id, sizeof(btn_id), "d##%s", id);
-            if (ImGui::SmallButton(btn_id)) {
-                *deriv = !*deriv;
-            }
-            ImGui::PopStyleVar();
-            ImGui::PopStyleColor();
-        };
-
-        ImGui::Text("Metrics:");
-        ImGui::SameLine();
-        metricWithDeriv("Var", &state.metric_flags.variance, &state.metric_flags.variance_deriv, "var");
-        ImGui::SameLine();
-        metricWithDeriv("Bright", &state.metric_flags.brightness, &state.metric_flags.brightness_deriv, "bright");
-        ImGui::SameLine();
-        metricWithDeriv("Unif", &state.metric_flags.uniformity, &state.metric_flags.uniformity_deriv, "unif");
-        ImGui::SameLine();
-        metricWithDeriv("Edge", &state.metric_flags.edge_energy, &state.metric_flags.edge_energy_deriv, "edge");
-        ImGui::SameLine();
-        metricWithDeriv("Caustic", &state.metric_flags.causticness, &state.metric_flags.causticness_deriv, "caustic");
-
-        // Second row
-        metricWithDeriv("Energy", &state.metric_flags.energy, &state.metric_flags.energy_deriv, "energy");
-        ImGui::SameLine();
-        metricWithDeriv("Contr.Std", &state.metric_flags.contrast_stddev, &state.metric_flags.contrast_stddev_deriv, "cstd");
-        ImGui::SameLine();
-        metricWithDeriv("Contr.Rng", &state.metric_flags.contrast_range, &state.metric_flags.contrast_range_deriv, "crng");
-        ImGui::SameLine();
-        metricWithDeriv("ColorVar", &state.metric_flags.color_variance, &state.metric_flags.color_variance_deriv, "cvar");
-        ImGui::SameLine();
-        metricWithDeriv("Coverage", &state.metric_flags.coverage, &state.metric_flags.coverage_deriv, "cov");
-
+        // Simple variance graph (main focus)
         ImVec2 graph_size = ImGui::GetContentRegionAvail();
-        graph_size.y = std::max(100.0f, graph_size.y - 60.0f); // Leave room for score
-        drawMetricGraph(state, graph_size);
+        graph_size.y = std::max(100.0f, graph_size.y - 180.0f);  // Leave room for scores
+        drawSimpleVarianceGraph(state, graph_size);
 
-        // Display current metrics
-        ImGui::Separator();
-        auto const* brightness_series = state.metrics_collector.getMetric(metrics::MetricNames::Brightness);
-        auto const* contrast_series = state.metrics_collector.getMetric(metrics::MetricNames::ContrastStddev);
-        double current_brightness = brightness_series && !brightness_series->empty() ? brightness_series->current() : 0.0;
-        double current_contrast = contrast_series && !contrast_series->empty() ? contrast_series->current() : 0.0;
-        ImGui::Text("Current: Bright %.3f  Contrast %.3f", current_brightness, current_contrast);
-
-        // Display analyzer scores with enhanced details
+        // Quality scores (prominent)
         if (state.boom_analyzer.hasResults() || state.causticness_analyzer.hasResults()) {
             ImGui::Separator();
-            ImGui::Text("Quality Scores:");
+            ImGui::Text("Quality:");
 
             // Get scores
             double boom_score = state.boom_analyzer.hasResults() ? state.boom_analyzer.score() : 0.0;
@@ -1942,6 +1945,101 @@ int main(int argc, char* argv[]) {
             ImGui::PopStyleColor();
             ImGui::SameLine();
             ImGui::Text("%.2f", composite);
+        }
+
+        ImGui::End();
+
+        // Detailed Metrics window (optional, for power users)
+        ImGui::Begin("Metrics");
+
+        // Plot mode selector
+        const char* plot_mode_names[] = {"Single Axis", "Multi-Axis", "Normalized"};
+        ImGui::SetNextItemWidth(100);
+        ImGui::Combo("Scale", reinterpret_cast<int*>(&s_plot_mode), plot_mode_names, 3);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Single: All on one axis\nMulti: Y1=large, Y2=normalized, Y3=medium\nNormalized: All scaled 0-1");
+        }
+
+        // Metric selector with derivative toggles
+        auto metricWithDeriv = [](const char* label, bool* metric, bool* deriv, const char* id) {
+            ImGui::Checkbox(label, metric);
+            ImGui::SameLine(0, 2);
+            ImGui::PushStyleColor(ImGuiCol_Text, *deriv ? ImVec4(0.4f, 0.8f, 0.4f, 1.0f) : ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 0));
+            char btn_id[32];
+            snprintf(btn_id, sizeof(btn_id), "d##%s", id);
+            if (ImGui::SmallButton(btn_id)) {
+                *deriv = !*deriv;
+            }
+            ImGui::PopStyleVar();
+            ImGui::PopStyleColor();
+        };
+
+        ImGui::Text("Metrics:");
+        ImGui::SameLine();
+        metricWithDeriv("Var", &state.metric_flags.variance, &state.metric_flags.variance_deriv, "var");
+        ImGui::SameLine();
+        metricWithDeriv("Bright", &state.metric_flags.brightness, &state.metric_flags.brightness_deriv, "bright");
+        ImGui::SameLine();
+        metricWithDeriv("Unif", &state.metric_flags.uniformity, &state.metric_flags.uniformity_deriv, "unif");
+        ImGui::SameLine();
+        metricWithDeriv("Edge", &state.metric_flags.edge_energy, &state.metric_flags.edge_energy_deriv, "edge");
+        ImGui::SameLine();
+        metricWithDeriv("Caustic", &state.metric_flags.causticness, &state.metric_flags.causticness_deriv, "caustic");
+
+        // Second row of metrics
+        metricWithDeriv("Energy", &state.metric_flags.energy, &state.metric_flags.energy_deriv, "energy");
+        ImGui::SameLine();
+        metricWithDeriv("Contr.Std", &state.metric_flags.contrast_stddev, &state.metric_flags.contrast_stddev_deriv, "cstd");
+        ImGui::SameLine();
+        metricWithDeriv("Contr.Rng", &state.metric_flags.contrast_range, &state.metric_flags.contrast_range_deriv, "crng");
+        ImGui::SameLine();
+        metricWithDeriv("ColorVar", &state.metric_flags.color_variance, &state.metric_flags.color_variance_deriv, "cvar");
+        ImGui::SameLine();
+        metricWithDeriv("Coverage", &state.metric_flags.coverage, &state.metric_flags.coverage_deriv, "cov");
+
+        // Full metric graph
+        ImVec2 metrics_graph_size = ImGui::GetContentRegionAvail();
+        metrics_graph_size.y = std::max(150.0f, metrics_graph_size.y - 100.0f);
+        drawMetricGraph(state, metrics_graph_size);
+
+        // Current metric values table (updates with timeline scrubbing)
+        ImGui::Separator();
+        ImGui::Text("Current Values (frame %d):", state.display_frame);
+
+        if (ImGui::BeginTable("##MetricValues", 4, ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit)) {
+            ImGui::TableSetupColumn("Metric");
+            ImGui::TableSetupColumn("Value");
+            ImGui::TableSetupColumn("Metric");
+            ImGui::TableSetupColumn("Value");
+
+            auto showMetric = [&](const char* name, const std::string& metric_name) {
+                double val = getMetricAtFrame(state.metrics_collector, metric_name, state.display_frame);
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(name);
+                ImGui::TableNextColumn();
+                ImGui::Text("%.3f", val);
+            };
+
+            ImGui::TableNextRow();
+            showMetric("Variance", metrics::MetricNames::Variance);
+            showMetric("Brightness", metrics::MetricNames::Brightness);
+
+            ImGui::TableNextRow();
+            showMetric("Uniformity", metrics::MetricNames::CircularSpread);
+            showMetric("Energy", metrics::MetricNames::TotalEnergy);
+
+            ImGui::TableNextRow();
+            showMetric("Causticness", metrics::MetricNames::Causticness);
+            showMetric("Coverage", metrics::MetricNames::Coverage);
+
+            ImGui::TableNextRow();
+            showMetric("Contrast", metrics::MetricNames::ContrastStddev);
+            showMetric("EdgeEnergy", metrics::MetricNames::EdgeEnergy);
+
+            ImGui::EndTable();
         }
 
         ImGui::End();
