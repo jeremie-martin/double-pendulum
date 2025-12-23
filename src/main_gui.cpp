@@ -3,6 +3,7 @@
 #include "config.h"
 #include "gl_renderer.h"
 #include "pendulum.h"
+#include "preset_library.h"
 #include "simulation.h"
 #include "variance_tracker.h"
 
@@ -64,10 +65,48 @@ struct ExportState {
     }
 };
 
+// Preset UI state
+struct PresetUIState {
+    // Color preset
+    std::string loaded_color_preset;      // Name of currently loaded preset (empty if none)
+    ColorParams loaded_color_values;      // Values when preset was loaded (for detecting changes)
+    char new_color_preset_name[64] = "";
+    bool show_color_save_popup = false;
+    bool show_color_delete_confirm = false;
+
+    // Post-process preset
+    std::string loaded_pp_preset;
+    PostProcessParams loaded_pp_values;
+    char new_pp_preset_name[64] = "";
+    bool show_pp_save_popup = false;
+    bool show_pp_delete_confirm = false;
+
+    // Check if color values have been modified from loaded preset
+    bool isColorModified(ColorParams const& current) const {
+        if (loaded_color_preset.empty()) return false;
+        return current.scheme != loaded_color_values.scheme ||
+               std::abs(current.start - loaded_color_values.start) > 0.001 ||
+               std::abs(current.end - loaded_color_values.end) > 0.001;
+    }
+
+    // Check if post-process values have been modified
+    bool isPPModified(PostProcessParams const& current) const {
+        if (loaded_pp_preset.empty()) return false;
+        return current.tone_map != loaded_pp_values.tone_map ||
+               std::abs(current.exposure - loaded_pp_values.exposure) > 0.001 ||
+               std::abs(current.contrast - loaded_pp_values.contrast) > 0.001 ||
+               std::abs(current.gamma - loaded_pp_values.gamma) > 0.001 ||
+               std::abs(current.reinhard_white_point - loaded_pp_values.reinhard_white_point) > 0.001 ||
+               current.normalization != loaded_pp_values.normalization;
+    }
+};
+
 // Application state
 struct AppState {
     Config config;
     PreviewParams preview;
+    PresetLibrary presets;
+    PresetUIState preset_ui;
 
     // Simulation state
     std::vector<Pendulum> pendulums;
@@ -130,7 +169,6 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
     }
 
     state.variance_tracker.reset();
-    state.analysis_tracker.reset();
     state.boom_frame.reset();
     state.white_frame.reset();
     state.current_frame = 0;
@@ -168,9 +206,9 @@ void renderStates(AppState& state, GLRenderer& renderer,
         float x0 = cx;
         float y0 = cy;
         float x1 = cx + s.x1 * scale;
-        float y1 = cy + s.y1 * scale;
+        float y1 = cy - s.y1 * scale;
         float x2 = cx + s.x2 * scale;
-        float y2 = cy + s.y2 * scale;
+        float y2 = cy - s.y2 * scale;
 
         renderer.drawLine(x0, y0, x1, y1, c.r, c.g, c.b);
         renderer.drawLine(x1, y1, x2, y2, c.r, c.g, c.b);
@@ -543,6 +581,61 @@ void tooltip(const char* text) {
     }
 }
 
+// Draw a color ramp preview (like Blender's ColorRamp)
+void drawColorRamp(ColorParams const& params, float width, float height) {
+    ColorSchemeGenerator gen(params);
+
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    ImVec2 pos = ImGui::GetCursorScreenPos();
+
+    // Draw gradient using multiple rectangles
+    int segments = static_cast<int>(width);
+    float segment_width = width / segments;
+
+    for (int i = 0; i < segments; ++i) {
+        float t = static_cast<float>(i) / (segments - 1);
+        Color c = gen.getColor(t);
+
+        ImU32 col = IM_COL32(static_cast<int>(c.r * 255), static_cast<int>(c.g * 255),
+                             static_cast<int>(c.b * 255), 255);
+
+        draw_list->AddRectFilled(ImVec2(pos.x + i * segment_width, pos.y),
+                                 ImVec2(pos.x + (i + 1) * segment_width + 1, pos.y + height), col);
+    }
+
+    // Draw border
+    draw_list->AddRect(pos, ImVec2(pos.x + width, pos.y + height),
+                       IM_COL32(100, 100, 100, 255));
+
+    // Draw start/end markers (triangular handles like Blender)
+    float marker_size = 8.0f;
+    float start_x = pos.x + params.start * width;
+    float end_x = pos.x + params.end * width;
+
+    // Start marker (bottom triangle)
+    draw_list->AddTriangleFilled(ImVec2(start_x, pos.y + height),
+                                 ImVec2(start_x - marker_size / 2, pos.y + height + marker_size),
+                                 ImVec2(start_x + marker_size / 2, pos.y + height + marker_size),
+                                 IM_COL32(200, 200, 200, 255));
+    draw_list->AddTriangle(ImVec2(start_x, pos.y + height),
+                           ImVec2(start_x - marker_size / 2, pos.y + height + marker_size),
+                           ImVec2(start_x + marker_size / 2, pos.y + height + marker_size),
+                           IM_COL32(50, 50, 50, 255));
+
+    // End marker
+    draw_list->AddTriangleFilled(ImVec2(end_x, pos.y + height),
+                                 ImVec2(end_x - marker_size / 2, pos.y + height + marker_size),
+                                 ImVec2(end_x + marker_size / 2, pos.y + height + marker_size),
+                                 IM_COL32(200, 200, 200, 255));
+    draw_list->AddTriangle(ImVec2(end_x, pos.y + height),
+                           ImVec2(end_x - marker_size / 2, pos.y + height + marker_size),
+                           ImVec2(end_x + marker_size / 2, pos.y + height + marker_size),
+                           IM_COL32(50, 50, 50, 255));
+
+    // Advance cursor
+    ImGui::Dummy(ImVec2(width, height + marker_size + 4));
+}
+
 void drawPreviewSection(AppState& state) {
     if (ImGui::CollapsingHeader("Preview", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::SliderInt("Pendulums", &state.preview.pendulum_count, 1000, 100000);
@@ -659,8 +752,39 @@ void drawSimulationSection(AppState& state) {
 }
 
 void drawColorSection(AppState& state) {
-    if (ImGui::CollapsingHeader("Color")) {
+    if (ImGui::CollapsingHeader("Color", ImGuiTreeNodeFlags_DefaultOpen)) {
         bool color_changed = false;
+
+        // Color ramp visualization
+        float ramp_width = ImGui::GetContentRegionAvail().x;
+        drawColorRamp(state.config.color, ramp_width, 24.0f);
+
+        // Preset selector
+        auto preset_names = state.presets.getColorNames();
+        if (!preset_names.empty()) {
+            if (ImGui::BeginCombo("Preset", state.preset_ui.selected_color_preset >= 0 &&
+                                                   state.preset_ui.selected_color_preset <
+                                                       static_cast<int>(preset_names.size())
+                                               ? preset_names[state.preset_ui.selected_color_preset]
+                                                     .c_str()
+                                               : "Select...")) {
+                for (int i = 0; i < static_cast<int>(preset_names.size()); ++i) {
+                    bool is_selected = (state.preset_ui.selected_color_preset == i);
+                    if (ImGui::Selectable(preset_names[i].c_str(), is_selected)) {
+                        state.preset_ui.selected_color_preset = i;
+                        if (auto preset = state.presets.getColor(preset_names[i])) {
+                            state.config.color = *preset;
+                            color_changed = true;
+                        }
+                    }
+                    if (is_selected) {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            tooltip("Load a saved color preset");
+        }
 
         const char* schemes[] = {"Spectrum", "Rainbow", "Heat", "Cool", "Monochrome"};
         int scheme_idx = static_cast<int>(state.config.color.scheme);
@@ -684,6 +808,37 @@ void drawColorSection(AppState& state) {
         }
         tooltip("End position in color range [0-1]");
 
+        // Save preset button
+        if (ImGui::Button("Save as Preset...")) {
+            state.preset_ui.show_color_save_popup = true;
+            state.preset_ui.new_color_preset_name[0] = '\0';
+        }
+
+        // Save preset popup
+        if (state.preset_ui.show_color_save_popup) {
+            ImGui::OpenPopup("Save Color Preset");
+        }
+        if (ImGui::BeginPopupModal("Save Color Preset", &state.preset_ui.show_color_save_popup,
+                                   ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::Text("Enter preset name:");
+            ImGui::InputText("##color_preset_name", state.preset_ui.new_color_preset_name,
+                             sizeof(state.preset_ui.new_color_preset_name));
+
+            if (ImGui::Button("Save", ImVec2(120, 0))) {
+                if (state.preset_ui.new_color_preset_name[0] != '\0') {
+                    state.presets.setColor(state.preset_ui.new_color_preset_name,
+                                           state.config.color);
+                    state.presets.save();
+                    state.preset_ui.show_color_save_popup = false;
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+                state.preset_ui.show_color_save_popup = false;
+            }
+            ImGui::EndPopup();
+        }
+
         if (color_changed && state.running) {
             ColorSchemeGenerator color_gen(state.config.color);
             int n = static_cast<int>(state.colors.size());
@@ -698,6 +853,33 @@ void drawColorSection(AppState& state) {
 void drawPostProcessSection(AppState& state) {
     if (ImGui::CollapsingHeader("Post-Processing", ImGuiTreeNodeFlags_DefaultOpen)) {
         bool pp_changed = false;
+
+        // Preset selector
+        auto preset_names = state.presets.getPostProcessNames();
+        if (!preset_names.empty()) {
+            if (ImGui::BeginCombo("Preset##pp",
+                                  state.preset_ui.selected_pp_preset >= 0 &&
+                                          state.preset_ui.selected_pp_preset <
+                                              static_cast<int>(preset_names.size())
+                                      ? preset_names[state.preset_ui.selected_pp_preset].c_str()
+                                      : "Select...")) {
+                for (int i = 0; i < static_cast<int>(preset_names.size()); ++i) {
+                    bool is_selected = (state.preset_ui.selected_pp_preset == i);
+                    if (ImGui::Selectable(preset_names[i].c_str(), is_selected)) {
+                        state.preset_ui.selected_pp_preset = i;
+                        if (auto preset = state.presets.getPostProcess(preset_names[i])) {
+                            state.config.post_process = *preset;
+                            pp_changed = true;
+                        }
+                    }
+                    if (is_selected) {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            tooltip("Load a saved post-processing preset");
+        }
 
         // Normalization mode
         const char* norm_names[] = {"Per-Frame (auto)", "By Count (consistent)"};
@@ -748,6 +930,37 @@ void drawPostProcessSection(AppState& state) {
             pp_changed = true;
         }
         tooltip("Display gamma (2.2 = sRGB standard)");
+
+        // Save preset button
+        if (ImGui::Button("Save as Preset...##pp")) {
+            state.preset_ui.show_pp_save_popup = true;
+            state.preset_ui.new_pp_preset_name[0] = '\0';
+        }
+
+        // Save preset popup
+        if (state.preset_ui.show_pp_save_popup) {
+            ImGui::OpenPopup("Save Post-Process Preset");
+        }
+        if (ImGui::BeginPopupModal("Save Post-Process Preset", &state.preset_ui.show_pp_save_popup,
+                                   ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::Text("Enter preset name:");
+            ImGui::InputText("##pp_preset_name", state.preset_ui.new_pp_preset_name,
+                             sizeof(state.preset_ui.new_pp_preset_name));
+
+            if (ImGui::Button("Save", ImVec2(120, 0))) {
+                if (state.preset_ui.new_pp_preset_name[0] != '\0') {
+                    state.presets.setPostProcess(state.preset_ui.new_pp_preset_name,
+                                                 state.config.post_process);
+                    state.presets.save();
+                    state.preset_ui.show_pp_save_popup = false;
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+                state.preset_ui.show_pp_save_popup = false;
+            }
+            ImGui::EndPopup();
+        }
 
         if (pp_changed && state.running) {
             state.needs_redraw = true;
@@ -813,8 +1026,8 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
     // Analysis metrics
     ImGui::Separator();
     ImGui::Text("Variance: %.4f", state.variance_tracker.getCurrentVariance());
-    ImGui::Text("Spread:   %.1f%% (uniform)",
-                state.variance_tracker.getCurrentSpread().circular_spread * 100);
+    ImGui::Text("Spread:   %.1f%% above",
+                state.variance_tracker.getCurrentSpread().spread_ratio * 100);
     auto const& current = state.analysis_tracker.getCurrent();
     ImGui::Text("Energy:   %.2f", current.total_energy);
 
@@ -1031,9 +1244,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Load config
+    // Load config and presets
     AppState state;
     state.config = Config::load("config/default.toml");
+    state.presets = PresetLibrary::load("config/presets.toml");
 
     bool done = false;
     auto last_time = std::chrono::high_resolution_clock::now();
@@ -1082,7 +1296,7 @@ int main(int argc, char* argv[]) {
                             static_cast<float>(renderer.height()));
         // Flip UV vertically: OpenGL texture origin is bottom-left, ImGui expects top-left
         ImGui::Image(static_cast<ImTextureID>(static_cast<uintptr_t>(renderer.getTextureID())),
-                     preview_size, ImVec2(0, 1), ImVec2(1, 0));
+                     preview_size, ImVec2(0, 0), ImVec2(1, 1));
         ImGui::End();
 
         // Analysis graph with metric selector
@@ -1116,11 +1330,11 @@ int main(int argc, char* argv[]) {
         graph_size.y = std::max(100.0f, graph_size.y - 60.0f); // Leave room for score
         drawMetricGraph(state, graph_size);
 
-        // Display current metrics (live from renderer, updates with post-processing)
+        // Display current and peak metrics
         ImGui::Separator();
-        ImGui::Text("Brightness %.3f  Coverage %.2f%%  ContrastRange %.3f", renderer.lastBrightness(),
-                    renderer.lastCoverage() * 100.0f, renderer.lastContrastRange());
-        ImGui::Text("Edge %.4f  ColorVar %.4f", renderer.lastEdgeEnergy(), renderer.lastColorVariance());
+        auto const& current = state.analysis_tracker.getCurrent();
+        ImGui::Text("Current: Brightness %.3f  Contrast %.3f", current.brightness,
+                    current.contrast_stddev);
 
         // Calculate peak causticness from history
         if (!state.analysis_tracker.getHistory().empty() && state.boom_frame) {

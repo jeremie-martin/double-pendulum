@@ -64,6 +64,7 @@ if(BUILD_GUI)
         src/simulation.cpp
         src/video_writer.cpp
         src/music_manager.cpp
+        src/preset_library.cpp
         src/gl_renderer.cpp
         src/headless_gl.cpp
         external/imgui/imgui.cpp
