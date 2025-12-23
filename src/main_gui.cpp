@@ -207,9 +207,9 @@ void renderStates(AppState& state, GLRenderer& renderer,
         float x0 = cx;
         float y0 = cy;
         float x1 = cx + s.x1 * scale;
-        float y1 = cy - s.y1 * scale;
+        float y1 = cy + s.y1 * scale;  // Positive Y = below pivot (screen Y also increases downward)
         float x2 = cx + s.x2 * scale;
-        float y2 = cy - s.y2 * scale;
+        float y2 = cy + s.y2 * scale;
 
         renderer.drawLine(x0, y0, x1, y1, c.r, c.g, c.b);
         renderer.drawLine(x1, y1, x2, y2, c.r, c.g, c.b);
