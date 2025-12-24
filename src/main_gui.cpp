@@ -1938,6 +1938,29 @@ void drawMetricParametersWindow(AppState& state) {
 
     // Boom Detection section
     if (ImGui::CollapsingHeader("Boom Detection", ImGuiTreeNodeFlags_DefaultOpen)) {
+        // Metric selector
+        const char* metric_names[] = {
+            "angular_causticness",
+            "tip_causticness",
+            "spatial_concentration",
+            "cv_causticness",
+            "fold_causticness",
+            "local_coherence"
+        };
+        int metric_idx = 0;
+        for (int i = 0; i < 6; ++i) {
+            if (boom_params.metric_name == metric_names[i]) {
+                metric_idx = i;
+                break;
+            }
+        }
+        if (ImGui::Combo("Metric", &metric_idx, metric_names, 6)) {
+            boom_params.metric_name = metric_names[metric_idx];
+            params_changed = true;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Which metric to use for boom detection");
+
+        // Method selector
         const char* method_names[] = {"Max Causticness", "First Peak %", "Derivative Peak"};
         int method = static_cast<int>(boom_params.method);
         if (ImGui::Combo("Method", &method, method_names, 3)) {
