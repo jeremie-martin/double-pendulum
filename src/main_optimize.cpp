@@ -59,17 +59,25 @@ struct ParameterSet {
 
     std::string describe() const {
         std::ostringstream oss;
-        oss << "sectors=" << metrics.min_sectors << "-" << metrics.max_sectors
-            << " target=" << metrics.target_per_sector;
+        // Shorten metric name for display
+        std::string metric_short = boom.metric_name;
+        if (metric_short.find("_causticness") != std::string::npos) {
+            metric_short = metric_short.substr(0, metric_short.find("_causticness"));
+        } else if (metric_short.find("_concentration") != std::string::npos) {
+            metric_short = metric_short.substr(0, metric_short.find("_concentration")) + "_conc";
+        } else if (metric_short.find("_coherence") != std::string::npos) {
+            metric_short = metric_short.substr(0, metric_short.find("_coherence")) + "_coh";
+        }
+        oss << metric_short << " ";
         switch (boom.method) {
         case BoomDetectionMethod::MaxCausticness:
-            oss << " method=max offset=" << boom.offset_seconds;
+            oss << "max off=" << boom.offset_seconds;
             break;
         case BoomDetectionMethod::FirstPeakPercent:
-            oss << " method=first_peak pct=" << boom.peak_percent_threshold;
+            oss << "first@" << (int)(boom.peak_percent_threshold * 100) << "%";
             break;
         case BoomDetectionMethod::DerivativePeak:
-            oss << " method=deriv smooth=" << boom.smoothing_window;
+            oss << "deriv w=" << boom.smoothing_window;
             break;
         }
         return oss.str();
@@ -214,50 +222,65 @@ metrics::BoomDetection evaluateSimulation(
 std::vector<ParameterSet> generateParameterGrid() {
     std::vector<ParameterSet> grid;
 
-    // Sector variations
-    std::vector<int> min_sectors_vals = {6, 8, 12};
-    std::vector<int> max_sectors_vals = {48, 72, 96};
-    std::vector<int> target_vals = {20, 40, 60};
+    // Metrics to try for boom detection
+    std::vector<std::string> metric_names = {
+        "angular_causticness",
+        "tip_causticness",
+        "spatial_concentration",
+        "cv_causticness",
+        "fold_causticness",
+        "local_coherence"
+    };
+
+    // Sector variations (simplified - fewer combos since we're adding metric dimension)
+    std::vector<int> min_sectors_vals = {8};
+    std::vector<int> max_sectors_vals = {72};
+    std::vector<int> target_vals = {40};
 
     // Boom detection variations
-    std::vector<double> offset_vals = {0.0, 0.15, 0.3, 0.5};
-    std::vector<double> peak_pct_vals = {0.5, 0.6, 0.7, 0.8};
-    std::vector<int> smooth_vals = {3, 5, 7};
+    std::vector<double> offset_vals = {0.0, 0.2, 0.4};
+    std::vector<double> peak_pct_vals = {0.5, 0.6, 0.7};
+    std::vector<int> smooth_vals = {5};
 
     // Generate combinations
-    for (int min_sec : min_sectors_vals) {
-        for (int max_sec : max_sectors_vals) {
-            for (int target : target_vals) {
-                MetricParams mp;
-                mp.min_sectors = min_sec;
-                mp.max_sectors = max_sec;
-                mp.target_per_sector = target;
+    for (auto const& metric : metric_names) {
+        for (int min_sec : min_sectors_vals) {
+            for (int max_sec : max_sectors_vals) {
+                for (int target : target_vals) {
+                    MetricParams mp;
+                    mp.min_sectors = min_sec;
+                    mp.max_sectors = max_sec;
+                    mp.target_per_sector = target;
 
-                // MaxCausticness with different offsets
-                for (double offset : offset_vals) {
-                    ParameterSet ps;
-                    ps.metrics = mp;
-                    ps.boom.method = BoomDetectionMethod::MaxCausticness;
-                    ps.boom.offset_seconds = offset;
-                    grid.push_back(ps);
-                }
+                    // MaxCausticness with different offsets
+                    for (double offset : offset_vals) {
+                        ParameterSet ps;
+                        ps.metrics = mp;
+                        ps.boom.method = BoomDetectionMethod::MaxCausticness;
+                        ps.boom.offset_seconds = offset;
+                        ps.boom.metric_name = metric;
+                        grid.push_back(ps);
+                    }
 
-                // FirstPeakPercent with different thresholds
-                for (double pct : peak_pct_vals) {
-                    ParameterSet ps;
-                    ps.metrics = mp;
-                    ps.boom.method = BoomDetectionMethod::FirstPeakPercent;
-                    ps.boom.peak_percent_threshold = pct;
-                    grid.push_back(ps);
-                }
+                    // FirstPeakPercent with different thresholds
+                    for (double pct : peak_pct_vals) {
+                        ParameterSet ps;
+                        ps.metrics = mp;
+                        ps.boom.method = BoomDetectionMethod::FirstPeakPercent;
+                        ps.boom.peak_percent_threshold = pct;
+                        ps.boom.metric_name = metric;
+                        grid.push_back(ps);
+                    }
 
-                // DerivativePeak with different smoothing
-                for (int smooth : smooth_vals) {
-                    ParameterSet ps;
-                    ps.metrics = mp;
-                    ps.boom.method = BoomDetectionMethod::DerivativePeak;
-                    ps.boom.smoothing_window = smooth;
-                    grid.push_back(ps);
+                    // DerivativePeak with different smoothing
+                    for (int smooth : smooth_vals) {
+                        ParameterSet ps;
+                        ps.metrics = mp;
+                        ps.boom.method = BoomDetectionMethod::DerivativePeak;
+                        ps.boom.smoothing_window = smooth;
+                        ps.boom.metric_name = metric;
+                        grid.push_back(ps);
+                    }
                 }
             }
         }
@@ -291,6 +314,7 @@ void saveBestParams(std::string const& path, EvaluationResult const& best) {
     file << "gini_baseline_divisor = " << best.params.metrics.gini_baseline_divisor << "\n\n";
 
     file << "[boom_detection]\n";
+    file << "metric_name = \"" << best.params.boom.metric_name << "\"\n";
     switch (best.params.boom.method) {
     case BoomDetectionMethod::MaxCausticness:
         file << "method = \"max_causticness\"\n";
