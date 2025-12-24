@@ -7,41 +7,110 @@
 
 namespace metrics {
 
+double CausticnessAnalyzer::computeProminence(std::vector<double> const& values,
+                                              size_t peak_idx) const {
+    // Prominence = peak_value - max(left_base, right_base)
+    // where left_base is the minimum between the peak and the nearest higher peak
+    // to the left (or edge), and right_base is the same for the right side.
+    // This is a standard signal processing metric for peak significance.
+
+    double peak_val = values[peak_idx];
+    size_t n = values.size();
+
+    // Find left base: go left until we hit a higher value or edge
+    double left_min = peak_val;
+    for (size_t i = peak_idx; i > 0; --i) {
+        size_t idx = i - 1;
+        if (values[idx] > peak_val) {
+            // Found a higher point, stop
+            break;
+        }
+        if (values[idx] < left_min) {
+            left_min = values[idx];
+        }
+    }
+
+    // Find right base: go right until we hit a higher value or edge
+    double right_min = peak_val;
+    for (size_t i = peak_idx + 1; i < n; ++i) {
+        if (values[i] > peak_val) {
+            // Found a higher point, stop
+            break;
+        }
+        if (values[i] < right_min) {
+            right_min = values[i];
+        }
+    }
+
+    // Prominence is height above the higher of the two bases
+    double base = std::max(left_min, right_min);
+    return peak_val - base;
+}
+
 std::vector<CausticnessPeak>
 CausticnessAnalyzer::findPeaks(std::vector<double> const& values) const {
+    // Find peaks with prominence-based filtering.
+    // Algorithm:
+    // 1. Find all local maxima (point higher than both neighbors)
+    // 2. Filter by minimum height (fraction of global max)
+    // 3. Filter by minimum prominence (fraction of global max)
+    // 4. Enforce minimum separation (keep higher peak if too close)
+
     std::vector<CausticnessPeak> peaks;
     if (values.size() < 3) {
         return peaks;
     }
 
-    // Calculate minimum separation in frames
+    // Calculate thresholds
     int min_sep_frames = static_cast<int>(min_peak_separation_ / frame_duration_);
     if (min_sep_frames < 1) {
         min_sep_frames = 1;
     }
 
-    // Find global max for minimum height threshold
     double global_max = *std::max_element(values.begin(), values.end());
     double min_height = global_max * min_peak_height_fraction_;
+    double min_prominence = global_max * min_prominence_fraction_;
 
-    // Find local maxima
+    // Step 1: Find all local maxima above minimum height
+    std::vector<size_t> candidates;
     for (size_t i = 1; i < values.size() - 1; ++i) {
         if (values[i] > values[i - 1] && values[i] > values[i + 1] &&
             values[i] >= min_height) {
-            // Check distance from previous peak
-            if (peaks.empty() ||
-                (static_cast<int>(i) - peaks.back().frame) >= min_sep_frames) {
-                CausticnessPeak peak;
-                peak.frame = static_cast<int>(i);
-                peak.value = values[i];
-                peak.seconds = i * frame_duration_;
-                peaks.push_back(peak);
-            } else if (values[i] > peaks.back().value) {
-                // Replace previous peak if this one is higher and within separation
-                peaks.back().frame = static_cast<int>(i);
-                peaks.back().value = values[i];
-                peaks.back().seconds = i * frame_duration_;
-            }
+            candidates.push_back(i);
+        }
+    }
+
+    // Step 2: Filter by prominence and collect prominent peaks
+    struct ProminentPeak {
+        size_t idx;
+        double value;
+        double prominence;
+    };
+    std::vector<ProminentPeak> prominent_peaks;
+
+    for (size_t idx : candidates) {
+        double prom = computeProminence(values, idx);
+        if (prom >= min_prominence) {
+            prominent_peaks.push_back({idx, values[idx], prom});
+        }
+    }
+
+    // Step 3: Enforce minimum separation (keep higher peak)
+    for (auto const& pp : prominent_peaks) {
+        if (peaks.empty() ||
+            (static_cast<int>(pp.idx) - peaks.back().frame) >= min_sep_frames) {
+            CausticnessPeak peak;
+            peak.frame = static_cast<int>(pp.idx);
+            peak.value = pp.value;
+            peak.seconds = pp.idx * frame_duration_;
+            peak.prominence = pp.prominence;
+            peaks.push_back(peak);
+        } else if (pp.value > peaks.back().value) {
+            // Replace previous peak if this one is higher and within separation
+            peaks.back().frame = static_cast<int>(pp.idx);
+            peaks.back().value = pp.value;
+            peaks.back().seconds = pp.idx * frame_duration_;
+            peaks.back().prominence = pp.prominence;
         }
     }
 
@@ -314,7 +383,8 @@ nlohmann::json CausticnessAnalyzer::toJSON() const {
         for (auto const& peak : detected_peaks_) {
             peaks_json.push_back({{"frame", peak.frame},
                                   {"value", peak.value},
-                                  {"seconds", peak.seconds}});
+                                  {"seconds", peak.seconds},
+                                  {"prominence", peak.prominence}});
         }
         j["detected_peaks"] = peaks_json;
     }

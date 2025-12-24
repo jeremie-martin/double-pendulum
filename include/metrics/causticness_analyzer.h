@@ -15,6 +15,7 @@ struct CausticnessPeak {
     int frame = -1;
     double value = 0.0;
     double seconds = 0.0;
+    double prominence = 0.0;  // Height above surrounding terrain
 };
 
 // Causticness evolution metrics
@@ -70,6 +71,7 @@ public:
     void setSamplingInterval(double seconds) { sampling_interval_ = seconds; }
     void setMinPeakSeparation(double seconds) { min_peak_separation_ = seconds; }
     void setMinPeakHeightFraction(double fraction) { min_peak_height_fraction_ = fraction; }
+    void setMinProminenceFraction(double fraction) { min_prominence_fraction_ = fraction; }
     // Set frame duration for time-based calculations.
     // Must be positive. Zero or negative values will trigger a warning on analyze().
     void setFrameDuration(double seconds) {
@@ -123,6 +125,7 @@ public:
 
 private:
     // Peak detection
+    double computeProminence(std::vector<double> const& values, size_t peak_idx) const;
     std::vector<CausticnessPeak> findPeaks(std::vector<double> const& values) const;
     void computePeakClarity(std::vector<double> const& values);
     void computePostBoomArea(std::vector<double> const& values);
@@ -131,6 +134,7 @@ private:
     double sampling_interval_ = 0.5;           // Sample every N seconds
     double min_peak_separation_ = 0.3;         // Min seconds between peaks (user: 0.3s)
     double min_peak_height_fraction_ = 0.1;    // Min peak height as fraction of max
+    double min_prominence_fraction_ = 0.05;    // Min prominence as fraction of max
 
     bool has_results_ = false;
     CausticnessMetrics metrics_;
