@@ -2260,8 +2260,11 @@ void drawTimeline(AppState& state, GLRenderer& renderer) {
 }
 
 int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
+    // Parse command-line config path (optional)
+    std::string config_path = "config/gui.toml";
+    if (argc > 1) {
+        config_path = argv[1];
+    }
 
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
@@ -2366,7 +2369,8 @@ int main(int argc, char* argv[]) {
 
     // Load config and presets
     AppState state;
-    state.config = Config::load("config/default.toml");
+    state.config = Config::load(config_path);
+    std::cout << "Loaded config from: " << config_path << "\n";
     state.presets = PresetLibrary::load("config/presets.toml");
 
     bool done = false;

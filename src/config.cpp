@@ -113,6 +113,163 @@ Config Config::defaults() {
     return Config{};
 }
 
+// Load config values from a TOML table into an existing config (for include support)
+static void loadConfigFromTable(Config& config, toml::table const& tbl) {
+    // Physics
+    if (auto physics = tbl["physics"].as_table()) {
+        config.physics.gravity = get_or(*physics, "gravity", config.physics.gravity);
+        config.physics.length1 = get_or(*physics, "length1", config.physics.length1);
+        config.physics.length2 = get_or(*physics, "length2", config.physics.length2);
+        config.physics.mass1 = get_or(*physics, "mass1", config.physics.mass1);
+        config.physics.mass2 = get_or(*physics, "mass2", config.physics.mass2);
+        if (physics->contains("initial_angle1_deg")) {
+            config.physics.initial_angle1 = deg2rad(get_or(*physics, "initial_angle1_deg", 0.0));
+        }
+        if (physics->contains("initial_angle2_deg")) {
+            config.physics.initial_angle2 = deg2rad(get_or(*physics, "initial_angle2_deg", 0.0));
+        }
+        config.physics.initial_velocity1 = get_or(*physics, "initial_velocity1", config.physics.initial_velocity1);
+        config.physics.initial_velocity2 = get_or(*physics, "initial_velocity2", config.physics.initial_velocity2);
+    }
+
+    // Simulation
+    if (auto sim = tbl["simulation"].as_table()) {
+        config.simulation.pendulum_count = get_or(*sim, "pendulum_count", config.simulation.pendulum_count);
+        if (sim->contains("angle_variation_deg")) {
+            config.simulation.angle_variation = deg2rad(get_or(*sim, "angle_variation_deg", 0.0));
+        }
+        config.simulation.duration_seconds = get_or(*sim, "duration_seconds", config.simulation.duration_seconds);
+        config.simulation.total_frames = get_or(*sim, "total_frames", config.simulation.total_frames);
+        auto quality_str = get_string_or(*sim, "physics_quality", "");
+        if (!quality_str.empty()) {
+            config.simulation.physics_quality = parsePhysicsQuality(quality_str);
+            config.simulation.max_dt = qualityToMaxDt(config.simulation.physics_quality);
+        }
+        if (sim->contains("max_dt")) {
+            config.simulation.max_dt = get_or(*sim, "max_dt", config.simulation.max_dt);
+            config.simulation.physics_quality = PhysicsQuality::Custom;
+        }
+    }
+
+    // Render
+    if (auto render = tbl["render"].as_table()) {
+        config.render.width = get_or(*render, "width", config.render.width);
+        config.render.height = get_or(*render, "height", config.render.height);
+        config.render.thread_count = get_or(*render, "thread_count", config.render.thread_count);
+    }
+
+    // Post-process
+    if (auto pp = tbl["post_process"].as_table()) {
+        auto tone_map_str = get_string_or(*pp, "tone_map", "");
+        if (!tone_map_str.empty()) {
+            config.post_process.tone_map = parseToneMapOperator(tone_map_str);
+        }
+        config.post_process.reinhard_white_point = get_or(*pp, "reinhard_white_point", config.post_process.reinhard_white_point);
+        config.post_process.exposure = get_or(*pp, "exposure", config.post_process.exposure);
+        config.post_process.contrast = get_or(*pp, "contrast", config.post_process.contrast);
+        config.post_process.gamma = get_or(*pp, "gamma", config.post_process.gamma);
+        auto norm_str = get_string_or(*pp, "normalization", "");
+        if (!norm_str.empty()) {
+            config.post_process.normalization = parseNormalizationMode(norm_str);
+        }
+    }
+
+    // Color
+    if (auto color = tbl["color"].as_table()) {
+        auto scheme_str = get_string_or(*color, "scheme", "");
+        if (!scheme_str.empty()) {
+            config.color.scheme = parseColorScheme(scheme_str);
+        }
+        config.color.start = get_or(*color, "start", config.color.start);
+        config.color.end = get_or(*color, "end", config.color.end);
+    }
+
+    // Metrics parameters
+    if (auto metrics_tbl = tbl["metrics"].as_table()) {
+        config.metrics.min_sectors = get_or(*metrics_tbl, "min_sectors", config.metrics.min_sectors);
+        config.metrics.max_sectors = get_or(*metrics_tbl, "max_sectors", config.metrics.max_sectors);
+        config.metrics.target_per_sector = get_or(*metrics_tbl, "target_per_sector", config.metrics.target_per_sector);
+        config.metrics.min_grid = get_or(*metrics_tbl, "min_grid", config.metrics.min_grid);
+        config.metrics.max_grid = get_or(*metrics_tbl, "max_grid", config.metrics.max_grid);
+        config.metrics.target_per_cell = get_or(*metrics_tbl, "target_per_cell", config.metrics.target_per_cell);
+        config.metrics.max_radius = get_or(*metrics_tbl, "max_radius", config.metrics.max_radius);
+        config.metrics.cv_normalization = get_or(*metrics_tbl, "cv_normalization", config.metrics.cv_normalization);
+        config.metrics.log_ratio_normalization = get_or(*metrics_tbl, "log_ratio_normalization", config.metrics.log_ratio_normalization);
+        config.metrics.min_spread_threshold = get_or(*metrics_tbl, "min_spread_threshold", config.metrics.min_spread_threshold);
+        config.metrics.gini_chaos_baseline = get_or(*metrics_tbl, "gini_chaos_baseline", config.metrics.gini_chaos_baseline);
+        config.metrics.gini_baseline_divisor = get_or(*metrics_tbl, "gini_baseline_divisor", config.metrics.gini_baseline_divisor);
+        config.metrics.log_inverse_baseline = get_or(*metrics_tbl, "log_inverse_baseline", config.metrics.log_inverse_baseline);
+        config.metrics.log_inverse_divisor = get_or(*metrics_tbl, "log_inverse_divisor", config.metrics.log_inverse_divisor);
+    }
+
+    // Boom detection parameters
+    if (auto boom_tbl = tbl["boom_detection"].as_table()) {
+        auto method_str = get_string_or(*boom_tbl, "method", "");
+        if (!method_str.empty()) {
+            config.boom.method = parseBoomDetectionMethod(method_str);
+        }
+        config.boom.offset_seconds = get_or(*boom_tbl, "offset_seconds", config.boom.offset_seconds);
+        config.boom.peak_percent_threshold = get_or(*boom_tbl, "peak_percent_threshold", config.boom.peak_percent_threshold);
+        config.boom.min_peak_prominence = get_or(*boom_tbl, "min_peak_prominence", config.boom.min_peak_prominence);
+        config.boom.smoothing_window = get_or(*boom_tbl, "smoothing_window", config.boom.smoothing_window);
+        auto metric_name = get_string_or(*boom_tbl, "metric_name", "");
+        if (!metric_name.empty()) {
+            config.boom.metric_name = metric_name;
+        }
+    }
+
+    // Detection thresholds
+    if (auto detect = tbl["detection"].as_table()) {
+        config.detection.boom_threshold = get_or(*detect, "boom_threshold", config.detection.boom_threshold);
+        config.detection.boom_confirmation = get_or(*detect, "boom_confirmation", config.detection.boom_confirmation);
+        if (detect->contains("chaos_threshold")) {
+            config.detection.chaos_threshold = get_or(*detect, "chaos_threshold", config.detection.chaos_threshold);
+        } else if (detect->contains("white_threshold")) {
+            config.detection.chaos_threshold = get_or(*detect, "white_threshold", config.detection.chaos_threshold);
+        }
+        if (detect->contains("chaos_confirmation")) {
+            config.detection.chaos_confirmation = get_or(*detect, "chaos_confirmation", config.detection.chaos_confirmation);
+        } else if (detect->contains("white_confirmation")) {
+            config.detection.chaos_confirmation = get_or(*detect, "white_confirmation", config.detection.chaos_confirmation);
+        }
+        if (detect->contains("early_stop_after_chaos")) {
+            config.detection.early_stop_after_chaos = get_or(*detect, "early_stop_after_chaos", config.detection.early_stop_after_chaos);
+        } else if (detect->contains("early_stop_after_white")) {
+            config.detection.early_stop_after_chaos = get_or(*detect, "early_stop_after_white", config.detection.early_stop_after_chaos);
+        }
+    }
+
+    // Output
+    if (auto out = tbl["output"].as_table()) {
+        auto format_str = get_string_or(*out, "format", "");
+        if (!format_str.empty()) {
+            config.output.format = parseOutputFormat(format_str);
+        }
+        auto dir = get_string_or(*out, "directory", "");
+        if (!dir.empty()) {
+            config.output.directory = dir;
+        }
+        auto prefix = get_string_or(*out, "filename_prefix", "");
+        if (!prefix.empty()) {
+            config.output.filename_prefix = prefix;
+        }
+        auto codec = get_string_or(*out, "video_codec", "");
+        if (!codec.empty()) {
+            config.output.video_codec = codec;
+        }
+        config.output.video_crf = get_or(*out, "video_crf", config.output.video_crf);
+        config.output.video_fps = get_or(*out, "video_fps", config.output.video_fps);
+        if (out->contains("save_simulation_data")) {
+            config.output.save_simulation_data = get_or(*out, "save_simulation_data", config.output.save_simulation_data);
+        }
+    }
+
+    // Analysis mode
+    if (auto analysis_tbl = tbl["analysis"].as_table()) {
+        config.analysis.enabled = get_or(*analysis_tbl, "enabled", config.analysis.enabled);
+    }
+}
+
 Config Config::load(std::string const& path) {
     Config config;
 
@@ -123,137 +280,35 @@ Config Config::load(std::string const& path) {
 
     try {
         auto tbl = toml::parse_file(path);
+        std::string base_path = std::filesystem::path(path).parent_path().string();
+        if (base_path.empty()) base_path = ".";
 
-        // Physics
-        if (auto physics = tbl["physics"].as_table()) {
-            config.physics.gravity = get_or(*physics, "gravity", 9.81);
-            config.physics.length1 = get_or(*physics, "length1", 1.0);
-            config.physics.length2 = get_or(*physics, "length2", 1.0);
-            config.physics.mass1 = get_or(*physics, "mass1", 1.0);
-            config.physics.mass2 = get_or(*physics, "mass2", 1.0);
-            config.physics.initial_angle1 = deg2rad(get_or(*physics, "initial_angle1_deg", -32.2));
-            config.physics.initial_angle2 = deg2rad(get_or(*physics, "initial_angle2_deg", -32.0));
-            config.physics.initial_velocity1 = get_or(*physics, "initial_velocity1", 0.0);
-            config.physics.initial_velocity2 = get_or(*physics, "initial_velocity2", 0.0);
-        }
-
-        // Simulation
-        if (auto sim = tbl["simulation"].as_table()) {
-            config.simulation.pendulum_count = get_or(*sim, "pendulum_count", 100000);
-            config.simulation.angle_variation = deg2rad(get_or(*sim, "angle_variation_deg", 0.1));
-            config.simulation.duration_seconds = get_or(*sim, "duration_seconds", 11.0);
-            config.simulation.total_frames = get_or(*sim, "total_frames", 660);
-
-            // Physics quality: either use a preset or specify max_dt directly
-            auto quality_str = get_string_or(*sim, "physics_quality", "");
-            if (!quality_str.empty()) {
-                config.simulation.physics_quality = parsePhysicsQuality(quality_str);
-                config.simulation.max_dt = qualityToMaxDt(config.simulation.physics_quality);
-            }
-            // max_dt overrides quality preset if specified
-            if (sim->contains("max_dt")) {
-                config.simulation.max_dt = get_or(*sim, "max_dt", 0.007);
-                config.simulation.physics_quality = PhysicsQuality::Custom;
+        // Process includes first (they provide base values that can be overridden)
+        if (auto includes = tbl["include"].as_array()) {
+            for (auto const& inc : *includes) {
+                if (auto inc_path = inc.value<std::string>()) {
+                    std::filesystem::path full_path;
+                    if (std::filesystem::path(*inc_path).is_absolute()) {
+                        full_path = *inc_path;
+                    } else {
+                        full_path = std::filesystem::path(base_path) / *inc_path;
+                    }
+                    if (std::filesystem::exists(full_path)) {
+                        try {
+                            auto inc_tbl = toml::parse_file(full_path.string());
+                            loadConfigFromTable(config, inc_tbl);
+                        } catch (toml::parse_error const& err) {
+                            std::cerr << "Error parsing included config " << full_path << ": " << err.description() << "\n";
+                        }
+                    } else {
+                        std::cerr << "Warning: Included config not found: " << full_path << "\n";
+                    }
+                }
             }
         }
 
-        // Render
-        if (auto render = tbl["render"].as_table()) {
-            config.render.width = get_or(*render, "width", 2160);
-            config.render.height = get_or(*render, "height", 2160);
-            config.render.thread_count = get_or(*render, "thread_count", 0);
-        }
-
-        // Post-process
-        if (auto pp = tbl["post_process"].as_table()) {
-            auto tone_map_str = get_string_or(*pp, "tone_map", "none");
-            config.post_process.tone_map = parseToneMapOperator(tone_map_str);
-            config.post_process.reinhard_white_point = get_or(*pp, "reinhard_white_point", 1.0);
-            config.post_process.exposure = get_or(*pp, "exposure", 0.0);
-            config.post_process.contrast = get_or(*pp, "contrast", 1.0);
-            config.post_process.gamma = get_or(*pp, "gamma", 2.2);
-            auto norm_str = get_string_or(*pp, "normalization", "per_frame");
-            config.post_process.normalization = parseNormalizationMode(norm_str);
-        }
-
-        // Color
-        if (auto color = tbl["color"].as_table()) {
-            auto scheme_str = get_string_or(*color, "scheme", "spectrum");
-            config.color.scheme = parseColorScheme(scheme_str);
-            config.color.start = get_or(*color, "start", 0.0);
-            config.color.end = get_or(*color, "end", 1.0);
-        }
-
-        // Metrics parameters
-        if (auto metrics_tbl = tbl["metrics"].as_table()) {
-            config.metrics.min_sectors = get_or(*metrics_tbl, "min_sectors", 8);
-            config.metrics.max_sectors = get_or(*metrics_tbl, "max_sectors", 72);
-            config.metrics.target_per_sector = get_or(*metrics_tbl, "target_per_sector", 40);
-            config.metrics.min_grid = get_or(*metrics_tbl, "min_grid", 4);
-            config.metrics.max_grid = get_or(*metrics_tbl, "max_grid", 32);
-            config.metrics.target_per_cell = get_or(*metrics_tbl, "target_per_cell", 40);
-            config.metrics.max_radius = get_or(*metrics_tbl, "max_radius", 2.0);
-            config.metrics.cv_normalization = get_or(*metrics_tbl, "cv_normalization", 1.5);
-            config.metrics.log_ratio_normalization = get_or(*metrics_tbl, "log_ratio_normalization", 2.0);
-            config.metrics.min_spread_threshold = get_or(*metrics_tbl, "min_spread_threshold", 0.05);
-            config.metrics.gini_chaos_baseline = get_or(*metrics_tbl, "gini_chaos_baseline", 0.35);
-            config.metrics.gini_baseline_divisor = get_or(*metrics_tbl, "gini_baseline_divisor", 0.65);
-            config.metrics.log_inverse_baseline = get_or(*metrics_tbl, "log_inverse_baseline", 1.0);
-            config.metrics.log_inverse_divisor = get_or(*metrics_tbl, "log_inverse_divisor", 2.5);
-        }
-
-        // Boom detection parameters
-        if (auto boom_tbl = tbl["boom_detection"].as_table()) {
-            auto method_str = get_string_or(*boom_tbl, "method", "max_causticness");
-            config.boom.method = parseBoomDetectionMethod(method_str);
-            config.boom.offset_seconds = get_or(*boom_tbl, "offset_seconds", 0.3);
-            config.boom.peak_percent_threshold = get_or(*boom_tbl, "peak_percent_threshold", 0.6);
-            config.boom.min_peak_prominence = get_or(*boom_tbl, "min_peak_prominence", 0.05);
-            config.boom.smoothing_window = get_or(*boom_tbl, "smoothing_window", 5);
-            config.boom.metric_name = get_string_or(*boom_tbl, "metric_name", "angular_causticness");
-        }
-
-        // Detection thresholds
-        if (auto detect = tbl["detection"].as_table()) {
-            config.detection.boom_threshold = get_or(*detect, "boom_threshold", 0.1);
-            config.detection.boom_confirmation = get_or(*detect, "boom_confirmation", 10);
-            // Support both "chaos" (new) and "white" (legacy) names
-            if (detect->contains("chaos_threshold")) {
-                config.detection.chaos_threshold = get_or(*detect, "chaos_threshold", 700.0);
-            } else {
-                config.detection.chaos_threshold = get_or(*detect, "white_threshold", 700.0);
-            }
-            if (detect->contains("chaos_confirmation")) {
-                config.detection.chaos_confirmation = get_or(*detect, "chaos_confirmation", 10);
-            } else {
-                config.detection.chaos_confirmation = get_or(*detect, "white_confirmation", 10);
-            }
-            if (detect->contains("early_stop_after_chaos")) {
-                config.detection.early_stop_after_chaos =
-                    get_or(*detect, "early_stop_after_chaos", false);
-            } else {
-                config.detection.early_stop_after_chaos =
-                    get_or(*detect, "early_stop_after_white", false);
-            }
-        }
-
-        // Output
-        if (auto out = tbl["output"].as_table()) {
-            auto format_str = get_string_or(*out, "format", "png");
-            config.output.format = parseOutputFormat(format_str);
-            config.output.directory = get_string_or(*out, "directory", "output");
-            config.output.filename_prefix = get_string_or(*out, "filename_prefix", "frame");
-            config.output.video_codec = get_string_or(*out, "video_codec", "libx264");
-            config.output.video_crf = get_or(*out, "video_crf", 23);
-            config.output.video_fps = get_or(*out, "video_fps", 60);
-            config.output.save_simulation_data =
-                get_or(*out, "save_simulation_data", false);
-        }
-
-        // Analysis mode
-        if (auto analysis_tbl = tbl["analysis"].as_table()) {
-            config.analysis.enabled = get_or(*analysis_tbl, "enabled", false);
-        }
+        // Load values from this file (override includes)
+        loadConfigFromTable(config, tbl);
 
     } catch (toml::parse_error const& err) {
         std::cerr << "Error parsing config: " << err.description() << "\n";

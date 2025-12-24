@@ -1,0 +1,40 @@
+# Default GUI configuration
+# Includes optimized metric parameters and sets GUI-friendly defaults
+
+include = ["best_params.toml"]
+
+[physics]
+gravity = 9.81
+length1 = 1.0
+length2 = 1.0
+mass1 = 1.0
+mass2 = 1.0
+initial_angle1_deg = 170.0
+initial_angle2_deg = 170.0
+
+[simulation]
+pendulum_count = 10000
+angle_variation_deg = 0.1
+duration_seconds = 15.0
+total_frames = 900
+physics_quality = "high"
+
+[render]
+width = 1080
+height = 1080
+
+[post_process]
+tone_map = "reinhard"
+exposure = 6.0
+contrast = 1.0
+gamma = 2.2
+
+[color]
+scheme = "spectrum"
+start = 0.0
+end = 1.0
+
+[output]
+format = "video"
+video_fps = 60
+video_crf = 18
