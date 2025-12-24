@@ -101,6 +101,10 @@ int computePhysicsMetrics(Options const& opts,
     metrics::MetricsCollector collector;
     metrics::EventDetector detector;
     metrics::CausticnessAnalyzer causticness_analyzer;
+
+    // Apply metric parameters from config
+    collector.setMetricParams(config.metrics);
+
     metrics::initializeMetricsSystem(
         collector, detector, causticness_analyzer,
         config.detection.chaos_threshold, config.detection.chaos_confirmation,
@@ -136,7 +140,7 @@ int computePhysicsMetrics(Options const& opts,
 
     // Run post-simulation analysis (boom detection + analyzers)
     auto boom = metrics::runPostSimulationAnalysis(
-        collector, detector, causticness_analyzer, frame_duration);
+        collector, detector, causticness_analyzer, frame_duration, config.boom);
 
     // Print results
     std::cout << "\nResults:\n";
@@ -255,6 +259,10 @@ int computeGPUMetrics(Options const& opts,
     metrics::MetricsCollector collector;
     metrics::EventDetector detector;
     metrics::CausticnessAnalyzer causticness_analyzer;
+
+    // Apply metric parameters from config
+    collector.setMetricParams(config.metrics);
+
     metrics::initializeMetricsSystem(
         collector, detector, causticness_analyzer,
         config.detection.chaos_threshold, config.detection.chaos_confirmation,
@@ -337,7 +345,7 @@ int computeGPUMetrics(Options const& opts,
 
     // Run post-simulation analysis (boom detection + analyzers)
     auto boom = metrics::runPostSimulationAnalysis(
-        collector, detector, causticness_analyzer, frame_duration);
+        collector, detector, causticness_analyzer, frame_duration, config.boom);
 
     // Print results
     std::cout << "\nResults:\n";

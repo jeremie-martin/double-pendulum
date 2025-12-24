@@ -60,7 +60,7 @@ inline void resetMetricsSystem(MetricsCollector& collector,
 
 // Run boom detection and analyzers after simulation completes.
 // This is the standard pattern used by all executables:
-// 1. Find boom frame via max angular causticness
+// 1. Find boom frame using configured method and metric
 // 2. Force boom event into detector for analyzer access
 // 3. Run analyzers
 //
@@ -68,9 +68,10 @@ inline void resetMetricsSystem(MetricsCollector& collector,
 inline BoomDetection runPostSimulationAnalysis(MetricsCollector const& collector,
                                                EventDetector& detector,
                                                CausticnessAnalyzer& causticness_analyzer,
-                                               double frame_duration) {
-    // Detect boom using max angular causticness
-    auto boom = findBoomFrame(collector, frame_duration);
+                                               double frame_duration,
+                                               BoomDetectionParams const& boom_params = {}) {
+    // Detect boom using configured method and metric
+    auto boom = findBoomFrame(collector, frame_duration, boom_params);
 
     if (boom.frame >= 0) {
         // Get variance at boom for the event
