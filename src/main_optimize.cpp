@@ -4,7 +4,12 @@
 // for boom and peak detection based on annotated ground truth data.
 //
 // Usage:
-//   ./pendulum-optimize annotations.json [simulation_data.bin ...]
+//   ./pendulum-optimize annotations.json [options] [simulation_data.bin ...]
+//
+// Options:
+//   --save-cache <dir>   Save Phase 1 computed metrics to cache directory
+//   --load-cache <dir>   Load Phase 1 metrics from cache (skip computation)
+//   --output <file>      Output file for best parameters (default: best_params.toml)
 //
 // Annotation format (JSON):
 // {
@@ -243,6 +248,202 @@ metrics::BoomDetection evaluateBoomDetection(ComputedMetrics const& computed,
                                              BoomDetectionParams const& boom_params) {
     return metrics::findBoomFrame(computed.collector, computed.frame_duration, boom_params);
 }
+
+// ============================================================================
+// PHASE 1 CACHE - Save/load computed metrics to avoid recomputation
+// ============================================================================
+
+// Cache file format version
+constexpr uint32_t CACHE_VERSION = 1;
+constexpr uint32_t CACHE_MAGIC = 0x4F50544D;  // "OPTM"
+
+// Save a single ComputedMetrics to binary file
+bool saveComputedMetrics(std::string const& path, ComputedMetrics const& cm) {
+    std::ofstream file(path, std::ios::binary);
+    if (!file.is_open()) return false;
+
+    // Write header
+    file.write(reinterpret_cast<char const*>(&CACHE_MAGIC), sizeof(CACHE_MAGIC));
+    file.write(reinterpret_cast<char const*>(&CACHE_VERSION), sizeof(CACHE_VERSION));
+
+    // Write metadata
+    uint32_t id_len = static_cast<uint32_t>(cm.sim_id.size());
+    file.write(reinterpret_cast<char const*>(&id_len), sizeof(id_len));
+    file.write(cm.sim_id.data(), id_len);
+    file.write(reinterpret_cast<char const*>(&cm.frame_duration), sizeof(cm.frame_duration));
+    file.write(reinterpret_cast<char const*>(&cm.boom_frame_truth), sizeof(cm.boom_frame_truth));
+
+    // Get all metric names and write count
+    auto metric_names = cm.collector.getMetricNames();
+    uint32_t num_metrics = static_cast<uint32_t>(metric_names.size());
+    file.write(reinterpret_cast<char const*>(&num_metrics), sizeof(num_metrics));
+
+    // Write each metric's values
+    for (auto const& name : metric_names) {
+        auto const* series = cm.collector.getMetric(name);
+        if (!series) continue;
+
+        uint32_t name_len = static_cast<uint32_t>(name.size());
+        file.write(reinterpret_cast<char const*>(&name_len), sizeof(name_len));
+        file.write(name.data(), name_len);
+
+        auto const& values = series->values();
+        uint32_t num_values = static_cast<uint32_t>(values.size());
+        file.write(reinterpret_cast<char const*>(&num_values), sizeof(num_values));
+        file.write(reinterpret_cast<char const*>(values.data()), num_values * sizeof(double));
+    }
+
+    return file.good();
+}
+
+// Load a single ComputedMetrics from binary file
+bool loadComputedMetrics(std::string const& path, ComputedMetrics& cm) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) return false;
+
+    // Read and verify header
+    uint32_t magic, version;
+    file.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+    file.read(reinterpret_cast<char*>(&version), sizeof(version));
+    if (magic != CACHE_MAGIC || version != CACHE_VERSION) return false;
+
+    // Read metadata
+    uint32_t id_len;
+    file.read(reinterpret_cast<char*>(&id_len), sizeof(id_len));
+    cm.sim_id.resize(id_len);
+    file.read(cm.sim_id.data(), id_len);
+    file.read(reinterpret_cast<char*>(&cm.frame_duration), sizeof(cm.frame_duration));
+    file.read(reinterpret_cast<char*>(&cm.boom_frame_truth), sizeof(cm.boom_frame_truth));
+
+    // Register metrics to prepare collector
+    cm.collector.registerStandardMetrics();
+
+    // Read metrics
+    uint32_t num_metrics;
+    file.read(reinterpret_cast<char*>(&num_metrics), sizeof(num_metrics));
+
+    for (uint32_t i = 0; i < num_metrics; ++i) {
+        uint32_t name_len;
+        file.read(reinterpret_cast<char*>(&name_len), sizeof(name_len));
+        std::string name(name_len, '\0');
+        file.read(name.data(), name_len);
+
+        uint32_t num_values;
+        file.read(reinterpret_cast<char*>(&num_values), sizeof(num_values));
+        std::vector<double> values(num_values);
+        file.read(reinterpret_cast<char*>(values.data()), num_values * sizeof(double));
+
+        // Populate the collector with loaded values
+        auto* series = cm.collector.getMetricMutable(name);
+        if (series) {
+            for (double v : values) {
+                series->push(v);
+            }
+        }
+    }
+
+    return file.good();
+}
+
+// Save Phase 1 cache to a directory
+bool savePhase1Cache(std::string const& cache_dir,
+                     std::map<std::string, std::vector<ComputedMetrics>> const& computed_by_config) {
+    namespace fs = std::filesystem;
+
+    // Create cache directory
+    std::error_code ec;
+    fs::create_directories(cache_dir, ec);
+    if (ec) {
+        std::cerr << "Error creating cache directory: " << ec.message() << "\n";
+        return false;
+    }
+
+    // Write index file with config keys
+    std::ofstream index(cache_dir + "/index.txt");
+    if (!index.is_open()) {
+        std::cerr << "Error creating cache index file\n";
+        return false;
+    }
+
+    size_t saved = 0;
+    for (auto const& [config_key, computed_vec] : computed_by_config) {
+        // Sanitize config_key for filesystem (replace special chars)
+        std::string safe_key = config_key;
+        std::replace(safe_key.begin(), safe_key.end(), '/', '_');
+        std::replace(safe_key.begin(), safe_key.end(), '\\', '_');
+
+        index << safe_key << "\n";
+
+        // Create subdirectory for this config
+        std::string config_dir = cache_dir + "/" + safe_key;
+        fs::create_directories(config_dir, ec);
+
+        // Save each simulation's computed metrics
+        for (size_t i = 0; i < computed_vec.size(); ++i) {
+            std::string file_path = config_dir + "/" + std::to_string(i) + ".bin";
+            if (saveComputedMetrics(file_path, computed_vec[i])) {
+                saved++;
+            }
+        }
+    }
+
+    std::cout << "Saved " << saved << " computed metric sets to " << cache_dir << "\n";
+    return true;
+}
+
+// Load Phase 1 cache from a directory
+bool loadPhase1Cache(std::string const& cache_dir,
+                     std::map<std::string, std::vector<ComputedMetrics>>& computed_by_config,
+                     size_t expected_sims_per_config) {
+    namespace fs = std::filesystem;
+
+    // Read index file
+    std::ifstream index(cache_dir + "/index.txt");
+    if (!index.is_open()) {
+        std::cerr << "Cache index not found: " << cache_dir << "/index.txt\n";
+        return false;
+    }
+
+    std::vector<std::string> config_keys;
+    std::string line;
+    while (std::getline(index, line)) {
+        if (!line.empty()) {
+            config_keys.push_back(line);
+        }
+    }
+
+    if (config_keys.empty()) {
+        std::cerr << "Empty cache index\n";
+        return false;
+    }
+
+    size_t loaded = 0;
+    for (auto const& safe_key : config_keys) {
+        std::string config_dir = cache_dir + "/" + safe_key;
+        if (!fs::exists(config_dir)) continue;
+
+        std::vector<ComputedMetrics> computed_vec(expected_sims_per_config);
+
+        bool all_loaded = true;
+        for (size_t i = 0; i < expected_sims_per_config; ++i) {
+            std::string file_path = config_dir + "/" + std::to_string(i) + ".bin";
+            if (!loadComputedMetrics(file_path, computed_vec[i])) {
+                all_loaded = false;
+                break;
+            }
+            loaded++;
+        }
+
+        if (all_loaded) {
+            computed_by_config[safe_key] = std::move(computed_vec);
+        }
+    }
+
+    std::cout << "Loaded " << loaded << " computed metric sets from cache\n";
+    return !computed_by_config.empty();
+}
+
+// ============================================================================
 
 // Compute effective sector count for sector-based metrics
 int computeEffectiveSectors(int pendulum_count, SectorMetricParams const& params) {
@@ -631,24 +832,9 @@ extractUniqueMetricConfigMaps(std::vector<ParameterizedMetric> const& metrics, i
     return result;
 }
 
-// Save best parameters to TOML file (using new per-metric format)
-void saveBestParams(std::string const& path, EvaluationResult const& best) {
-    std::ofstream file(path);
-    if (!file.is_open()) {
-        std::cerr << "Error: Could not write to " << path << "\n";
-        return;
-    }
-
-    file << "# Best parameters found by pendulum-optimize\n";
-    file << "# Boom MAE: " << std::fixed << std::setprecision(2) << best.boom_mae << " frames\n";
-    file << "# Peak MAE: " << std::fixed << std::setprecision(2) << best.peak_mae << " frames\n";
-    file << "# Samples evaluated: " << best.samples_evaluated << "\n\n";
-
-    // Output the metric-specific configuration
-    std::string const& metric_name = best.params.boom.metric_name;
-    file << "[metrics." << metric_name << "]\n";
-
-    // Output parameters based on variant type
+// Helper to write metric params to file
+void writeMetricParams(std::ofstream& file, std::string const& /*metric_name*/,
+                       MetricParamsVariant const& params) {
     std::visit([&](auto const& p) {
         using T = std::decay_t<decltype(p)>;
         if constexpr (std::is_same_v<T, SectorMetricParams>) {
@@ -685,11 +871,12 @@ void saveBestParams(std::string const& path, EvaluationResult const& best) {
             file << "log_inverse_baseline = " << std::fixed << std::setprecision(2) << p.log_inverse_baseline << "\n";
             file << "log_inverse_divisor = " << std::fixed << std::setprecision(2) << p.log_inverse_divisor << "\n";
         }
-    }, best.params.metric_config.params);
+    }, params);
+}
 
-    // Output boom detection parameters embedded in the metric section
-    file << "\n[metrics." << metric_name << ".boom]\n";
-    switch (best.params.boom.method) {
+// Helper to write boom params to file
+void writeBoomParams(std::ofstream& file, BoomDetectionParams const& boom) {
+    switch (boom.method) {
     case BoomDetectionMethod::MaxCausticness:
         file << "method = \"max_causticness\"\n";
         break;
@@ -706,27 +893,73 @@ void saveBestParams(std::string const& path, EvaluationResult const& best) {
         file << "method = \"second_derivative_peak\"\n";
         break;
     }
-    file << "offset_seconds = " << std::fixed << std::setprecision(2)
-         << best.params.boom.offset_seconds << "\n";
-    file << "peak_percent_threshold = " << std::fixed << std::setprecision(2)
-         << best.params.boom.peak_percent_threshold << "\n";
-    file << "min_peak_prominence = " << std::fixed << std::setprecision(2)
-         << best.params.boom.min_peak_prominence << "\n";
-    file << "smoothing_window = " << best.params.boom.smoothing_window << "\n";
-    file << "crossing_threshold = " << std::fixed << std::setprecision(2)
-         << best.params.boom.crossing_threshold << "\n";
-    file << "crossing_confirmation = " << best.params.boom.crossing_confirmation << "\n";
+    file << "offset_seconds = " << std::fixed << std::setprecision(2) << boom.offset_seconds << "\n";
+    file << "peak_percent_threshold = " << std::fixed << std::setprecision(2) << boom.peak_percent_threshold << "\n";
+    file << "min_peak_prominence = " << std::fixed << std::setprecision(2) << boom.min_peak_prominence << "\n";
+    file << "smoothing_window = " << boom.smoothing_window << "\n";
+    file << "crossing_threshold = " << std::fixed << std::setprecision(2) << boom.crossing_threshold << "\n";
+    file << "crossing_confirmation = " << boom.crossing_confirmation << "\n";
+}
 
-    // Output global boom detection settings
-    file << "\n[boom_detection]\n";
-    file << "active_metric = \"" << metric_name << "\"\n";
+// Save best parameters for ALL metrics to TOML file
+void saveAllBestParams(std::string const& path,
+                       std::vector<EvaluationResult> const& results,
+                       EvaluationResult const& global_best) {
+    std::ofstream file(path);
+    if (!file.is_open()) {
+        std::cerr << "Error: Could not write to " << path << "\n";
+        return;
+    }
 
-    std::cout << "Best parameters saved to: " << path << "\n";
+    // Find best result for each metric type
+    std::map<std::string, EvaluationResult const*> best_per_metric;
+    for (auto const& r : results) {
+        std::string const& metric = r.params.boom.metric_name;
+        if (best_per_metric.find(metric) == best_per_metric.end() ||
+            r.boom_mae < best_per_metric[metric]->boom_mae) {
+            best_per_metric[metric] = &r;
+        }
+    }
+
+    file << "# Best parameters found by pendulum-optimize\n";
+    file << "# Global best: " << global_best.params.boom.metric_name
+         << " with MAE=" << std::fixed << std::setprecision(2) << global_best.boom_mae << " frames\n";
+    file << "# Samples evaluated: " << global_best.samples_evaluated << "\n";
+    file << "# This file contains best parameters for ALL metrics.\n";
+    file << "# The [boom_detection] section at the end specifies which metric to use.\n\n";
+
+    // Sort metrics by MAE for consistent output
+    std::vector<std::pair<std::string, EvaluationResult const*>> sorted_metrics(
+        best_per_metric.begin(), best_per_metric.end());
+    std::sort(sorted_metrics.begin(), sorted_metrics.end(),
+              [](auto const& a, auto const& b) { return a.second->boom_mae < b.second->boom_mae; });
+
+    // Write each metric's best configuration
+    for (auto const& [metric_name, best] : sorted_metrics) {
+        file << "# " << metric_name << ": MAE=" << std::fixed << std::setprecision(2)
+             << best->boom_mae << " frames\n";
+        file << "[metrics." << metric_name << "]\n";
+        writeMetricParams(file, metric_name, best->params.metric_config.params);
+        file << "\n[metrics." << metric_name << ".boom]\n";
+        writeBoomParams(file, best->params.boom);
+        file << "\n";
+    }
+
+    // Output global boom detection settings pointing to best metric
+    file << "[boom_detection]\n";
+    file << "active_metric = \"" << global_best.params.boom.metric_name << "\"\n";
+
+    std::cout << "Best parameters for " << best_per_metric.size() << " metrics saved to: " << path << "\n";
 }
 
 void printUsage(char const* prog) {
-    std::cerr << "Usage: " << prog << " annotations.json [simulation_data.bin ...]\n\n"
+    std::cerr << "Usage: " << prog << " annotations.json [options] [simulation_data.bin ...]\n\n"
               << "Performs grid search to find optimal metric parameters.\n\n"
+              << "Options:\n"
+              << "  --save-cache <dir>   Save Phase 1 computed metrics to cache directory\n"
+              << "  --load-cache <dir>   Load Phase 1 metrics from cache (skip computation)\n"
+              << "  --output <file>      Output file for best parameters (default: best_params.toml)\n"
+              << "  --help               Show this help message\n\n"
               << "If simulation data files are provided on command line, they override\n"
               << "the paths in annotations.json.\n\n"
               << "Annotation JSON format:\n"
@@ -749,7 +982,40 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::string annotations_path = argv[1];
+    // Parse command line options
+    std::string annotations_path;
+    std::string save_cache_dir;
+    std::string load_cache_dir;
+    std::string output_file = "best_params.toml";
+    std::vector<std::string> data_paths;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--help" || arg == "-h") {
+            printUsage(argv[0]);
+            return 0;
+        } else if (arg == "--save-cache" && i + 1 < argc) {
+            save_cache_dir = argv[++i];
+        } else if (arg == "--load-cache" && i + 1 < argc) {
+            load_cache_dir = argv[++i];
+        } else if (arg == "--output" && i + 1 < argc) {
+            output_file = argv[++i];
+        } else if (arg[0] == '-') {
+            std::cerr << "Unknown option: " << arg << "\n";
+            printUsage(argv[0]);
+            return 1;
+        } else if (annotations_path.empty()) {
+            annotations_path = arg;
+        } else {
+            data_paths.push_back(arg);
+        }
+    }
+
+    if (annotations_path.empty()) {
+        std::cerr << "Error: annotations.json path required\n";
+        printUsage(argv[0]);
+        return 1;
+    }
 
     // Load annotations
     auto annotations = loadAnnotations(annotations_path);
@@ -761,10 +1027,8 @@ int main(int argc, char* argv[]) {
     std::cout << "Loaded " << annotations.size() << " annotations\n";
 
     // Override paths if provided on command line
-    if (argc > 2) {
-        for (int i = 2; i < argc && i - 2 < static_cast<int>(annotations.size()); ++i) {
-            annotations[i - 2].data_path = argv[i];
-        }
+    for (size_t i = 0; i < data_paths.size() && i < annotations.size(); ++i) {
+        annotations[i].data_path = data_paths[i];
     }
 
     // Validate all data files exist
@@ -899,92 +1163,121 @@ int main(int argc, char* argv[]) {
     std::cout << "Threads: " << num_threads << "\n\n";
 
     auto start_time = std::chrono::steady_clock::now();
+    std::mutex print_mutex;  // Shared mutex for progress output
 
     // ============================================
     // PHASE 1: Compute metrics for each unique metric config
     // ============================================
     size_t total_phase1_work = unique_config_maps.size() * simulations.size();
-    std::cout << "Phase 1: Computing metrics (" << total_phase1_work << " work items)...\n";
 
     // Create index from config key to computed metrics
     // computed_by_config[config_key][sim_idx] = ComputedMetrics
     std::map<std::string, std::vector<ComputedMetrics>> computed_by_config;
-    for (auto const& [key, config_map] : unique_config_maps) {
-        computed_by_config[key].resize(simulations.size());
-    }
 
-    // Flatten work items: (config_key, sim_idx)
-    std::vector<std::pair<std::string, size_t>> work_items;
-    for (auto const& [key, config_map] : unique_config_maps) {
-        for (size_t sim = 0; sim < simulations.size(); ++sim) {
-            work_items.emplace_back(key, sim);
+    bool cache_loaded = false;
+    if (!load_cache_dir.empty()) {
+        std::cout << "Phase 1: Loading metrics from cache: " << load_cache_dir << "\n";
+        cache_loaded = loadPhase1Cache(load_cache_dir, computed_by_config, simulations.size());
+        if (cache_loaded) {
+            std::cout << "Phase 1: Loaded " << computed_by_config.size() << " configs from cache\n\n";
+        } else {
+            std::cerr << "Warning: Failed to load cache, computing from scratch\n";
         }
     }
-
-    std::atomic<size_t> work_idx{0};
-    std::atomic<size_t> completed{0};
-    std::atomic<bool> done{false};
-    std::mutex print_mutex;
-
-    // Progress thread
-    std::thread progress_thread([&]() {
-        while (!done.load()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-            size_t c = completed.load();
-            auto now = std::chrono::steady_clock::now();
-            double elapsed = std::chrono::duration<double>(now - start_time).count();
-            double rate = c > 0 ? c / elapsed : 0;
-            double eta = rate > 0 ? (total_phase1_work - c) / rate : 0;
-
-            std::lock_guard<std::mutex> lock(print_mutex);
-            std::cout << "\r  Progress: " << c << "/" << total_phase1_work << " (" << std::fixed
-                      << std::setprecision(1) << (100.0 * c / total_phase1_work) << "%)"
-                      << " | " << std::setprecision(1) << elapsed << "s"
-                      << " | " << std::setprecision(0) << rate << " items/s"
-                      << " | ETA: " << eta << "s     " << std::flush;
-        }
-    });
-
-    // Worker threads
-    std::vector<std::thread> workers;
-    std::mutex computed_mutex;
-    for (unsigned int t = 0; t < num_threads; ++t) {
-        workers.emplace_back([&]() {
-            while (true) {
-                size_t idx = work_idx.fetch_add(1);
-                if (idx >= work_items.size()) {
-                    break;
-                }
-
-                auto const& [key, sim] = work_items[idx];
-                auto const& config_map = unique_config_maps.at(key);
-
-                ComputedMetrics cm;
-                computeMetrics(simulations[sim], config_map, cm);
-
-                {
-                    std::lock_guard<std::mutex> lock(computed_mutex);
-                    computed_by_config[key][sim] = std::move(cm);
-                }
-
-                completed.fetch_add(1);
-            }
-        });
-    }
-
-    for (auto& w : workers) {
-        w.join();
-    }
-
-    done.store(true);
-    progress_thread.join();
 
     auto phase1_done = std::chrono::steady_clock::now();
-    double phase1_total = std::chrono::duration<double>(phase1_done - start_time).count();
-    std::cout << "\rPhase 1 complete: " << total_phase1_work << " items in " << std::fixed
-              << std::setprecision(2) << phase1_total << "s"
-              << " (" << std::setprecision(0) << (total_phase1_work / phase1_total)
-              << " items/s)                    \n\n";
+    double phase1_total = 0;
+
+    if (!cache_loaded) {
+        std::cout << "Phase 1: Computing metrics (" << total_phase1_work << " work items)...\n";
+
+        // Initialize storage
+        for (auto const& [key, config_map] : unique_config_maps) {
+            computed_by_config[key].resize(simulations.size());
+        }
+
+        // Flatten work items: (config_key, sim_idx)
+        std::vector<std::pair<std::string, size_t>> work_items;
+        for (auto const& [key, config_map] : unique_config_maps) {
+            for (size_t sim = 0; sim < simulations.size(); ++sim) {
+                work_items.emplace_back(key, sim);
+            }
+        }
+
+        std::atomic<size_t> work_idx{0};
+        std::atomic<size_t> completed{0};
+        std::atomic<bool> done{false};
+
+        // Progress thread
+        std::thread progress_thread([&]() {
+            while (!done.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                size_t c = completed.load();
+                auto now = std::chrono::steady_clock::now();
+                double elapsed = std::chrono::duration<double>(now - start_time).count();
+                double rate = c > 0 ? c / elapsed : 0;
+                double eta = rate > 0 ? (total_phase1_work - c) / rate : 0;
+
+                std::lock_guard<std::mutex> lock(print_mutex);
+                std::cout << "\r  Progress: " << c << "/" << total_phase1_work << " (" << std::fixed
+                          << std::setprecision(1) << (100.0 * c / total_phase1_work) << "%)"
+                          << " | " << std::setprecision(1) << elapsed << "s"
+                          << " | " << std::setprecision(0) << rate << " items/s"
+                          << " | ETA: " << eta << "s     " << std::flush;
+            }
+        });
+
+        // Worker threads
+        std::vector<std::thread> workers;
+        std::mutex computed_mutex;
+        for (unsigned int t = 0; t < num_threads; ++t) {
+            workers.emplace_back([&]() {
+                while (true) {
+                    size_t idx = work_idx.fetch_add(1);
+                    if (idx >= work_items.size()) {
+                        break;
+                    }
+
+                    auto const& [key, sim] = work_items[idx];
+                    auto const& config_map = unique_config_maps.at(key);
+
+                    ComputedMetrics cm;
+                    computeMetrics(simulations[sim], config_map, cm);
+
+                    {
+                        std::lock_guard<std::mutex> lock(computed_mutex);
+                        computed_by_config[key][sim] = std::move(cm);
+                    }
+
+                    completed.fetch_add(1);
+                }
+            });
+        }
+
+        for (auto& w : workers) {
+            w.join();
+        }
+
+        done.store(true);
+        progress_thread.join();
+
+        phase1_done = std::chrono::steady_clock::now();
+        phase1_total = std::chrono::duration<double>(phase1_done - start_time).count();
+        std::cout << "\rPhase 1 complete: " << total_phase1_work << " items in " << std::fixed
+                  << std::setprecision(2) << phase1_total << "s"
+                  << " (" << std::setprecision(0) << (total_phase1_work / phase1_total)
+                  << " items/s)                    \n\n";
+
+        // Save cache if requested
+        if (!save_cache_dir.empty()) {
+            std::cout << "Saving Phase 1 cache to: " << save_cache_dir << "\n";
+            if (savePhase1Cache(save_cache_dir, computed_by_config)) {
+                std::cout << "Cache saved successfully\n\n";
+            } else {
+                std::cerr << "Warning: Failed to save cache\n\n";
+            }
+        }
+    }
 
     // ============================================
     // PHASE 2: Evaluate boom detection for each ParameterizedMetric
@@ -1012,9 +1305,9 @@ int main(int argc, char* argv[]) {
         }
     });
 
-    workers.clear();
+    std::vector<std::thread> phase2_workers;
     for (unsigned int t = 0; t < num_threads; ++t) {
-        workers.emplace_back([&]() {
+        phase2_workers.emplace_back([&]() {
             while (true) {
                 size_t idx = pm_idx.fetch_add(1);
                 if (idx >= param_metrics.size()) {
@@ -1168,7 +1461,7 @@ int main(int argc, char* argv[]) {
         });
     }
 
-    for (auto& w : workers) {
+    for (auto& w : phase2_workers) {
         w.join();
     }
 
@@ -1418,8 +1711,8 @@ int main(int argc, char* argv[]) {
         }
         std::cout << std::string(100, '-') << "\n\n";
 
-        // Save best parameters
-        saveBestParams("best_params.toml", winner);
+        // Save best parameters for all metrics
+        saveAllBestParams(output_file, results, winner);
     }
 
     std::cout << std::string(100, '=') << "\n";

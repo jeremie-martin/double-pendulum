@@ -1867,23 +1867,32 @@ void drawMetricParametersWindow(AppState& state) {
 
     // Boom Detection section (primary focus)
     if (ImGui::CollapsingHeader("Boom Detection", ImGuiTreeNodeFlags_DefaultOpen)) {
-        // Metric selector
+        // Metric selector - all available metrics for boom detection
         const char* metric_names[] = {
             "angular_causticness",
             "tip_causticness",
-            "spatial_concentration",
             "cv_causticness",
+            "spatial_concentration",
             "fold_causticness",
-            "local_coherence"
+            "organization_causticness",
+            "r1_concentration",
+            "r2_concentration",
+            "joint_concentration",
+            "trajectory_smoothness",
+            "curvature",
+            "true_folds",
+            "local_coherence",
+            "variance"
         };
+        constexpr int num_metrics = sizeof(metric_names) / sizeof(metric_names[0]);
         int metric_idx = 0;
-        for (int i = 0; i < 6; ++i) {
+        for (int i = 0; i < num_metrics; ++i) {
             if (active_metric == metric_names[i]) {
                 metric_idx = i;
                 break;
             }
         }
-        if (ImGui::Combo("Metric", &metric_idx, metric_names, 6)) {
+        if (ImGui::Combo("Metric", &metric_idx, metric_names, num_metrics)) {
             state.config.boom_metric = metric_names[metric_idx];
             params_changed = true;
         }
