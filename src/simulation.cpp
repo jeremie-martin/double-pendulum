@@ -591,12 +591,6 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
               << " (target: 0.9)\n";
 
     // Display analyzer scores
-    if (boom_analyzer_.hasResults()) {
-        auto const& quality = boom_analyzer_.toJSON();
-        std::cout << "Boom score:  " << std::setprecision(2) << boom_analyzer_.score()
-                  << " (sharpness=" << quality.value("sharpness_ratio", 0.0)
-                  << ", type=" << quality.value("boom_type", "unknown") << ")\n";
-    }
     if (causticness_analyzer_.hasResults()) {
         auto const& json = causticness_analyzer_.toJSON();
         auto const& m = json["metrics"];
