@@ -83,6 +83,13 @@ struct ParameterSet {
         case BoomDetectionMethod::DerivativePeak:
             oss << "deriv w=" << boom.smoothing_window;
             break;
+        case BoomDetectionMethod::ThresholdCrossing:
+            oss << "cross@" << (int)(boom.crossing_threshold * 100) << "% x"
+                << boom.crossing_confirmation;
+            break;
+        case BoomDetectionMethod::SecondDerivativePeak:
+            oss << "accel w=" << boom.smoothing_window;
+            break;
         }
         // Always show offset since it's applied to all methods
         oss << " off=" << std::fixed << std::setprecision(1) << boom.offset_seconds;
@@ -375,56 +382,6 @@ struct MetricConfig {
     }
 };
 
-// Boom detection configuration (Phase 2 - cheap evaluation)
-struct BoomConfig {
-    std::string metric_name;
-    BoomDetectionMethod method;
-    double offset_seconds = 0.0;
-    double peak_percent_threshold = 0.6;
-    double min_peak_prominence = 0.05;
-    int smoothing_window = 5;
-
-    BoomDetectionParams toParams() const {
-        BoomDetectionParams p;
-        p.metric_name = metric_name;
-        p.method = method;
-        p.offset_seconds = offset_seconds;
-        p.peak_percent_threshold = peak_percent_threshold;
-        p.min_peak_prominence = min_peak_prominence;
-        p.smoothing_window = smoothing_window;
-        return p;
-    }
-
-    std::string describe() const {
-        std::ostringstream oss;
-        // Shorten metric name for display
-        std::string metric_short = metric_name;
-        if (metric_short.find("_causticness") != std::string::npos) {
-            metric_short = metric_short.substr(0, metric_short.find("_causticness"));
-        } else if (metric_short.find("_concentration") != std::string::npos) {
-            metric_short = metric_short.substr(0, metric_short.find("_concentration")) + "_conc";
-        } else if (metric_short.find("_coherence") != std::string::npos) {
-            metric_short = metric_short.substr(0, metric_short.find("_coherence")) + "_coh";
-        }
-        oss << metric_short << " ";
-        switch (method) {
-        case BoomDetectionMethod::MaxCausticness:
-            oss << "max";
-            break;
-        case BoomDetectionMethod::FirstPeakPercent:
-            oss << "first@" << (int)(peak_percent_threshold * 100) << "%";
-            oss << " prom=" << std::fixed << std::setprecision(2) << min_peak_prominence;
-            break;
-        case BoomDetectionMethod::DerivativePeak:
-            oss << "deriv w=" << smoothing_window;
-            break;
-        }
-        // Always show offset since it's applied to all methods
-        oss << " off=" << std::fixed << std::setprecision(1) << offset_seconds;
-        return oss.str();
-    }
-};
-
 // Helper to set effective sectors in MetricParams
 MetricParams withEffectiveSectors(MetricParams base, int eff_sec, int N) {
     base.max_sectors = eff_sec;
@@ -469,7 +426,15 @@ std::vector<ParameterizedMetric> generateParameterizedMetrics(int N) {
         result.push_back({"angular_causticness", params});
         result.push_back({"tip_causticness", params});
         result.push_back({"organization_causticness", params});
+        result.push_back({"r1_concentration", params});
+        result.push_back({"r2_concentration", params});
+        result.push_back({"joint_concentration", params});
     }
+
+    // ================================================================
+    // VARIANCE (no parameterization needed - just use defaults)
+    // ================================================================
+    result.push_back({"variance", defaults});
 
     // ================================================================
     // CV_CAUSTICNESS (vary effective_sectors × cv_normalization)
@@ -604,74 +569,6 @@ std::vector<MetricParams> extractUniqueMetricParams(std::vector<ParameterizedMet
     return result;
 }
 
-// Generate boom detection configurations (Phase 2)
-std::vector<BoomConfig> generateBoomConfigs() {
-    std::vector<BoomConfig> configs;
-
-    // Metrics to try for boom detection
-    // Include all causticness-related metrics that could indicate boom moment
-    std::vector<std::string> metric_names = {
-        // Primary causticness metrics
-        "angular_causticness",
-        "tip_causticness",
-        "spatial_concentration",
-        "cv_causticness",
-        "fold_causticness",
-        "local_coherence",
-        // Additional metrics worth testing
-        "variance",                  // Original standard metric
-        "organization_causticness",  // Organization-based causticness
-        "trajectory_smoothness",     // Trajectory coherence
-        "curvature",                 // Curvature metric
-        "true_folds",                // True fold detection
-        // Concentration metrics
-        "r1_concentration",
-        "r2_concentration",
-        "joint_concentration",
-    };
-
-    // Boom detection variations - comprehensive search since phase 2 is fast
-    std::vector<double> offset_vals;
-    for (double x = -1.0; x <= 1.0; x += 0.025) {
-        offset_vals.push_back(x);
-    }
-    std::vector<double> peak_pct_vals = {0.1,  0.15, 0.2,  0.25, 0.3,  0.35, 0.4,  0.45, 0.5,
-                                         0.55, 0.6,  0.65, 0.7,  0.75, 0.8,  0.85, 0.9,  0.95};
-    std::vector<int> smooth_vals = {1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
-                                    16, 17, 18, 19, 20, 22, 24, 26, 28, 30, 35, 40, 45, 50};
-
-    for (auto const& metric : metric_names) {
-        // MaxCausticness with different offsets
-        for (double offset : offset_vals) {
-            BoomConfig cfg;
-            cfg.metric_name = metric;
-            cfg.method = BoomDetectionMethod::MaxCausticness;
-            cfg.offset_seconds = offset;
-            configs.push_back(cfg);
-        }
-
-        // FirstPeakPercent with different thresholds
-        for (double pct : peak_pct_vals) {
-            BoomConfig cfg;
-            cfg.metric_name = metric;
-            cfg.method = BoomDetectionMethod::FirstPeakPercent;
-            cfg.peak_percent_threshold = pct;
-            configs.push_back(cfg);
-        }
-
-        // DerivativePeak with different smoothing
-        for (int smooth : smooth_vals) {
-            BoomConfig cfg;
-            cfg.metric_name = metric;
-            cfg.method = BoomDetectionMethod::DerivativePeak;
-            cfg.smoothing_window = smooth;
-            configs.push_back(cfg);
-        }
-    }
-
-    return configs;
-}
-
 // Save best parameters to TOML file
 void saveBestParams(std::string const& path, EvaluationResult const& best) {
     std::ofstream file(path);
@@ -719,6 +616,12 @@ void saveBestParams(std::string const& path, EvaluationResult const& best) {
     case BoomDetectionMethod::DerivativePeak:
         file << "method = \"derivative_peak\"\n";
         break;
+    case BoomDetectionMethod::ThresholdCrossing:
+        file << "method = \"threshold_crossing\"\n";
+        break;
+    case BoomDetectionMethod::SecondDerivativePeak:
+        file << "method = \"second_derivative_peak\"\n";
+        break;
     }
     // Always save all boom parameters (offset applies to all methods now)
     file << "offset_seconds = " << std::fixed << std::setprecision(2)
@@ -728,6 +631,9 @@ void saveBestParams(std::string const& path, EvaluationResult const& best) {
     file << "min_peak_prominence = " << std::fixed << std::setprecision(2)
          << best.params.boom.min_peak_prominence << "\n";
     file << "smoothing_window = " << best.params.boom.smoothing_window << "\n";
+    file << "crossing_threshold = " << std::fixed << std::setprecision(2)
+         << best.params.boom.crossing_threshold << "\n";
+    file << "crossing_confirmation = " << best.params.boom.crossing_confirmation << "\n";
 
     std::cout << "Best parameters saved to: " << path << "\n";
 }
@@ -876,6 +782,10 @@ int main(int argc, char* argv[]) {
     }
     std::vector<int> smooth_vals = {1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
                                     16, 17, 18, 19, 20, 22, 24, 26, 28, 30, 35, 40, 45, 50};
+    // ThresholdCrossing parameters
+    std::vector<double> crossing_thresh_vals = {0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
+                                                 0.55, 0.6, 0.65, 0.7, 0.75, 0.8};
+    std::vector<int> crossing_confirm_vals = {1, 2, 3, 4, 5, 7, 10};
 
     unsigned int num_threads = std::thread::hardware_concurrency();
     if (num_threads == 0) {
@@ -886,8 +796,12 @@ int main(int argc, char* argv[]) {
     // MaxCausticness: offset_vals.size()
     // FirstPeakPercent: peak_pct_vals.size() * offset_vals.size() * prominence_vals.size()
     // DerivativePeak: smooth_vals.size() * offset_vals.size()
+    // ThresholdCrossing: crossing_thresh_vals.size() * crossing_confirm_vals.size() * offset_vals.size()
+    // SecondDerivativePeak: smooth_vals.size() * offset_vals.size()
     size_t num_boom_methods = offset_vals.size() +
                               (peak_pct_vals.size() * offset_vals.size() * prominence_vals.size()) +
+                              (smooth_vals.size() * offset_vals.size()) +
+                              (crossing_thresh_vals.size() * crossing_confirm_vals.size() * offset_vals.size()) +
                               (smooth_vals.size() * offset_vals.size());
     size_t total_phase2_evals = param_metrics.size() * num_boom_methods;
 
@@ -1133,6 +1047,33 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
+                // ThresholdCrossing: vary threshold × confirmation × offset
+                for (double thresh : crossing_thresh_vals) {
+                    for (int confirm : crossing_confirm_vals) {
+                        for (double offset : offset_vals) {
+                            BoomDetectionParams bp;
+                            bp.metric_name = pm.metric_name;
+                            bp.method = BoomDetectionMethod::ThresholdCrossing;
+                            bp.crossing_threshold = thresh;
+                            bp.crossing_confirmation = confirm;
+                            bp.offset_seconds = offset;
+                            evaluateBoomMethod(bp);
+                        }
+                    }
+                }
+
+                // SecondDerivativePeak: vary smoothing × offset
+                for (int smooth : smooth_vals) {
+                    for (double offset : offset_vals) {
+                        BoomDetectionParams bp;
+                        bp.metric_name = pm.metric_name;
+                        bp.method = BoomDetectionMethod::SecondDerivativePeak;
+                        bp.smoothing_window = smooth;
+                        bp.offset_seconds = offset;
+                        evaluateBoomMethod(bp);
+                    }
+                }
+
                 pm_completed.fetch_add(1);
             }
         });
@@ -1315,6 +1256,14 @@ int main(int argc, char* argv[]) {
             break;
         case BoomDetectionMethod::DerivativePeak:
             std::cout << "DerivativePeak (window=" << winner.params.boom.smoothing_window << ")\n";
+            break;
+        case BoomDetectionMethod::ThresholdCrossing:
+            std::cout << "ThresholdCrossing (thresh="
+                      << (int)(winner.params.boom.crossing_threshold * 100) << "%, confirm="
+                      << winner.params.boom.crossing_confirmation << ")\n";
+            break;
+        case BoomDetectionMethod::SecondDerivativePeak:
+            std::cout << "SecondDerivativePeak (window=" << winner.params.boom.smoothing_window << ")\n";
             break;
         }
         std::cout << "  Effective Sectors: " << winner.params.effective_sectors << "\n";

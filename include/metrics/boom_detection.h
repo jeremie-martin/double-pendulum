@@ -54,6 +54,12 @@ public:
         case BoomDetectionMethod::DerivativePeak:
             result = detectDerivativePeak(values, frame_duration);
             break;
+        case BoomDetectionMethod::ThresholdCrossing:
+            result = detectThresholdCrossing(values, frame_duration);
+            break;
+        case BoomDetectionMethod::SecondDerivativePeak:
+            result = detectSecondDerivativePeak(values, frame_duration);
+            break;
         default:
             result = detectMaxCausticness(values, frame_duration);
             break;
@@ -189,6 +195,96 @@ private:
         } else {
             // Fall back to max if no positive derivative
             return detectMaxCausticness(values, frame_duration);
+        }
+
+        return result;
+    }
+
+    // Method 4: First frame where metric crosses threshold (fraction of max)
+    // This is useful for consistent timing relative to metric behavior
+    BoomDetection detectThresholdCrossing(std::vector<double> const& values,
+                                           double frame_duration) const {
+        BoomDetection result;
+        result.method_used = BoomDetectionMethod::ThresholdCrossing;
+
+        if (values.empty()) return result;
+
+        // Find maximum value to compute threshold
+        double max_val = *std::max_element(values.begin(), values.end());
+        double threshold = max_val * params_.crossing_threshold;
+
+        // Find first frame where metric crosses and stays above threshold
+        int consecutive = 0;
+        for (size_t i = 0; i < values.size(); ++i) {
+            if (values[i] >= threshold) {
+                consecutive++;
+                if (consecutive >= params_.crossing_confirmation) {
+                    // Found! Return the frame where crossing started
+                    int crossing_frame = static_cast<int>(i) - params_.crossing_confirmation + 1;
+                    result.frame = std::max(0, crossing_frame);
+                    result.seconds = result.frame * frame_duration;
+                    result.causticness = values[result.frame];
+                    return result;
+                }
+            } else {
+                consecutive = 0;
+            }
+        }
+
+        // No sustained crossing found, fall back to max
+        return detectMaxCausticness(values, frame_duration);
+    }
+
+    // Method 5: When d²(causticness)/dt² is maximum (acceleration peak)
+    // This detects the very beginning of the transition, even before derivative peaks
+    BoomDetection detectSecondDerivativePeak(std::vector<double> const& values,
+                                              double frame_duration) const {
+        BoomDetection result;
+        result.method_used = BoomDetectionMethod::SecondDerivativePeak;
+
+        if (values.size() < 5) return result;
+
+        // Apply smoothing if window > 1
+        std::vector<double> smoothed = values;
+        if (params_.smoothing_window > 1) {
+            smoothed = smoothValues(values, params_.smoothing_window);
+        }
+
+        // Compute first derivative (central difference)
+        std::vector<double> first_deriv;
+        first_deriv.reserve(smoothed.size() - 2);
+        for (size_t i = 1; i + 1 < smoothed.size(); ++i) {
+            double deriv = (smoothed[i + 1] - smoothed[i - 1]) / (2.0 * frame_duration);
+            first_deriv.push_back(deriv);
+        }
+
+        // Compute second derivative (central difference of first derivative)
+        std::vector<double> second_deriv;
+        second_deriv.reserve(first_deriv.size() - 2);
+        for (size_t i = 1; i + 1 < first_deriv.size(); ++i) {
+            double deriv2 = (first_deriv[i + 1] - first_deriv[i - 1]) / (2.0 * frame_duration);
+            second_deriv.push_back(deriv2);
+        }
+
+        // Find maximum positive second derivative (acceleration)
+        double max_accel = 0.0;
+        int max_accel_frame = -1;
+
+        for (size_t i = 0; i < second_deriv.size(); ++i) {
+            if (second_deriv[i] > max_accel) {
+                max_accel = second_deriv[i];
+                // +2 because second_deriv starts at frame 2 (due to two central differences)
+                max_accel_frame = static_cast<int>(i + 2);
+            }
+        }
+
+        if (max_accel_frame >= 0 && max_accel_frame < static_cast<int>(values.size())) {
+            result.frame = max_accel_frame;
+            result.seconds = result.frame * frame_duration;
+            result.causticness = values[max_accel_frame];
+        } else {
+            // Fall back to first derivative peak if no positive acceleration
+            return detectDerivativePeak(values, frame_duration);
         }
 
         return result;

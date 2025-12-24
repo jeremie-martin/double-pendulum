@@ -84,6 +84,10 @@ BoomDetectionMethod parseBoomDetectionMethod(std::string const& str) {
         return BoomDetectionMethod::FirstPeakPercent;
     if (str == "derivative_peak")
         return BoomDetectionMethod::DerivativePeak;
+    if (str == "threshold_crossing")
+        return BoomDetectionMethod::ThresholdCrossing;
+    if (str == "second_derivative_peak")
+        return BoomDetectionMethod::SecondDerivativePeak;
     std::cerr << "Unknown boom detection method: " << str << ", using max_causticness\n";
     return BoomDetectionMethod::MaxCausticness;
 }
@@ -212,6 +216,8 @@ static void loadConfigFromTable(Config& config, toml::table const& tbl) {
         config.boom.peak_percent_threshold = get_or(*boom_tbl, "peak_percent_threshold", config.boom.peak_percent_threshold);
         config.boom.min_peak_prominence = get_or(*boom_tbl, "min_peak_prominence", config.boom.min_peak_prominence);
         config.boom.smoothing_window = get_or(*boom_tbl, "smoothing_window", config.boom.smoothing_window);
+        config.boom.crossing_threshold = get_or(*boom_tbl, "crossing_threshold", config.boom.crossing_threshold);
+        config.boom.crossing_confirmation = get_or(*boom_tbl, "crossing_confirmation", config.boom.crossing_confirmation);
         auto metric_name = get_string_or(*boom_tbl, "metric_name", "");
         if (!metric_name.empty()) {
             config.boom.metric_name = metric_name;
@@ -575,6 +581,10 @@ bool Config::applyOverride(std::string const& key, std::string const& value) {
                 boom.min_peak_prominence = std::stod(value);
             } else if (param == "smoothing_window") {
                 boom.smoothing_window = std::stoi(value);
+            } else if (param == "crossing_threshold") {
+                boom.crossing_threshold = std::stod(value);
+            } else if (param == "crossing_confirmation") {
+                boom.crossing_confirmation = std::stoi(value);
             } else if (param == "metric_name") {
                 boom.metric_name = value;
             } else {
@@ -652,6 +662,8 @@ std::string boomDetectionMethodToString(BoomDetectionMethod method) {
     case BoomDetectionMethod::MaxCausticness: return "max_causticness";
     case BoomDetectionMethod::FirstPeakPercent: return "first_peak_percent";
     case BoomDetectionMethod::DerivativePeak: return "derivative_peak";
+    case BoomDetectionMethod::ThresholdCrossing: return "threshold_crossing";
+    case BoomDetectionMethod::SecondDerivativePeak: return "second_derivative_peak";
     }
     return "max_causticness";
 }
@@ -736,6 +748,8 @@ void Config::save(std::string const& path) const {
     file << "peak_percent_threshold = " << boom.peak_percent_threshold << "\n";
     file << "min_peak_prominence = " << boom.min_peak_prominence << "\n";
     file << "smoothing_window = " << boom.smoothing_window << "\n";
+    file << "crossing_threshold = " << boom.crossing_threshold << "\n";
+    file << "crossing_confirmation = " << boom.crossing_confirmation << "\n";
     file << "metric_name = \"" << boom.metric_name << "\"\n";
     file << "\n";
 

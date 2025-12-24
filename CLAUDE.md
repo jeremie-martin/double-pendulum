@@ -74,23 +74,38 @@ The unified metrics system in `include/metrics/` replaces the legacy variance/an
 ### Key Concepts
 
 - **Metric**: Raw time-series measurement (variance, brightness, causticness)
-- **Boom**: Detected from max angular causticness (not threshold crossing)
+- **Boom**: Detected via BoomDetector with multiple methods (see Boom Detection below)
 - **Chaos**: Detected via EventDetector threshold crossing with confirmation
 - **Analyzer**: Component that computes quality scores from metrics
 - **Score**: Quality assessment for ranking/filtering (SimulationScore)
 
 ### Boom Detection
 
-Boom is detected as the frame with maximum angular causticness, offset by 0.3s for better visual alignment:
+Boom detection finds the visually significant "explosion" moment in the simulation. Multiple detection methods are available:
+
+| Method | Description | Key Parameters |
+|--------|-------------|----------------|
+| `max_causticness` | Frame with maximum causticness (default) | `offset_seconds` |
+| `first_peak_percent` | First peak >= X% of max | `peak_percent_threshold`, `min_peak_prominence` |
+| `derivative_peak` | When d(causticness)/dt is maximum | `smoothing_window` |
+| `threshold_crossing` | First sustained crossing of threshold | `crossing_threshold`, `crossing_confirmation` |
+| `second_derivative_peak` | When d²(causticness)/dt² is maximum (acceleration) | `smoothing_window` |
 
 ```cpp
 #include "metrics/boom_detection.h"
 
-// After simulation loop completes:
+// Using default MaxCausticness method:
 auto boom = metrics::findBoomFrame(collector, frame_duration);
+
+// Or with custom params:
+BoomDetectionParams params;
+params.method = BoomDetectionMethod::ThresholdCrossing;
+params.crossing_threshold = 0.3;  // 30% of max
+params.crossing_confirmation = 5; // 5 consecutive frames
+auto boom = metrics::findBoomFrame(collector, frame_duration, params);
+
 if (boom.frame >= 0) {
     // boom.frame, boom.seconds, boom.causticness are available
-
     // Force event for BoomAnalyzer compatibility:
     metrics::forceBoomEvent(event_detector, boom, variance_at_boom);
 }

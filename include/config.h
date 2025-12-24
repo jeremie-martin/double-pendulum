@@ -142,9 +142,11 @@ struct MetricParams {
 
 // Boom detection method
 enum class BoomDetectionMethod {
-    MaxCausticness,    // Find frame with max causticness (peak visual richness)
-    FirstPeakPercent,  // Find first peak >= X% of max (boom onset)
-    DerivativePeak     // When d(causticness)/dt is maximum (steepest transition)
+    MaxCausticness,       // Find frame with max causticness (peak visual richness)
+    FirstPeakPercent,     // Find first peak >= X% of max (boom onset)
+    DerivativePeak,       // When d(causticness)/dt is maximum (steepest transition)
+    ThresholdCrossing,    // First frame where metric crosses threshold (fraction of max)
+    SecondDerivativePeak  // When d²(causticness)/dt² is maximum (acceleration peak)
 };
 
 // Boom detection parameters - controls how boom frame is identified
@@ -160,8 +162,14 @@ struct BoomDetectionParams {
     // For all peak detection: minimum prominence to count as peak
     double min_peak_prominence = 0.05;
 
-    // For DerivativePeak: smoothing window size (frames)
+    // For DerivativePeak and SecondDerivativePeak: smoothing window size (frames)
     int smoothing_window = 5;
+
+    // For ThresholdCrossing: threshold as fraction of max value
+    double crossing_threshold = 0.3;
+
+    // For ThresholdCrossing: require this many consecutive frames above threshold
+    int crossing_confirmation = 3;
 
     // Which metric to use for detection
     std::string metric_name = "angular_causticness";

@@ -1961,9 +1961,10 @@ void drawMetricParametersWindow(AppState& state) {
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Which metric to use for boom detection");
 
         // Method selector
-        const char* method_names[] = {"Max Causticness", "First Peak %", "Derivative Peak"};
+        const char* method_names[] = {"Max Causticness", "First Peak %", "Derivative Peak",
+                                       "Threshold Crossing", "2nd Derivative Peak"};
         int method = static_cast<int>(boom_params.method);
-        if (ImGui::Combo("Method", &method, method_names, 3)) {
+        if (ImGui::Combo("Method", &method, method_names, 5)) {
             boom_params.method = static_cast<BoomDetectionMethod>(method);
             params_changed = true;
         }
@@ -1987,11 +1988,26 @@ void drawMetricParametersWindow(AppState& state) {
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("First peak >= this percentage of max");
         }
 
-        if (boom_params.method == BoomDetectionMethod::DerivativePeak) {
+        if (boom_params.method == BoomDetectionMethod::DerivativePeak ||
+            boom_params.method == BoomDetectionMethod::SecondDerivativePeak) {
             if (ImGui::SliderInt("Smoothing", &boom_params.smoothing_window, 1, 15)) {
                 params_changed = true;
             }
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Smoothing window for derivative");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Smoothing window for derivative calculation");
+        }
+
+        if (boom_params.method == BoomDetectionMethod::ThresholdCrossing) {
+            float crossing = static_cast<float>(boom_params.crossing_threshold);
+            if (ImGui::SliderFloat("Threshold", &crossing, 0.1f, 0.8f, "%.2f")) {
+                boom_params.crossing_threshold = crossing;
+                params_changed = true;
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Threshold as fraction of max value");
+
+            if (ImGui::SliderInt("Confirm Frames", &boom_params.crossing_confirmation, 1, 10)) {
+                params_changed = true;
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Consecutive frames above threshold to confirm crossing");
         }
 
         float prominence = static_cast<float>(boom_params.min_peak_prominence);
