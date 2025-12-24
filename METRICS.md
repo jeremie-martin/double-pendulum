@@ -128,12 +128,8 @@ frame,variance,circular_spread,spread_ratio,angular_range,angular_causticness,br
 
 Note: `circular_spread` is the uniformity metric (0=concentrated, 1=uniform).
 
-## Legacy Code Notes
+## Notes
 
-Some legacy code remains from the variance-based detection era:
-
-1. **BoomAnalyzer**: Still exists but produces low scores. Used in probe pipeline.
-2. **EventDetector threshold detection**: Still used for chaos detection, not boom.
-3. **variance_at_boom in forceBoomEvent**: Passed for BoomAnalyzer compatibility.
-
-These may be cleaned up in future refactoring.
+- **BoomAnalyzer class files**: Remain in codebase but are no longer used. Can be deleted.
+- **EventDetector threshold detection**: Still used for chaos detection, not boom.
+- **variance_at_boom in forceBoomEvent**: Passed for event logging compatibility.
