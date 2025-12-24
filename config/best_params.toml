@@ -1,7 +1,7 @@
 # Best parameters found by pendulum-optimize
-# Boom MAE: 8.33 frames
+# Boom MAE: 36.47 frames
 # Peak MAE: 1000000000.00 frames
-# Samples evaluated: 3
+# Samples evaluated: 30
 
 [metrics]
 min_sectors = 8
@@ -14,6 +14,6 @@ gini_baseline_divisor = 0.65
 
 [boom_detection]
 metric_name = "cv_causticness"
-method = "max_causticness"
-offset_seconds = 0.20
+method = "first_peak_percent"
+peak_percent_threshold = 0.80
 min_peak_prominence = 0.05

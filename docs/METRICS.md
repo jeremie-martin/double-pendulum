@@ -155,27 +155,58 @@ EOF
 ./pendulum-optimize annotations.json
 ```
 
+### Two-Phase Architecture
+
+The optimizer uses a two-phase approach for efficiency:
+
+**Phase 1 - Compute Metrics (expensive, parallelized)**
+- Loads all simulation data into memory
+- Computes all causticness metrics for each (metric_config, simulation) pair
+- Fully parallelized across all CPU cores
+- Example: 336 metric configs × 30 sims = 10,080 work items
+
+**Phase 2 - Search Boom Methods (cheap, instant)**
+- Evaluates different boom detection configurations on pre-computed metrics
+- Time: <0.01s for 96 configurations per metric config
+
+This architecture means:
+- Adding more boom detection methods is essentially free
+- Adding more metric configs scales linearly with Phase 1 time
+- All CPU cores stay fully utilized
+
 ### What It Searches
 
-The optimizer performs grid search over:
-
-| Dimension | Values |
-|-----------|--------|
-| Metric | angular, tip, spatial, cv, fold, local_coherence |
-| Method | max, first_peak, derivative |
-| Method params | offset, threshold, smoothing |
-| Metric params | sectors, target (currently fixed for speed) |
+| Phase | Dimension | Values |
+|-------|-----------|--------|
+| Phase 1 | min_sectors | 2, 3, 4, 5, 6, 7, 8, 9 |
+| Phase 1 | max_sectors | 16, 32, 48, 64, 80, 96 |
+| Phase 1 | target_per_sector | 20, 30, 40, 50, 60, 70, 80 |
+| Phase 2 | Metric | angular, tip, spatial, cv, fold, local_coherence |
+| Phase 2 | Method | max, first_peak, derivative |
+| Phase 2 | Method params | offset, threshold, smoothing |
 
 ### Output
 
 ```
+=== Two-Phase Optimization ===
+Phase 1: 336 metric configs × 30 simulations (expensive)
+Phase 2: 96 boom detection methods (fast)
+Total: 32256 parameter combinations
+Threads: 32
+
+Phase 1: Computing metrics (10080 work items)...
+  Progress: 5000/10080 (49.6%) | 45.2s | 111 items/s | ETA: 46s
+Phase 1 complete: 10080 items in 91.23s (110 items/s)
+
+Phase 2: Evaluating 96 boom detection methods...
+Phase 2 complete: 0.12s
+
 Top 10 parameter combinations:
 ------------------------------------------------------------------------------------------
 Rank    Boom MAE    Peak MAE     Score  Parameters
 ------------------------------------------------------------------------------------------
-   1         8.3         N/A       8.3  cv max off=0.2
-   2        11.3         N/A      11.3  cv max off=0
-   3        13.0         N/A      13.0  cv first@70%
+   1        28.5         N/A      28.5  cv first@80%
+   2        29.1         N/A      29.1  cv max off=0.2
 ...
 ```
 
@@ -188,11 +219,9 @@ Based on optimization against 30 annotated simulations:
 ```toml
 [boom_detection]
 metric_name = "cv_causticness"
-method = "max_causticness"
-offset_seconds = 0.20
+method = "first_peak_percent"
+peak_percent_threshold = 0.80
 ```
-
-This achieves MAE of ~8 frames (~0.08s at 96fps).
 
 ## Metric Computation Details
 

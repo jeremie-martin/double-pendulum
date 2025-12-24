@@ -47,8 +47,8 @@
 struct Annotation {
     std::string id;
     std::string data_path;
-    int boom_frame = -1;           // Ground truth boom frame (-1 = unknown)
-    int peak_frame = -1;           // Ground truth peak causticness frame (-1 = unknown)
+    int boom_frame = -1; // Ground truth boom frame (-1 = unknown)
+    int peak_frame = -1; // Ground truth peak causticness frame (-1 = unknown)
     std::string notes;
 };
 
@@ -87,9 +87,9 @@ struct ParameterSet {
 // Evaluation results for a parameter set
 struct EvaluationResult {
     ParameterSet params;
-    double boom_mae = 0.0;    // Mean absolute error for boom detection (frames)
-    double peak_mae = 0.0;    // Mean absolute error for peak detection (frames)
-    double combined_score = 0.0;  // Combined score (lower is better)
+    double boom_mae = 0.0;       // Mean absolute error for boom detection (frames)
+    double peak_mae = 0.0;       // Mean absolute error for peak detection (frames)
+    double combined_score = 0.0; // Combined score (lower is better)
     int samples_evaluated = 0;
 };
 
@@ -174,119 +174,169 @@ struct LoadedSimulation {
     }
 };
 
-// Compute metrics for a pre-loaded simulation using given parameters
-metrics::BoomDetection evaluateSimulation(
-    LoadedSimulation const& sim,
-    MetricParams const& metric_params,
-    BoomDetectionParams const& boom_params,
-    double& out_peak_frame) {
+// Pre-computed metrics for a simulation (computed once, used many times)
+struct ComputedMetrics {
+    std::string sim_id;
+    double frame_duration = 0.0;
+    int boom_frame_truth = -1;
+    metrics::MetricsCollector collector;
+};
 
+// Phase 1: Compute all metrics for a simulation (expensive, done once per MetricParams)
+void computeMetrics(LoadedSimulation const& sim, MetricParams const& metric_params,
+                    ComputedMetrics& out) {
     auto const& header = sim.reader.header();
     int frame_count = header.frame_count;
 
+    out.sim_id = sim.id;
+    out.frame_duration = sim.frame_duration;
+    out.boom_frame_truth = sim.boom_frame_truth;
+
     // Create metrics collector with our parameters
-    metrics::MetricsCollector collector;
-    collector.setMetricParams(metric_params);
-    collector.registerStandardMetrics();
+    out.collector.setMetricParams(metric_params);
+    out.collector.registerStandardMetrics();
 
     // Process all frames using zero-copy packed state access
     for (int frame = 0; frame < frame_count; ++frame) {
         auto const* packed = sim.reader.getFramePacked(frame);
-        if (!packed) {
+        if (!packed)
             break;
-        }
-        collector.beginFrame(frame);
-        collector.updateFromPackedStates(packed, header.pendulum_count);
-        collector.endFrame();
+        out.collector.beginFrame(frame);
+        out.collector.updateFromPackedStates(packed, header.pendulum_count);
+        out.collector.endFrame();
     }
-
-    // Find peak causticness frame (max value, no offset)
-    auto const* caustic_series = collector.getMetric(boom_params.metric_name);
-    if (!caustic_series || caustic_series->empty()) {
-        caustic_series = collector.getMetric(metrics::MetricNames::AngularCausticness);
-    }
-
-    if (caustic_series && !caustic_series->empty()) {
-        auto const& values = caustic_series->values();
-        auto max_it = std::max_element(values.begin(), values.end());
-        out_peak_frame = static_cast<double>(std::distance(values.begin(), max_it));
-    } else {
-        out_peak_frame = -1;
-    }
-
-    // Detect boom using our parameters
-    return metrics::findBoomFrame(collector, sim.frame_duration, boom_params);
 }
 
-// Generate parameter sets for grid search
-std::vector<ParameterSet> generateParameterGrid() {
-    std::vector<ParameterSet> grid;
+// Phase 2: Evaluate boom detection on pre-computed metrics (cheap, done many times)
+metrics::BoomDetection evaluateBoomDetection(ComputedMetrics const& computed,
+                                             BoomDetectionParams const& boom_params) {
+    return metrics::findBoomFrame(computed.collector, computed.frame_duration, boom_params);
+}
 
-    // Metrics to try for boom detection
-    std::vector<std::string> metric_names = {
-        "angular_causticness",
-        "tip_causticness",
-        "spatial_concentration",
-        "cv_causticness",
-        "fold_causticness",
-        "local_coherence"
-    };
+// Metric parameter configuration (Phase 1 - expensive computation)
+struct MetricConfig {
+    MetricParams params;
 
-    // Sector variations (simplified - fewer combos since we're adding metric dimension)
-    std::vector<int> min_sectors_vals = {8};
-    std::vector<int> max_sectors_vals = {72};
-    std::vector<int> target_vals = {40};
+    bool operator==(MetricConfig const& other) const {
+        return params.min_sectors == other.params.min_sectors &&
+               params.max_sectors == other.params.max_sectors &&
+               params.target_per_sector == other.params.target_per_sector;
+    }
+};
 
-    // Boom detection variations
-    std::vector<double> offset_vals = {0.0, 0.2, 0.4};
-    std::vector<double> peak_pct_vals = {0.5, 0.6, 0.7};
-    std::vector<int> smooth_vals = {5};
+// Boom detection configuration (Phase 2 - cheap evaluation)
+struct BoomConfig {
+    std::string metric_name;
+    BoomDetectionMethod method;
+    double offset_seconds = 0.0;
+    double peak_percent_threshold = 0.6;
+    int smoothing_window = 5;
 
-    // Generate combinations
-    for (auto const& metric : metric_names) {
-        for (int min_sec : min_sectors_vals) {
-            for (int max_sec : max_sectors_vals) {
-                for (int target : target_vals) {
-                    MetricParams mp;
-                    mp.min_sectors = min_sec;
-                    mp.max_sectors = max_sec;
-                    mp.target_per_sector = target;
+    BoomDetectionParams toParams() const {
+        BoomDetectionParams p;
+        p.metric_name = metric_name;
+        p.method = method;
+        p.offset_seconds = offset_seconds;
+        p.peak_percent_threshold = peak_percent_threshold;
+        p.smoothing_window = smoothing_window;
+        return p;
+    }
 
-                    // MaxCausticness with different offsets
-                    for (double offset : offset_vals) {
-                        ParameterSet ps;
-                        ps.metrics = mp;
-                        ps.boom.method = BoomDetectionMethod::MaxCausticness;
-                        ps.boom.offset_seconds = offset;
-                        ps.boom.metric_name = metric;
-                        grid.push_back(ps);
-                    }
+    std::string describe() const {
+        std::ostringstream oss;
+        // Shorten metric name for display
+        std::string metric_short = metric_name;
+        if (metric_short.find("_causticness") != std::string::npos) {
+            metric_short = metric_short.substr(0, metric_short.find("_causticness"));
+        } else if (metric_short.find("_concentration") != std::string::npos) {
+            metric_short = metric_short.substr(0, metric_short.find("_concentration")) + "_conc";
+        } else if (metric_short.find("_coherence") != std::string::npos) {
+            metric_short = metric_short.substr(0, metric_short.find("_coherence")) + "_coh";
+        }
+        oss << metric_short << " ";
+        switch (method) {
+        case BoomDetectionMethod::MaxCausticness:
+            oss << "max off=" << offset_seconds;
+            break;
+        case BoomDetectionMethod::FirstPeakPercent:
+            oss << "first@" << (int)(peak_percent_threshold * 100) << "%";
+            break;
+        case BoomDetectionMethod::DerivativePeak:
+            oss << "deriv w=" << smoothing_window;
+            break;
+        }
+        return oss.str();
+    }
+};
 
-                    // FirstPeakPercent with different thresholds
-                    for (double pct : peak_pct_vals) {
-                        ParameterSet ps;
-                        ps.metrics = mp;
-                        ps.boom.method = BoomDetectionMethod::FirstPeakPercent;
-                        ps.boom.peak_percent_threshold = pct;
-                        ps.boom.metric_name = metric;
-                        grid.push_back(ps);
-                    }
+// Generate metric parameter configurations (Phase 1)
+std::vector<MetricConfig> generateMetricConfigs() {
+    std::vector<MetricConfig> configs;
 
-                    // DerivativePeak with different smoothing
-                    for (int smooth : smooth_vals) {
-                        ParameterSet ps;
-                        ps.metrics = mp;
-                        ps.boom.method = BoomDetectionMethod::DerivativePeak;
-                        ps.boom.smoothing_window = smooth;
-                        ps.boom.metric_name = metric;
-                        grid.push_back(ps);
-                    }
-                }
+    // Sector variations
+    std::vector<int> min_sectors_vals = {2, 3, 4, 5, 6, 7, 8, 9}; // Reduced for speed
+    std::vector<int> max_sectors_vals = {16, 32, 48, 64, 80, 96}; // Reduced for speed
+    std::vector<int> target_vals = {20, 30, 40, 50, 60, 70, 80};  // Reduced for speed
+
+    for (int min_sec : min_sectors_vals) {
+        for (int max_sec : max_sectors_vals) {
+            for (int target : target_vals) {
+                MetricConfig cfg;
+                cfg.params.min_sectors = min_sec;
+                cfg.params.max_sectors = max_sec;
+                cfg.params.target_per_sector = target;
+                configs.push_back(cfg);
             }
         }
     }
 
-    return grid;
+    return configs;
+}
+
+// Generate boom detection configurations (Phase 2)
+std::vector<BoomConfig> generateBoomConfigs() {
+    std::vector<BoomConfig> configs;
+
+    // Metrics to try for boom detection
+    std::vector<std::string> metric_names = {"angular_causticness",   "tip_causticness",
+                                             "spatial_concentration", "cv_causticness",
+                                             "fold_causticness",      "local_coherence"};
+
+    // Boom detection variations
+    std::vector<double> offset_vals = {-0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4};
+    std::vector<double> peak_pct_vals = {0.4, 0.5, 0.6, 0.7, 0.8, 0.9};
+    std::vector<int> smooth_vals = {3, 5, 7};
+
+    for (auto const& metric : metric_names) {
+        // MaxCausticness with different offsets
+        for (double offset : offset_vals) {
+            BoomConfig cfg;
+            cfg.metric_name = metric;
+            cfg.method = BoomDetectionMethod::MaxCausticness;
+            cfg.offset_seconds = offset;
+            configs.push_back(cfg);
+        }
+
+        // FirstPeakPercent with different thresholds
+        for (double pct : peak_pct_vals) {
+            BoomConfig cfg;
+            cfg.metric_name = metric;
+            cfg.method = BoomDetectionMethod::FirstPeakPercent;
+            cfg.peak_percent_threshold = pct;
+            configs.push_back(cfg);
+        }
+
+        // DerivativePeak with different smoothing
+        for (int smooth : smooth_vals) {
+            BoomConfig cfg;
+            cfg.metric_name = metric;
+            cfg.method = BoomDetectionMethod::DerivativePeak;
+            cfg.smoothing_window = smooth;
+            configs.push_back(cfg);
+        }
+    }
+
+    return configs;
 }
 
 // Save best parameters to TOML file
@@ -298,10 +348,8 @@ void saveBestParams(std::string const& path, EvaluationResult const& best) {
     }
 
     file << "# Best parameters found by pendulum-optimize\n";
-    file << "# Boom MAE: " << std::fixed << std::setprecision(2)
-         << best.boom_mae << " frames\n";
-    file << "# Peak MAE: " << std::fixed << std::setprecision(2)
-         << best.peak_mae << " frames\n";
+    file << "# Boom MAE: " << std::fixed << std::setprecision(2) << best.boom_mae << " frames\n";
+    file << "# Peak MAE: " << std::fixed << std::setprecision(2) << best.peak_mae << " frames\n";
     file << "# Samples evaluated: " << best.samples_evaluated << "\n\n";
 
     file << "[metrics]\n";
@@ -413,10 +461,10 @@ int main(int argc, char* argv[]) {
             double load_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
             auto const& h = sim.reader.header();
             total_frames += h.frame_count;
-            total_pendulums = h.pendulum_count;  // Same for all
-            std::cout << "  " << ann.id << ": " << h.frame_count << " frames, "
-                      << h.pendulum_count << " pendulums, boom@" << ann.boom_frame
-                      << " (" << std::fixed << std::setprecision(0) << load_ms << "ms)\n";
+            total_pendulums = h.pendulum_count; // Same for all
+            std::cout << "  " << ann.id << ": " << h.frame_count << " frames, " << h.pendulum_count
+                      << " pendulums, boom@" << ann.boom_frame << " (" << std::fixed
+                      << std::setprecision(0) << load_ms << "ms)\n";
             simulations.push_back(std::move(sim));
         } else {
             std::cerr << "  FAILED: " << ann.data_path << "\n";
@@ -425,8 +473,8 @@ int main(int argc, char* argv[]) {
 
     auto load_end = std::chrono::steady_clock::now();
     double load_time = std::chrono::duration<double>(load_end - load_start).count();
-    std::cout << "Loaded " << simulations.size() << " simulations in "
-              << std::fixed << std::setprecision(2) << load_time << "s"
+    std::cout << "Loaded " << simulations.size() << " simulations in " << std::fixed
+              << std::setprecision(2) << load_time << "s"
               << " (" << total_frames << " total frames, " << total_pendulums << " pendulums)\n\n";
 
     if (simulations.empty()) {
@@ -434,93 +482,82 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Generate parameter grid
-    auto grid = generateParameterGrid();
+    // Generate configurations
+    auto metric_configs = generateMetricConfigs();
+    auto boom_configs = generateBoomConfigs();
     unsigned int num_threads = std::thread::hardware_concurrency();
-    if (num_threads == 0) num_threads = 4;
+    if (num_threads == 0)
+        num_threads = 4;
 
-    std::cout << "Testing " << grid.size() << " parameter combinations\n";
-    std::cout << "Using " << num_threads << " threads\n";
-    std::cout << "Simulations: " << simulations.size() << " files, ~"
-              << simulations[0].reader.header().frame_count << " frames each\n\n";
+    size_t total_combinations = metric_configs.size() * boom_configs.size();
+    std::cout << "=== Two-Phase Optimization ===\n";
+    std::cout << "Phase 1: " << metric_configs.size() << " metric configs × " << simulations.size()
+              << " simulations (expensive)\n";
+    std::cout << "Phase 2: " << boom_configs.size() << " boom detection methods (fast)\n";
+    std::cout << "Total: " << total_combinations << " parameter combinations\n";
+    std::cout << "Threads: " << num_threads << "\n\n";
 
-    // Pre-allocate results vector
-    std::vector<EvaluationResult> results(grid.size());
+    auto start_time = std::chrono::steady_clock::now();
 
-    // Thread-safe progress tracking
+    // ============================================
+    // PHASE 1: Compute metrics (expensive, done once per MetricConfig)
+    // ============================================
+    size_t total_phase1_work = metric_configs.size() * simulations.size();
+    std::cout << "Phase 1: Computing metrics (" << total_phase1_work << " work items)...\n";
+
+    // Storage: computed_metrics[metric_config_idx][sim_idx]
+    std::vector<std::vector<ComputedMetrics>> all_computed_metrics(metric_configs.size());
+    for (size_t mc = 0; mc < metric_configs.size(); ++mc) {
+        all_computed_metrics[mc].resize(simulations.size());
+    }
+
+    // Parallelize across ALL (metric_config, simulation) pairs
+    std::atomic<size_t> work_idx{0};
     std::atomic<size_t> completed{0};
     std::atomic<bool> done{false};
     std::mutex print_mutex;
-    auto start_time = std::chrono::steady_clock::now();
 
-    // Progress printer thread
+    // Progress thread
     std::thread progress_thread([&]() {
         while (!done.load()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
             size_t c = completed.load();
-            auto elapsed = std::chrono::steady_clock::now() - start_time;
-            double secs = std::chrono::duration<double>(elapsed).count();
-            double rate = c > 0 ? secs / c : 0;
-            double eta = (grid.size() - c) * rate;
+            auto now = std::chrono::steady_clock::now();
+            double elapsed = std::chrono::duration<double>(now - start_time).count();
+            double rate = c > 0 ? c / elapsed : 0;
+            double eta = rate > 0 ? (total_phase1_work - c) / rate : 0;
 
             std::lock_guard<std::mutex> lock(print_mutex);
-            std::cout << "\rProgress: " << c << "/" << grid.size()
-                      << " (" << std::fixed << std::setprecision(1)
-                      << (100.0 * c / grid.size()) << "%)"
-                      << " | " << std::setprecision(1) << secs << "s elapsed"
-                      << " | ETA: " << std::setprecision(0) << eta << "s"
-                      << "     " << std::flush;
+            std::cout << "\r  Progress: " << c << "/" << total_phase1_work << " (" << std::fixed
+                      << std::setprecision(1) << (100.0 * c / total_phase1_work) << "%)"
+                      << " | " << std::setprecision(1) << elapsed << "s"
+                      << " | " << std::setprecision(0) << rate << " items/s"
+                      << " | ETA: " << eta << "s     " << std::flush;
         }
     });
 
-    // Worker function for evaluating a range of parameters
-    auto evaluate_range = [&](size_t start_idx, size_t end_idx) {
-        for (size_t pi = start_idx; pi < end_idx; ++pi) {
-            auto const& params = grid[pi];
-            EvaluationResult& result = results[pi];
-            result.params = params;
-
-            double boom_error_sum = 0.0;
-            double peak_error_sum = 0.0;
-            int boom_samples = 0;
-            int peak_samples = 0;
-
-            for (auto const& sim : simulations) {
-                double peak_frame = -1;
-                auto boom = evaluateSimulation(sim, params.metrics, params.boom, peak_frame);
-
-                if (sim.boom_frame_truth >= 0 && boom.frame >= 0) {
-                    boom_error_sum += std::abs(boom.frame - sim.boom_frame_truth);
-                    boom_samples++;
-                }
-
-                if (sim.peak_frame_truth >= 0 && peak_frame >= 0) {
-                    peak_error_sum += std::abs(peak_frame - sim.peak_frame_truth);
-                    peak_samples++;
-                }
-            }
-
-            result.boom_mae = boom_samples > 0 ? boom_error_sum / boom_samples : 1e9;
-            result.peak_mae = peak_samples > 0 ? peak_error_sum / peak_samples : 1e9;
-            result.samples_evaluated = boom_samples + peak_samples;
-            result.combined_score = 0.7 * result.boom_mae + 0.3 * result.peak_mae;
-
-            completed.fetch_add(1);
-        }
-    };
-
-    // Launch worker threads
+    // Worker threads process (metric_config, simulation) pairs
     std::vector<std::thread> workers;
-    size_t chunk_size = (grid.size() + num_threads - 1) / num_threads;
     for (unsigned int t = 0; t < num_threads; ++t) {
-        size_t start_idx = t * chunk_size;
-        size_t end_idx = std::min(start_idx + chunk_size, grid.size());
-        if (start_idx < grid.size()) {
-            workers.emplace_back(evaluate_range, start_idx, end_idx);
-        }
+        workers.emplace_back([&]() {
+            while (true) {
+                size_t idx = work_idx.fetch_add(1);
+                if (idx >= total_phase1_work) {
+                    break;
+                }
+
+                // Decode work item: idx = mc * num_sims + sim
+                size_t mc = idx / simulations.size();
+                size_t sim = idx % simulations.size();
+
+                computeMetrics(simulations[sim], metric_configs[mc].params,
+                               all_computed_metrics[mc][sim]);
+
+                completed.fetch_add(1);
+            }
+        });
     }
 
-    // Wait for all workers to complete
     for (auto& w : workers) {
         w.join();
     }
@@ -528,37 +565,107 @@ int main(int argc, char* argv[]) {
     done.store(true);
     progress_thread.join();
 
-    auto total_time = std::chrono::steady_clock::now() - start_time;
-    double total_secs = std::chrono::duration<double>(total_time).count();
-    std::cout << "\rCompleted " << grid.size() << " evaluations in "
-              << std::fixed << std::setprecision(2) << total_secs << "s"
-              << " (" << std::setprecision(1) << (grid.size() / total_secs) << " evals/sec)\n\n";
+    auto phase1_done = std::chrono::steady_clock::now();
+    double phase1_total = std::chrono::duration<double>(phase1_done - start_time).count();
+    std::cout << "\rPhase 1 complete: " << total_phase1_work << " items in " << std::fixed
+              << std::setprecision(2) << phase1_total << "s"
+              << " (" << std::setprecision(0) << (total_phase1_work / phase1_total)
+              << " items/s)                    \n\n";
+
+    // ============================================
+    // PHASE 2: Search boom detection methods (cheap)
+    // ============================================
+    std::cout << "Phase 2: Evaluating " << boom_configs.size() << " boom detection methods...\n";
+
+    std::vector<EvaluationResult> results;
+    results.reserve(total_combinations);
+    std::mutex results_mutex;
+
+    // For each metric configuration
+    for (size_t mc = 0; mc < metric_configs.size(); ++mc) {
+        auto const& metric_cfg = metric_configs[mc];
+        auto const& computed_for_config = all_computed_metrics[mc];
+
+        // Thread-safe progress
+        std::atomic<size_t> boom_idx{0};
+        std::vector<std::thread> workers;
+
+        for (unsigned int t = 0; t < num_threads; ++t) {
+            workers.emplace_back([&]() {
+                while (true) {
+                    size_t bi = boom_idx.fetch_add(1);
+                    if (bi >= boom_configs.size())
+                        break;
+
+                    auto const& boom_cfg = boom_configs[bi];
+                    auto boom_params = boom_cfg.toParams();
+
+                    double boom_error_sum = 0.0;
+                    int boom_samples = 0;
+
+                    // Evaluate against all simulations (very fast - just reads pre-computed data)
+                    for (auto const& computed : computed_for_config) {
+                        auto boom = evaluateBoomDetection(computed, boom_params);
+
+                        if (computed.boom_frame_truth >= 0 && boom.frame >= 0) {
+                            boom_error_sum += std::abs(boom.frame - computed.boom_frame_truth);
+                            boom_samples++;
+                        }
+                    }
+
+                    EvaluationResult result;
+                    result.params.metrics = metric_cfg.params;
+                    result.params.boom = boom_params;
+                    result.boom_mae = boom_samples > 0 ? boom_error_sum / boom_samples : 1e9;
+                    result.peak_mae = 1e9; // Not tracking peak for now
+                    result.samples_evaluated = boom_samples;
+                    result.combined_score = result.boom_mae;
+
+                    std::lock_guard<std::mutex> lock(results_mutex);
+                    results.push_back(result);
+                }
+            });
+        }
+
+        for (auto& w : workers)
+            w.join();
+
+        std::cout << "  MetricConfig " << (mc + 1) << "/" << metric_configs.size() << ": "
+                  << boom_configs.size() << " boom methods evaluated\n";
+    }
+
+    auto phase2_done = std::chrono::steady_clock::now();
+    double phase2_total = std::chrono::duration<double>(phase2_done - phase1_done).count();
+    double total_secs = std::chrono::duration<double>(phase2_done - start_time).count();
+
+    std::cout << "\nPhase 2 complete: " << std::fixed << std::setprecision(2) << phase2_total
+              << "s\n";
+    std::cout << "Total time: " << total_secs << "s for " << results.size() << " evaluations"
+              << " (" << std::setprecision(0) << (results.size() / total_secs) << " evals/sec)\n\n";
 
     // Sort by combined score
-    std::sort(results.begin(), results.end(), [](auto const& a, auto const& b) {
-        return a.combined_score < b.combined_score;
-    });
+    std::sort(results.begin(), results.end(),
+              [](auto const& a, auto const& b) { return a.combined_score < b.combined_score; });
 
     // Display top 10 results
     std::cout << "Top 10 parameter combinations:\n";
     std::cout << std::string(90, '-') << "\n";
-    std::cout << std::setw(4) << "Rank"
-              << std::setw(12) << "Boom MAE"
-              << std::setw(12) << "Peak MAE"
-              << std::setw(10) << "Score"
+    std::cout << std::setw(4) << "Rank" << std::setw(12) << "Boom MAE" << std::setw(12)
+              << "Peak MAE" << std::setw(10) << "Score"
               << "  Parameters\n";
     std::cout << std::string(90, '-') << "\n";
 
     for (size_t i = 0; i < std::min(results.size(), size_t(10)); ++i) {
         auto const& r = results[i];
-        std::cout << std::setw(4) << (i + 1)
-                  << std::setw(12) << std::fixed << std::setprecision(1) << r.boom_mae;
+        std::cout << std::setw(4) << (i + 1) << std::setw(12) << std::fixed << std::setprecision(1)
+                  << r.boom_mae;
         if (r.peak_mae < 1e6) {
             std::cout << std::setw(12) << std::fixed << std::setprecision(1) << r.peak_mae;
         } else {
             std::cout << std::setw(12) << "N/A";
         }
-        std::cout << std::setw(10) << std::fixed << std::setprecision(1) << r.boom_mae  // Use boom_mae as score when no peak
+        std::cout << std::setw(10) << std::fixed << std::setprecision(1)
+                  << r.boom_mae // Use boom_mae as score when no peak
                   << "  " << r.params.describe() << "\n";
     }
 
