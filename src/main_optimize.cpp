@@ -28,16 +28,19 @@
 #include "simulation_data.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <regex>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 // Annotation entry
@@ -376,19 +379,31 @@ int main(int argc, char* argv[]) {
     std::vector<LoadedSimulation> simulations;
     simulations.reserve(valid_annotations.size());
 
+    size_t total_frames = 0;
+    size_t total_pendulums = 0;
     for (auto const& ann : valid_annotations) {
+        auto t0 = std::chrono::steady_clock::now();
         LoadedSimulation sim;
         if (sim.load(ann)) {
+            auto t1 = std::chrono::steady_clock::now();
+            double load_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+            auto const& h = sim.reader.header();
+            total_frames += h.frame_count;
+            total_pendulums = h.pendulum_count;  // Same for all
+            std::cout << "  " << ann.id << ": " << h.frame_count << " frames, "
+                      << h.pendulum_count << " pendulums, boom@" << ann.boom_frame
+                      << " (" << std::fixed << std::setprecision(0) << load_ms << "ms)\n";
             simulations.push_back(std::move(sim));
         } else {
-            std::cerr << "Failed to load: " << ann.data_path << "\n";
+            std::cerr << "  FAILED: " << ann.data_path << "\n";
         }
     }
 
     auto load_end = std::chrono::steady_clock::now();
     double load_time = std::chrono::duration<double>(load_end - load_start).count();
     std::cout << "Loaded " << simulations.size() << " simulations in "
-              << std::fixed << std::setprecision(2) << load_time << "s\n\n";
+              << std::fixed << std::setprecision(2) << load_time << "s"
+              << " (" << total_frames << " total frames, " << total_pendulums << " pendulums)\n\n";
 
     if (simulations.empty()) {
         std::cerr << "No simulations loaded successfully.\n";
@@ -397,60 +412,103 @@ int main(int argc, char* argv[]) {
 
     // Generate parameter grid
     auto grid = generateParameterGrid();
-    std::cout << "Testing " << grid.size() << " parameter combinations\n\n";
+    unsigned int num_threads = std::thread::hardware_concurrency();
+    if (num_threads == 0) num_threads = 4;
 
-    // Evaluate each parameter set
-    std::vector<EvaluationResult> results;
-    results.reserve(grid.size());
+    std::cout << "Testing " << grid.size() << " parameter combinations\n";
+    std::cout << "Using " << num_threads << " threads\n";
+    std::cout << "Simulations: " << simulations.size() << " files, ~"
+              << simulations[0].reader.header().frame_count << " frames each\n\n";
 
+    // Pre-allocate results vector
+    std::vector<EvaluationResult> results(grid.size());
+
+    // Thread-safe progress tracking
+    std::atomic<size_t> completed{0};
+    std::atomic<bool> done{false};
+    std::mutex print_mutex;
     auto start_time = std::chrono::steady_clock::now();
 
-    for (size_t pi = 0; pi < grid.size(); ++pi) {
-        auto const& params = grid[pi];
-        EvaluationResult result;
-        result.params = params;
-
-        double boom_error_sum = 0.0;
-        double peak_error_sum = 0.0;
-        int boom_samples = 0;
-        int peak_samples = 0;
-
-        for (auto const& sim : simulations) {
-            double peak_frame = -1;
-            auto boom = evaluateSimulation(sim, params.metrics, params.boom, peak_frame);
-
-            if (sim.boom_frame_truth >= 0 && boom.frame >= 0) {
-                boom_error_sum += std::abs(boom.frame - sim.boom_frame_truth);
-                boom_samples++;
-            }
-
-            if (sim.peak_frame_truth >= 0 && peak_frame >= 0) {
-                peak_error_sum += std::abs(peak_frame - sim.peak_frame_truth);
-                peak_samples++;
-            }
-        }
-
-        result.boom_mae = boom_samples > 0 ? boom_error_sum / boom_samples : 1e9;
-        result.peak_mae = peak_samples > 0 ? peak_error_sum / peak_samples : 1e9;
-        result.samples_evaluated = boom_samples + peak_samples;
-
-        // Combined score: weighted average (boom detection more important)
-        result.combined_score = 0.7 * result.boom_mae + 0.3 * result.peak_mae;
-
-        results.push_back(result);
-
-        // Progress update
-        if ((pi + 1) % 100 == 0 || pi + 1 == grid.size()) {
+    // Progress printer thread
+    std::thread progress_thread([&]() {
+        while (!done.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            size_t c = completed.load();
             auto elapsed = std::chrono::steady_clock::now() - start_time;
             double secs = std::chrono::duration<double>(elapsed).count();
-            std::cout << "\rProgress: " << (pi + 1) << "/" << grid.size()
+            double rate = c > 0 ? secs / c : 0;
+            double eta = (grid.size() - c) * rate;
+
+            std::lock_guard<std::mutex> lock(print_mutex);
+            std::cout << "\rProgress: " << c << "/" << grid.size()
                       << " (" << std::fixed << std::setprecision(1)
-                      << (100.0 * (pi + 1) / grid.size()) << "%)"
-                      << " Elapsed: " << std::fixed << std::setprecision(1) << secs << "s"
-                      << std::flush;
+                      << (100.0 * c / grid.size()) << "%)"
+                      << " | " << std::setprecision(1) << secs << "s elapsed"
+                      << " | ETA: " << std::setprecision(0) << eta << "s"
+                      << "     " << std::flush;
+        }
+    });
+
+    // Worker function for evaluating a range of parameters
+    auto evaluate_range = [&](size_t start_idx, size_t end_idx) {
+        for (size_t pi = start_idx; pi < end_idx; ++pi) {
+            auto const& params = grid[pi];
+            EvaluationResult& result = results[pi];
+            result.params = params;
+
+            double boom_error_sum = 0.0;
+            double peak_error_sum = 0.0;
+            int boom_samples = 0;
+            int peak_samples = 0;
+
+            for (auto const& sim : simulations) {
+                double peak_frame = -1;
+                auto boom = evaluateSimulation(sim, params.metrics, params.boom, peak_frame);
+
+                if (sim.boom_frame_truth >= 0 && boom.frame >= 0) {
+                    boom_error_sum += std::abs(boom.frame - sim.boom_frame_truth);
+                    boom_samples++;
+                }
+
+                if (sim.peak_frame_truth >= 0 && peak_frame >= 0) {
+                    peak_error_sum += std::abs(peak_frame - sim.peak_frame_truth);
+                    peak_samples++;
+                }
+            }
+
+            result.boom_mae = boom_samples > 0 ? boom_error_sum / boom_samples : 1e9;
+            result.peak_mae = peak_samples > 0 ? peak_error_sum / peak_samples : 1e9;
+            result.samples_evaluated = boom_samples + peak_samples;
+            result.combined_score = 0.7 * result.boom_mae + 0.3 * result.peak_mae;
+
+            completed.fetch_add(1);
+        }
+    };
+
+    // Launch worker threads
+    std::vector<std::thread> workers;
+    size_t chunk_size = (grid.size() + num_threads - 1) / num_threads;
+    for (unsigned int t = 0; t < num_threads; ++t) {
+        size_t start_idx = t * chunk_size;
+        size_t end_idx = std::min(start_idx + chunk_size, grid.size());
+        if (start_idx < grid.size()) {
+            workers.emplace_back(evaluate_range, start_idx, end_idx);
         }
     }
-    std::cout << "\n\n";
+
+    // Wait for all workers to complete
+    for (auto& w : workers) {
+        w.join();
+    }
+
+    done.store(true);
+    progress_thread.join();
+
+    auto total_time = std::chrono::steady_clock::now() - start_time;
+    double total_secs = std::chrono::duration<double>(total_time).count();
+    std::cout << "\rCompleted " << grid.size() << " evaluations in "
+              << std::fixed << std::setprecision(2) << total_secs << "s"
+              << " (" << std::setprecision(1) << (grid.size() / total_secs) << " evals/sec)\n\n";
 
     // Sort by combined score
     std::sort(results.begin(), results.end(), [](auto const& a, auto const& b) {
@@ -459,24 +517,28 @@ int main(int argc, char* argv[]) {
 
     // Display top 10 results
     std::cout << "Top 10 parameter combinations:\n";
-    std::cout << std::string(80, '-') << "\n";
+    std::cout << std::string(90, '-') << "\n";
     std::cout << std::setw(4) << "Rank"
               << std::setw(12) << "Boom MAE"
               << std::setw(12) << "Peak MAE"
               << std::setw(10) << "Score"
               << "  Parameters\n";
-    std::cout << std::string(80, '-') << "\n";
+    std::cout << std::string(90, '-') << "\n";
 
     for (size_t i = 0; i < std::min(results.size(), size_t(10)); ++i) {
         auto const& r = results[i];
         std::cout << std::setw(4) << (i + 1)
-                  << std::setw(12) << std::fixed << std::setprecision(2) << r.boom_mae
-                  << std::setw(12) << std::fixed << std::setprecision(2) << r.peak_mae
-                  << std::setw(10) << std::fixed << std::setprecision(2) << r.combined_score
+                  << std::setw(12) << std::fixed << std::setprecision(1) << r.boom_mae;
+        if (r.peak_mae < 1e6) {
+            std::cout << std::setw(12) << std::fixed << std::setprecision(1) << r.peak_mae;
+        } else {
+            std::cout << std::setw(12) << "N/A";
+        }
+        std::cout << std::setw(10) << std::fixed << std::setprecision(1) << r.boom_mae  // Use boom_mae as score when no peak
                   << "  " << r.params.describe() << "\n";
     }
 
-    std::cout << std::string(80, '-') << "\n\n";
+    std::cout << std::string(90, '-') << "\n\n";
 
     // Save best parameters
     if (!results.empty()) {

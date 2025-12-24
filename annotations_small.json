@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "annotations": [
+    {"id": "run_20251224_140011", "data_path": "output/eval/run_20251224_140011/simulation_data.bin", "boom_frame": 429},
+    {"id": "run_20251224_140022", "data_path": "output/eval/run_20251224_140022/simulation_data.bin", "boom_frame": 552},
+    {"id": "run_20251224_140032", "data_path": "output/eval/run_20251224_140032/simulation_data.bin", "boom_frame": 584}
+  ]
+}
