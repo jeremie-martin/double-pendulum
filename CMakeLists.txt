@@ -90,6 +90,15 @@ target_compile_options(pendulum-metrics PRIVATE
     -Wall -Wextra -Wpedantic
 )
 
+# Metric optimization executable
+add_executable(pendulum-optimize src/main_optimize.cpp)
+
+target_link_libraries(pendulum-optimize PRIVATE double-pendulum-core)
+
+target_compile_options(pendulum-optimize PRIVATE
+    -Wall -Wextra -Wpedantic
+)
+
 # GUI executable (optional)
 option(BUILD_GUI "Build GUI application with ImGui" OFF)
 if(BUILD_GUI)

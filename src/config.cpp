@@ -77,6 +77,17 @@ PhysicsQuality parsePhysicsQuality(std::string const& str) {
     return PhysicsQuality::High;
 }
 
+BoomDetectionMethod parseBoomDetectionMethod(std::string const& str) {
+    if (str == "max_causticness")
+        return BoomDetectionMethod::MaxCausticness;
+    if (str == "first_peak_percent")
+        return BoomDetectionMethod::FirstPeakPercent;
+    if (str == "derivative_peak")
+        return BoomDetectionMethod::DerivativePeak;
+    std::cerr << "Unknown boom detection method: " << str << ", using max_causticness\n";
+    return BoomDetectionMethod::MaxCausticness;
+}
+
 // Safe value extraction helpers
 template <typename T> T get_or(toml::table const& tbl, std::string_view key, T default_val) {
     if (auto node = tbl.get(key)) {
@@ -171,6 +182,35 @@ Config Config::load(std::string const& path) {
             config.color.scheme = parseColorScheme(scheme_str);
             config.color.start = get_or(*color, "start", 0.0);
             config.color.end = get_or(*color, "end", 1.0);
+        }
+
+        // Metrics parameters
+        if (auto metrics_tbl = tbl["metrics"].as_table()) {
+            config.metrics.min_sectors = get_or(*metrics_tbl, "min_sectors", 8);
+            config.metrics.max_sectors = get_or(*metrics_tbl, "max_sectors", 72);
+            config.metrics.target_per_sector = get_or(*metrics_tbl, "target_per_sector", 40);
+            config.metrics.min_grid = get_or(*metrics_tbl, "min_grid", 4);
+            config.metrics.max_grid = get_or(*metrics_tbl, "max_grid", 32);
+            config.metrics.target_per_cell = get_or(*metrics_tbl, "target_per_cell", 40);
+            config.metrics.max_radius = get_or(*metrics_tbl, "max_radius", 2.0);
+            config.metrics.cv_normalization = get_or(*metrics_tbl, "cv_normalization", 1.5);
+            config.metrics.log_ratio_normalization = get_or(*metrics_tbl, "log_ratio_normalization", 2.0);
+            config.metrics.min_spread_threshold = get_or(*metrics_tbl, "min_spread_threshold", 0.05);
+            config.metrics.gini_chaos_baseline = get_or(*metrics_tbl, "gini_chaos_baseline", 0.35);
+            config.metrics.gini_baseline_divisor = get_or(*metrics_tbl, "gini_baseline_divisor", 0.65);
+            config.metrics.log_inverse_baseline = get_or(*metrics_tbl, "log_inverse_baseline", 1.0);
+            config.metrics.log_inverse_divisor = get_or(*metrics_tbl, "log_inverse_divisor", 2.5);
+        }
+
+        // Boom detection parameters
+        if (auto boom_tbl = tbl["boom_detection"].as_table()) {
+            auto method_str = get_string_or(*boom_tbl, "method", "max_causticness");
+            config.boom.method = parseBoomDetectionMethod(method_str);
+            config.boom.offset_seconds = get_or(*boom_tbl, "offset_seconds", 0.3);
+            config.boom.peak_percent_threshold = get_or(*boom_tbl, "peak_percent_threshold", 0.6);
+            config.boom.min_peak_prominence = get_or(*boom_tbl, "min_peak_prominence", 0.05);
+            config.boom.smoothing_window = get_or(*boom_tbl, "smoothing_window", 5);
+            config.boom.metric_name = get_string_or(*boom_tbl, "metric_name", "angular_causticness");
         }
 
         // Detection thresholds
@@ -432,6 +472,60 @@ bool Config::applyOverride(std::string const& key, std::string const& value) {
                 std::cerr << "Unknown analysis parameter: " << param << "\n";
                 return false;
             }
+        }
+        // Metrics parameters
+        else if (section == "metrics") {
+            if (param == "min_sectors") {
+                metrics.min_sectors = std::stoi(value);
+            } else if (param == "max_sectors") {
+                metrics.max_sectors = std::stoi(value);
+            } else if (param == "target_per_sector") {
+                metrics.target_per_sector = std::stoi(value);
+            } else if (param == "min_grid") {
+                metrics.min_grid = std::stoi(value);
+            } else if (param == "max_grid") {
+                metrics.max_grid = std::stoi(value);
+            } else if (param == "target_per_cell") {
+                metrics.target_per_cell = std::stoi(value);
+            } else if (param == "max_radius") {
+                metrics.max_radius = std::stod(value);
+            } else if (param == "cv_normalization") {
+                metrics.cv_normalization = std::stod(value);
+            } else if (param == "log_ratio_normalization") {
+                metrics.log_ratio_normalization = std::stod(value);
+            } else if (param == "min_spread_threshold") {
+                metrics.min_spread_threshold = std::stod(value);
+            } else if (param == "gini_chaos_baseline") {
+                metrics.gini_chaos_baseline = std::stod(value);
+            } else if (param == "gini_baseline_divisor") {
+                metrics.gini_baseline_divisor = std::stod(value);
+            } else if (param == "log_inverse_baseline") {
+                metrics.log_inverse_baseline = std::stod(value);
+            } else if (param == "log_inverse_divisor") {
+                metrics.log_inverse_divisor = std::stod(value);
+            } else {
+                std::cerr << "Unknown metrics parameter: " << param << "\n";
+                return false;
+            }
+        }
+        // Boom detection parameters
+        else if (section == "boom_detection" || section == "boom") {
+            if (param == "method") {
+                boom.method = parseBoomDetectionMethod(value);
+            } else if (param == "offset_seconds") {
+                boom.offset_seconds = std::stod(value);
+            } else if (param == "peak_percent_threshold") {
+                boom.peak_percent_threshold = std::stod(value);
+            } else if (param == "min_peak_prominence") {
+                boom.min_peak_prominence = std::stod(value);
+            } else if (param == "smoothing_window") {
+                boom.smoothing_window = std::stoi(value);
+            } else if (param == "metric_name") {
+                boom.metric_name = value;
+            } else {
+                std::cerr << "Unknown boom_detection parameter: " << param << "\n";
+                return false;
+            }
         } else {
             std::cerr << "Unknown section: " << section << "\n";
             return false;
@@ -497,6 +591,15 @@ std::string physicsQualityToString(PhysicsQuality quality) {
     }
     return "high";
 }
+
+std::string boomDetectionMethodToString(BoomDetectionMethod method) {
+    switch (method) {
+    case BoomDetectionMethod::MaxCausticness: return "max_causticness";
+    case BoomDetectionMethod::FirstPeakPercent: return "first_peak_percent";
+    case BoomDetectionMethod::DerivativePeak: return "derivative_peak";
+    }
+    return "max_causticness";
+}
 } // namespace
 
 void Config::save(std::string const& path) const {
@@ -551,6 +654,34 @@ void Config::save(std::string const& path) const {
     file << "scheme = \"" << colorSchemeToString(color.scheme) << "\"\n";
     file << "start = " << color.start << "\n";
     file << "end = " << color.end << "\n";
+    file << "\n";
+
+    // Metrics section
+    file << "[metrics]\n";
+    file << "min_sectors = " << metrics.min_sectors << "\n";
+    file << "max_sectors = " << metrics.max_sectors << "\n";
+    file << "target_per_sector = " << metrics.target_per_sector << "\n";
+    file << "min_grid = " << metrics.min_grid << "\n";
+    file << "max_grid = " << metrics.max_grid << "\n";
+    file << "target_per_cell = " << metrics.target_per_cell << "\n";
+    file << "max_radius = " << metrics.max_radius << "\n";
+    file << "cv_normalization = " << metrics.cv_normalization << "\n";
+    file << "log_ratio_normalization = " << metrics.log_ratio_normalization << "\n";
+    file << "min_spread_threshold = " << metrics.min_spread_threshold << "\n";
+    file << "gini_chaos_baseline = " << metrics.gini_chaos_baseline << "\n";
+    file << "gini_baseline_divisor = " << metrics.gini_baseline_divisor << "\n";
+    file << "log_inverse_baseline = " << metrics.log_inverse_baseline << "\n";
+    file << "log_inverse_divisor = " << metrics.log_inverse_divisor << "\n";
+    file << "\n";
+
+    // Boom detection section
+    file << "[boom_detection]\n";
+    file << "method = \"" << boomDetectionMethodToString(boom.method) << "\"\n";
+    file << "offset_seconds = " << boom.offset_seconds << "\n";
+    file << "peak_percent_threshold = " << boom.peak_percent_threshold << "\n";
+    file << "min_peak_prominence = " << boom.min_peak_prominence << "\n";
+    file << "smoothing_window = " << boom.smoothing_window << "\n";
+    file << "metric_name = \"" << boom.metric_name << "\"\n";
     file << "\n";
 
     // Detection section

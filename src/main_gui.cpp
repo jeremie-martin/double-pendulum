@@ -211,6 +211,10 @@ struct AppState {
     std::chrono::high_resolution_clock::time_point replay_start_time;
     int replay_start_frame = 0;
     bool replay_playing = false;  // True when actively replaying in real-time
+
+    // Metric parameters window
+    bool show_metric_params_window = false;
+    bool needs_metric_recompute = false;
 };
 
 void initSimulation(AppState& state, GLRenderer& renderer) {
@@ -246,6 +250,9 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
         state.metrics_collector, state.event_detector, state.causticness_analyzer,
         state.config.detection.chaos_threshold, state.config.detection.chaos_confirmation,
         state.frame_duration, /*with_gpu=*/true);
+
+    // Apply metric params from config
+    state.metrics_collector.setMetricParams(state.config.metrics);
 
     state.boom_frame.reset();
     state.chaos_frame.reset();
@@ -1788,6 +1795,210 @@ void drawPostProcessSection(AppState& state) {
     }
 }
 
+// Recompute all metrics from frame history using current parameters
+void recomputeMetrics(AppState& state) {
+    if (state.frame_history.empty()) return;
+
+    // Update metric params on collector
+    state.metrics_collector.setMetricParams(state.config.metrics);
+
+    // Reset metrics collector
+    state.metrics_collector.reset();
+
+    // Recompute metrics for all frames in history
+    for (size_t frame = 0; frame < state.frame_history.size(); ++frame) {
+        state.metrics_collector.beginFrame(static_cast<int>(frame));
+        state.metrics_collector.updateFromStates(state.frame_history[frame]);
+        state.metrics_collector.endFrame();
+    }
+
+    // Re-detect boom with new params
+    auto boom = metrics::findBoomFrame(state.metrics_collector,
+                                       state.frame_duration,
+                                       state.config.boom);
+    if (boom.frame >= 0) {
+        state.boom_frame = boom.frame;
+        state.boom_causticness = boom.causticness;
+
+        // Update event detector for analyzers
+        double variance = state.metrics_collector.getVariance();
+        metrics::forceBoomEvent(state.event_detector, boom, variance);
+    } else {
+        state.boom_frame.reset();
+        state.boom_causticness = 0.0;
+    }
+
+    state.needs_metric_recompute = false;
+}
+
+// Draw metric parameters window
+void drawMetricParametersWindow(AppState& state) {
+    if (!state.show_metric_params_window) return;
+
+    ImGui::SetNextWindowSize(ImVec2(400, 500), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Metric Parameters", &state.show_metric_params_window)) {
+        ImGui::End();
+        return;
+    }
+
+    bool params_changed = false;
+    auto& params = state.config.metrics;
+    auto& boom_params = state.config.boom;
+
+    // Sector Algorithm section
+    if (ImGui::CollapsingHeader("Sector Algorithm", ImGuiTreeNodeFlags_DefaultOpen)) {
+        params_changed |= ImGui::SliderInt("Min Sectors", &params.min_sectors, 4, 24);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Minimum number of sectors for angle binning");
+
+        params_changed |= ImGui::SliderInt("Max Sectors", &params.max_sectors, 24, 144);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Maximum number of sectors for angle binning");
+
+        params_changed |= ImGui::SliderInt("Target/Sector", &params.target_per_sector, 10, 100);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Target pendulums per sector (controls N-scaling)");
+    }
+
+    // Grid Algorithm section
+    if (ImGui::CollapsingHeader("Grid Algorithm")) {
+        params_changed |= ImGui::SliderInt("Min Grid", &params.min_grid, 2, 16);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Minimum grid size for spatial metrics");
+
+        params_changed |= ImGui::SliderInt("Max Grid", &params.max_grid, 16, 64);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Maximum grid size for spatial metrics");
+
+        params_changed |= ImGui::SliderInt("Target/Cell", &params.target_per_cell, 10, 100);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Target pendulums per grid cell");
+    }
+
+    // Normalization section
+    if (ImGui::CollapsingHeader("Normalization")) {
+        float max_radius = static_cast<float>(params.max_radius);
+        if (ImGui::SliderFloat("Max Radius", &max_radius, 1.0f, 4.0f, "%.2f")) {
+            params.max_radius = max_radius;
+            params_changed = true;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Maximum tip radius (L1 + L2)");
+
+        float cv_norm = static_cast<float>(params.cv_normalization);
+        if (ImGui::SliderFloat("CV Norm", &cv_norm, 0.5f, 3.0f, "%.2f")) {
+            params.cv_normalization = cv_norm;
+            params_changed = true;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("CV normalization divisor");
+
+        float log_ratio_norm = static_cast<float>(params.log_ratio_normalization);
+        if (ImGui::SliderFloat("Log Ratio Norm", &log_ratio_norm, 1.0f, 4.0f, "%.2f")) {
+            params.log_ratio_normalization = log_ratio_norm;
+            params_changed = true;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("P90/P10 log ratio normalization");
+
+        float spread_thresh = static_cast<float>(params.min_spread_threshold);
+        if (ImGui::SliderFloat("Min Spread", &spread_thresh, 0.01f, 0.2f, "%.3f")) {
+            params.min_spread_threshold = spread_thresh;
+            params_changed = true;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Minimum spread to compute coherence metrics");
+    }
+
+    // Gini Baseline section
+    if (ImGui::CollapsingHeader("Gini Baseline")) {
+        float gini_baseline = static_cast<float>(params.gini_chaos_baseline);
+        if (ImGui::SliderFloat("Chaos Baseline", &gini_baseline, 0.0f, 0.6f, "%.3f")) {
+            params.gini_chaos_baseline = gini_baseline;
+            params_changed = true;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Gini coefficient noise floor in chaos");
+
+        float gini_divisor = static_cast<float>(params.gini_baseline_divisor);
+        if (ImGui::SliderFloat("Baseline Divisor", &gini_divisor, 0.2f, 1.0f, "%.3f")) {
+            params.gini_baseline_divisor = gini_divisor;
+            params_changed = true;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Divisor for normalized Gini");
+    }
+
+    // Local Coherence section
+    if (ImGui::CollapsingHeader("Local Coherence")) {
+        float log_baseline = static_cast<float>(params.log_inverse_baseline);
+        if (ImGui::SliderFloat("Log Baseline", &log_baseline, 0.0f, 2.0f, "%.2f")) {
+            params.log_inverse_baseline = log_baseline;
+            params_changed = true;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Log inverse baseline for min/median ratio");
+
+        float log_divisor = static_cast<float>(params.log_inverse_divisor);
+        if (ImGui::SliderFloat("Log Divisor", &log_divisor, 1.0f, 5.0f, "%.2f")) {
+            params.log_inverse_divisor = log_divisor;
+            params_changed = true;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Divisor for log inverse normalization");
+    }
+
+    ImGui::Separator();
+
+    // Boom Detection section
+    if (ImGui::CollapsingHeader("Boom Detection", ImGuiTreeNodeFlags_DefaultOpen)) {
+        const char* method_names[] = {"Max Causticness", "First Peak %", "Derivative Peak"};
+        int method = static_cast<int>(boom_params.method);
+        if (ImGui::Combo("Method", &method, method_names, 3)) {
+            boom_params.method = static_cast<BoomDetectionMethod>(method);
+            params_changed = true;
+        }
+
+        if (boom_params.method == BoomDetectionMethod::MaxCausticness) {
+            float offset = static_cast<float>(boom_params.offset_seconds);
+            if (ImGui::SliderFloat("Offset (s)", &offset, 0.0f, 1.0f, "%.2f")) {
+                boom_params.offset_seconds = offset;
+                params_changed = true;
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Time offset from peak for visual alignment");
+        }
+
+        if (boom_params.method == BoomDetectionMethod::FirstPeakPercent) {
+            float peak_pct = static_cast<float>(boom_params.peak_percent_threshold);
+            if (ImGui::SliderFloat("Peak %", &peak_pct, 0.3f, 0.9f, "%.0f%%")) {
+                boom_params.peak_percent_threshold = peak_pct;
+                params_changed = true;
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("First peak >= this fraction of max");
+        }
+
+        if (boom_params.method == BoomDetectionMethod::DerivativePeak) {
+            if (ImGui::SliderInt("Smoothing", &boom_params.smoothing_window, 1, 15)) {
+                params_changed = true;
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Smoothing window for derivative");
+        }
+
+        float prominence = static_cast<float>(boom_params.min_peak_prominence);
+        if (ImGui::SliderFloat("Min Prominence", &prominence, 0.01f, 0.2f, "%.3f")) {
+            boom_params.min_peak_prominence = prominence;
+            params_changed = true;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Minimum peak prominence (fraction of max)");
+    }
+
+    ImGui::Separator();
+
+    // Action buttons
+    if (ImGui::Button("Reset Defaults")) {
+        state.config.metrics = MetricParams{};
+        state.config.boom = BoomDetectionParams{};
+        params_changed = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Recompute Now") || (params_changed && !state.frame_history.empty())) {
+        state.needs_metric_recompute = true;
+    }
+
+    if (state.needs_metric_recompute) {
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Recomputing...");
+    }
+
+    ImGui::End();
+}
+
 void drawDetectionSection(AppState& state) {
     if (ImGui::CollapsingHeader("Detection")) {
         auto boom_thresh = static_cast<float>(state.config.detection.boom_threshold);
@@ -2374,7 +2585,7 @@ int main(int argc, char* argv[]) {
         // Detailed Analysis - full metric controls with derivatives
         ImGui::Begin("Detailed Analysis");
 
-        // Plot mode selector
+        // Plot mode selector and params button
         const char* plot_mode_names[] = {"Single Axis", "Multi-Axis", "Normalized"};
         ImGui::SetNextItemWidth(100);
         ImGui::Combo("Scale", reinterpret_cast<int*>(&s_plot_mode), plot_mode_names, 3);
@@ -2382,6 +2593,13 @@ int main(int argc, char* argv[]) {
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Single: All on one axis\nMulti: Y1=large, Y2=normalized, Y3=medium\nNormalized: All scaled 0-1");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Params")) {
+            state.show_metric_params_window = !state.show_metric_params_window;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Open metric parameters window");
         }
 
         // Metric selector with derivative toggles
@@ -2516,6 +2734,14 @@ int main(int argc, char* argv[]) {
         ImGui::Begin("Timeline");
         drawTimeline(state, renderer);
         ImGui::End();
+
+        // Metric Parameters window
+        drawMetricParametersWindow(state);
+
+        // Handle metric recomputation request
+        if (state.needs_metric_recompute) {
+            recomputeMetrics(state);
+        }
 
         // Rendering
         ImGui::Render();

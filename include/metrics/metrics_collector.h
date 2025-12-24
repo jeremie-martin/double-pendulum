@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config.h"
 #include "metrics/metric_series.h"
 
 #include <cmath>
@@ -63,6 +64,10 @@ class MetricsCollector {
 public:
     MetricsCollector();
     ~MetricsCollector();
+
+    // Metric parameters (runtime configurable)
+    void setMetricParams(MetricParams const& params) { params_ = params; }
+    MetricParams const& getMetricParams() const { return params_; }
 
     // Metric registration (call during initialization)
     void registerMetric(std::string const& name, MetricType type);
@@ -133,6 +138,7 @@ public:
 private:
     std::unordered_map<std::string, MetricSeries<double>> metrics_;
     std::unordered_map<std::string, MetricType> metric_types_;
+    MetricParams params_;  // Runtime-configurable metric computation parameters
 
     int current_frame_ = -1;
     SpreadMetrics current_spread_;

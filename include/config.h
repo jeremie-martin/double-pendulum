@@ -111,6 +111,62 @@ struct ColorParams {
     double end = 1.0;   // Range end [0, 1]
 };
 
+// Metric computation parameters - controls how causticness metrics are calculated
+// All defaults match previous hardcoded values for backward compatibility
+struct MetricParams {
+    // Sector-based algorithm parameters (for angular causticness, tip causticness, etc.)
+    // Sectors scale with N to maintain N-independence: num_sectors = clamp(N/target, min, max)
+    int min_sectors = 8;
+    int max_sectors = 72;
+    int target_per_sector = 40;
+
+    // Grid-based spatial metrics (for spatial_concentration)
+    int min_grid = 4;
+    int max_grid = 32;
+    int target_per_cell = 40;
+
+    // Normalization thresholds
+    double max_radius = 2.0;               // Maximum tip radius (L1 + L2 for unit lengths)
+    double cv_normalization = 1.5;         // CV divisor for 0-1 normalization
+    double log_ratio_normalization = 2.0;  // Log ratio divisor for P90/P10 metric
+    double min_spread_threshold = 0.05;    // Minimum spread to compute coherence metrics
+
+    // Gini baseline adjustment (subtracts chaos noise floor from distance-based Gini)
+    double gini_chaos_baseline = 0.35;
+    double gini_baseline_divisor = 0.65;
+
+    // Local coherence parameters (for min/median ratio metric)
+    double log_inverse_baseline = 1.0;
+    double log_inverse_divisor = 2.5;
+};
+
+// Boom detection method
+enum class BoomDetectionMethod {
+    MaxCausticness,    // Find frame with max causticness (peak visual richness)
+    FirstPeakPercent,  // Find first peak >= X% of max (boom onset)
+    DerivativePeak     // When d(causticness)/dt is maximum (steepest transition)
+};
+
+// Boom detection parameters - controls how boom frame is identified
+struct BoomDetectionParams {
+    BoomDetectionMethod method = BoomDetectionMethod::MaxCausticness;
+
+    // For MaxCausticness: offset from peak (visual alignment)
+    double offset_seconds = 0.3;
+
+    // For FirstPeakPercent: threshold as fraction of max peak
+    double peak_percent_threshold = 0.6;
+
+    // For all peak detection: minimum prominence to count as peak
+    double min_peak_prominence = 0.05;
+
+    // For DerivativePeak: smoothing window size (frames)
+    int smoothing_window = 5;
+
+    // Which metric to use for detection
+    std::string metric_name = "angular_causticness";
+};
+
 // Thresholds for detecting events from variance data
 struct DetectionParams {
     // DEPRECATED: boom_threshold and boom_confirmation are no longer used.
@@ -160,6 +216,8 @@ struct Config {
     RenderParams render;
     PostProcessParams post_process;
     ColorParams color;
+    MetricParams metrics;
+    BoomDetectionParams boom;
     DetectionParams detection;
     OutputParams output;
     AnalysisParams analysis;

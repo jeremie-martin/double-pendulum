@@ -428,12 +428,9 @@ double MetricsCollector::computeAngularCausticness(
     // Scale number of sectors based on N for consistent statistics
     // Target: ~30-50 pendulums per sector for meaningful statistics
     // This makes the metric independent of pendulum count
-    constexpr int MIN_SECTORS = 8;
-    constexpr int MAX_SECTORS = 72;
-    constexpr int TARGET_PER_SECTOR = 40;
-
     int N = static_cast<int>(angle1s.size());
-    int num_sectors = std::max(MIN_SECTORS, std::min(MAX_SECTORS, N / TARGET_PER_SECTOR));
+    int num_sectors = std::max(params_.min_sectors,
+                               std::min(params_.max_sectors, N / params_.target_per_sector));
     double sector_width = TWO_PI / num_sectors;
 
     // Use vector for dynamic sector count
@@ -550,12 +547,9 @@ double MetricsCollector::computeCausticnessFromAngles(
     if (angles.empty()) return 0.0;
 
     // Scale number of sectors based on N for consistent statistics
-    constexpr int MIN_SECTORS = 8;
-    constexpr int MAX_SECTORS = 72;
-    constexpr int TARGET_PER_SECTOR = 40;
-
     int N = static_cast<int>(angles.size());
-    int num_sectors = std::max(MIN_SECTORS, std::min(MAX_SECTORS, N / TARGET_PER_SECTOR));
+    int num_sectors = std::max(params_.min_sectors,
+                               std::min(params_.max_sectors, N / params_.target_per_sector));
     double sector_width = TWO_PI / num_sectors;
 
     std::vector<int> sector_counts(num_sectors, 0);
@@ -623,12 +617,8 @@ double MetricsCollector::computeSpatialConcentration(
 
     // Adaptive grid size: target ~40 pendulums per cell for statistical stability
     // This makes the metric N-independent
-    constexpr int MIN_GRID = 4;
-    constexpr int MAX_GRID = 32;
-    constexpr int TARGET_PER_CELL = 40;
-
-    int grid_size = std::max(MIN_GRID, std::min(MAX_GRID,
-        static_cast<int>(std::sqrt(static_cast<double>(N) / TARGET_PER_CELL))));
+    int grid_size = std::max(params_.min_grid, std::min(params_.max_grid,
+        static_cast<int>(std::sqrt(static_cast<double>(N) / params_.target_per_cell))));
 
     // Find bounds
     double min_x = *std::min_element(x2s.begin(), x2s.end());
@@ -690,12 +680,9 @@ double MetricsCollector::computeCVCausticness(
     if (angle1s.empty() || angle1s.size() != angle2s.size()) return 0.0;
 
     // Scale sectors adaptively for N-independence
-    constexpr int MIN_SECTORS = 8;
-    constexpr int MAX_SECTORS = 72;
-    constexpr int TARGET_PER_SECTOR = 40;
-
     int N = static_cast<int>(angle1s.size());
-    int num_sectors = std::max(MIN_SECTORS, std::min(MAX_SECTORS, N / TARGET_PER_SECTOR));
+    int num_sectors = std::max(params_.min_sectors,
+                               std::min(params_.max_sectors, N / params_.target_per_sector));
     double sector_width = TWO_PI / num_sectors;
 
     std::vector<int> sector_counts(num_sectors, 0);
@@ -730,7 +717,7 @@ double MetricsCollector::computeCVCausticness(
 
     // Normalize CV to roughly 0-1 range (CV can be 0-2+ for very spiky data)
     // Then multiply by coverage for the desired low→high→low pattern
-    double normalized_cv = std::min(1.0, cv / 1.5);
+    double normalized_cv = std::min(1.0, cv / params_.cv_normalization);
 
     return coverage * normalized_cv;
 }
@@ -763,12 +750,9 @@ double MetricsCollector::computeOrganizationCausticness(
     double R2 = std::sqrt(std::pow(cos_sum2/n, 2) + std::pow(sin_sum2/n, 2));
 
     // Compute sector coverage for combined tip angle
-    constexpr int MIN_SECTORS = 8;
-    constexpr int MAX_SECTORS = 72;
-    constexpr int TARGET_PER_SECTOR = 40;
-
     int N = static_cast<int>(angle1s.size());
-    int num_sectors = std::max(MIN_SECTORS, std::min(MAX_SECTORS, N / TARGET_PER_SECTOR));
+    int num_sectors = std::max(params_.min_sectors,
+                               std::min(params_.max_sectors, N / params_.target_per_sector));
     double sector_width = TWO_PI / num_sectors;
 
     std::vector<bool> occupied(num_sectors, false);
@@ -814,8 +798,7 @@ double MetricsCollector::computeFoldCausticness(
         sum_r += std::sqrt(x2s[i] * x2s[i] + y2s[i] * y2s[i]);
     }
     double mean_radius = sum_r / N;
-    double max_radius = 2.0;  // L1 + L2 (assuming unit lengths)
-    double spread = std::min(1.0, mean_radius / max_radius);
+    double spread = std::min(1.0, mean_radius / params_.max_radius);
 
     // 2. Compute adjacent-pair distance statistics
     // Pendulums are ordered by initial angle, so adjacent pairs started nearly identical
@@ -835,7 +818,7 @@ double MetricsCollector::computeFoldCausticness(
     double cv = (mean_d > 1e-10) ? std_d / mean_d : 0.0;
 
     // Normalize CV to roughly 0-1 range
-    double clustering = std::min(1.0, cv / 1.5);
+    double clustering = std::min(1.0, cv / params_.cv_normalization);
 
     // 3. Combine: need high spread AND high CV
     // - Start: spread≈0 → metric≈0 (all tips at same spot)
@@ -876,10 +859,10 @@ double MetricsCollector::computeTrajectorySmoothness(
         for (int i = 0; i < N; ++i) {
             sum_r += std::sqrt(x2s[i] * x2s[i] + y2s[i] * y2s[i]);
         }
-        spread = std::min(1.0, (sum_r / N) / 2.0);
+        spread = std::min(1.0, (sum_r / N) / params_.max_radius);
     }
 
-    if (spread < 0.05) return 0.0;  // Not spread enough yet
+    if (spread < params_.min_spread_threshold) return 0.0;  // Not spread enough yet
 
     // Compute neighbor distances
     std::vector<double> distances;
@@ -950,10 +933,10 @@ double MetricsCollector::computeCurvature(
         for (int i = 0; i < N; ++i) {
             sum_r += std::sqrt(x2s[i] * x2s[i] + y2s[i] * y2s[i]);
         }
-        spread = std::min(1.0, (sum_r / N) / 2.0);
+        spread = std::min(1.0, (sum_r / N) / params_.max_radius);
     }
 
-    if (spread < 0.05) return 0.0;
+    if (spread < params_.min_spread_threshold) return 0.0;
 
     // Compute neighbor distances
     std::vector<double> distances;
@@ -990,7 +973,7 @@ double MetricsCollector::computeCurvature(
     double log_ratio = std::log10(std::max(1.0, ratio));
 
     // Normalize to 0-1 range (ratio of 10-50 is typical for good caustics)
-    double normalized = std::min(1.0, log_ratio / 2.0);
+    double normalized = std::min(1.0, log_ratio / params_.log_ratio_normalization);
 
     // Combine with spread
     return spread * normalized;
@@ -1024,10 +1007,10 @@ double MetricsCollector::computeTrueFolds(
         for (int i = 0; i < N; ++i) {
             sum_r += std::sqrt(x2s[i] * x2s[i] + y2s[i] * y2s[i]);
         }
-        spread = std::min(1.0, (sum_r / N) / 2.0);
+        spread = std::min(1.0, (sum_r / N) / params_.max_radius);
     }
 
-    if (spread < 0.05) return 0.0;
+    if (spread < params_.min_spread_threshold) return 0.0;
 
     // Compute neighbor distances
     std::vector<double> distances;
@@ -1059,8 +1042,9 @@ double MetricsCollector::computeTrueFolds(
     // For random distributions (exponential/Rayleigh), Gini is typically 0.3-0.5
     // For fold distributions, Gini should be higher (0.6-0.8)
     //
-    // Subtract the "chaos baseline" of ~0.4
-    double adjusted_gini = std::max(0.0, (gini - 0.35) / 0.65);
+    // Subtract the "chaos baseline"
+    double adjusted_gini = std::max(0.0,
+        (gini - params_.gini_chaos_baseline) / params_.gini_baseline_divisor);
 
     return spread * adjusted_gini;
 }
@@ -1092,10 +1076,10 @@ double MetricsCollector::computeLocalCoherence(
         for (int i = 0; i < N; ++i) {
             sum_r += std::sqrt(x2s[i] * x2s[i] + y2s[i] * y2s[i]);
         }
-        spread = std::min(1.0, (sum_r / N) / 2.0);
+        spread = std::min(1.0, (sum_r / N) / params_.max_radius);
     }
 
-    if (spread < 0.05) return 0.0;
+    if (spread < params_.min_spread_threshold) return 0.0;
 
     // Compute neighbor distances
     std::vector<double> distances;
@@ -1130,8 +1114,9 @@ double MetricsCollector::computeLocalCoherence(
     double log_inverse = -std::log10(std::max(1e-6, ratio));
 
     // Normalize: log_inverse ranges 0-6, typical caustic is 1.5-3
-    // Subtract chaos baseline of ~1
-    double adjusted = std::max(0.0, (log_inverse - 1.0) / 2.5);
+    // Subtract chaos baseline
+    double adjusted = std::max(0.0,
+        (log_inverse - params_.log_inverse_baseline) / params_.log_inverse_divisor);
 
     return spread * std::min(1.0, adjusted);
 }
