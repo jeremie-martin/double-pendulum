@@ -9,21 +9,21 @@ initial_angle1_deg = 157.1
 initial_angle2_deg = 149.0
 
 [simulation]
-pendulum_count = 10000
+pendulum_count = 7500
 angle_variation_deg = 0.1
 duration_seconds = 15.0
-total_frames = 600
+total_frames = 1440
 physics_quality = "high"     # "low", "medium", "high", "ultra"
 # max_dt = 0.05            # Alternative: specify max timestep directly
 
 [render]
-width = 1080
-height = 1080
+width = 768
+height = 768
 
 [post_process]
-exposure = 6.0
-contrast = 1.0
-gamma = 1.6
+exposure = 5.5
+contrast = 1.1
+gamma = 1.4
 # normalization = "by_count"
 normalization = "per_frame"
 

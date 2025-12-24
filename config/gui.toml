@@ -27,7 +27,7 @@ height = 1080
 tone_map = "reinhard"
 exposure = 6.0
 contrast = 1.0
-gamma = 2.2
+gamma = 1.6
 
 [color]
 scheme = "spectrum"

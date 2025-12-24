@@ -1968,22 +1968,23 @@ void drawMetricParametersWindow(AppState& state) {
             params_changed = true;
         }
 
-        if (boom_params.method == BoomDetectionMethod::MaxCausticness) {
-            float offset = static_cast<float>(boom_params.offset_seconds);
-            if (ImGui::SliderFloat("Offset (s)", &offset, 0.0f, 1.0f, "%.2f")) {
-                boom_params.offset_seconds = offset;
-                params_changed = true;
-            }
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Time offset from peak for visual alignment");
+        // Offset is applied to ALL methods now (applied centrally in BoomDetector::detect)
+        float offset = static_cast<float>(boom_params.offset_seconds);
+        if (ImGui::SliderFloat("Offset (s)", &offset, -0.5f, 1.0f, "%.2f")) {
+            boom_params.offset_seconds = offset;
+            params_changed = true;
         }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Time offset from detected point for visual alignment (negative=earlier)");
 
+        // Method-specific parameters
         if (boom_params.method == BoomDetectionMethod::FirstPeakPercent) {
-            float peak_pct = static_cast<float>(boom_params.peak_percent_threshold);
-            if (ImGui::SliderFloat("Peak %", &peak_pct, 0.3f, 0.9f, "%.0f%%")) {
-                boom_params.peak_percent_threshold = peak_pct;
+            // Display as percentage (0-100) but store as fraction (0.0-1.0)
+            float peak_pct_display = static_cast<float>(boom_params.peak_percent_threshold) * 100.0f;
+            if (ImGui::SliderFloat("Peak %", &peak_pct_display, 30.0f, 90.0f, "%.0f%%")) {
+                boom_params.peak_percent_threshold = peak_pct_display / 100.0;
                 params_changed = true;
             }
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("First peak >= this fraction of max");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("First peak >= this percentage of max");
         }
 
         if (boom_params.method == BoomDetectionMethod::DerivativePeak) {

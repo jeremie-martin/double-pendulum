@@ -48,3 +48,5 @@ __pycache__/
 youtube-uploader/credentials/
 youtube-uploader/.venv/
 uv.lock
+
+eval

@@ -43,16 +43,36 @@ public:
 
         auto const& values = caustic_series->values();
 
+        BoomDetection result;
         switch (params_.method) {
         case BoomDetectionMethod::MaxCausticness:
-            return detectMaxCausticness(values, frame_duration);
+            result = detectMaxCausticness(values, frame_duration);
+            break;
         case BoomDetectionMethod::FirstPeakPercent:
-            return detectFirstPeakPercent(values, frame_duration);
+            result = detectFirstPeakPercent(values, frame_duration);
+            break;
         case BoomDetectionMethod::DerivativePeak:
-            return detectDerivativePeak(values, frame_duration);
+            result = detectDerivativePeak(values, frame_duration);
+            break;
+        default:
+            result = detectMaxCausticness(values, frame_duration);
+            break;
         }
 
-        return detectMaxCausticness(values, frame_duration);
+        // Apply offset (common to all methods) for visual alignment
+        // Negative offset = earlier, Positive offset = later
+        if (result.frame >= 0 && std::abs(params_.offset_seconds) > 1e-9) {
+            int offset_frames = static_cast<int>(params_.offset_seconds / frame_duration);
+            result.frame = std::max(0, std::min(static_cast<int>(values.size()) - 1,
+                                                 result.frame - offset_frames));
+            result.seconds = result.frame * frame_duration;
+            // Update causticness to match the offset frame
+            if (result.frame >= 0 && result.frame < static_cast<int>(values.size())) {
+                result.causticness = values[result.frame];
+            }
+        }
+
+        return result;
     }
 
 private:
@@ -60,6 +80,7 @@ private:
 
     // Method 1: Find frame with maximum causticness (peak visual richness)
     // This is the original behavior - finds when caustics are most prominent
+    // Note: offset is applied centrally in detect() for all methods
     BoomDetection detectMaxCausticness(std::vector<double> const& values,
                                         double frame_duration) const {
         BoomDetection result;
@@ -68,9 +89,7 @@ private:
         auto max_it = std::max_element(values.begin(), values.end());
         int max_frame = static_cast<int>(std::distance(values.begin(), max_it));
 
-        // Apply offset for better visual alignment
-        int offset_frames = static_cast<int>(params_.offset_seconds / frame_duration);
-        result.frame = std::max(0, max_frame - offset_frames);
+        result.frame = max_frame;
         result.seconds = result.frame * frame_duration;
         result.causticness = *max_it;
 
