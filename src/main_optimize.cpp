@@ -142,23 +142,36 @@ std::vector<Annotation> loadAnnotations(std::string const& path) {
     return annotations;
 }
 
-// Compute metrics for a simulation using given parameters
+// Pre-loaded simulation data for fast parameter iteration
+struct LoadedSimulation {
+    std::string id;
+    simulation_data::Reader reader;
+    double frame_duration = 0.0;
+    int boom_frame_truth = -1;
+    int peak_frame_truth = -1;
+
+    bool load(Annotation const& ann) {
+        if (!reader.open(ann.data_path)) {
+            return false;
+        }
+        id = ann.id;
+        boom_frame_truth = ann.boom_frame;
+        peak_frame_truth = ann.peak_frame;
+        auto const& h = reader.header();
+        frame_duration = h.duration_seconds / h.frame_count;
+        return true;
+    }
+};
+
+// Compute metrics for a pre-loaded simulation using given parameters
 metrics::BoomDetection evaluateSimulation(
-    std::string const& data_path,
+    LoadedSimulation const& sim,
     MetricParams const& metric_params,
     BoomDetectionParams const& boom_params,
     double& out_peak_frame) {
 
-    // Load simulation data
-    simulation_data::Reader reader;
-    if (!reader.open(data_path)) {
-        std::cerr << "Error: Could not open " << data_path << "\n";
-        return {};
-    }
-
-    auto header = reader.header();
+    auto const& header = sim.reader.header();
     int frame_count = header.frame_count;
-    double frame_duration = header.duration_seconds / frame_count;
 
     // Create metrics collector with our parameters
     metrics::MetricsCollector collector;
@@ -167,7 +180,7 @@ metrics::BoomDetection evaluateSimulation(
 
     // Process all frames using zero-copy packed state access
     for (int frame = 0; frame < frame_count; ++frame) {
-        auto const* packed = reader.getFramePacked(frame);
+        auto const* packed = sim.reader.getFramePacked(frame);
         if (!packed) {
             break;
         }
@@ -191,7 +204,7 @@ metrics::BoomDetection evaluateSimulation(
     }
 
     // Detect boom using our parameters
-    return metrics::findBoomFrame(collector, frame_duration, boom_params);
+    return metrics::findBoomFrame(collector, sim.frame_duration, boom_params);
 }
 
 // Generate parameter sets for grid search
@@ -356,7 +369,31 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::cout << "Evaluating " << valid_annotations.size() << " simulations\n\n";
+    std::cout << "Loading " << valid_annotations.size() << " simulations into memory...\n";
+
+    // Pre-load all simulation data (load once, evaluate many times)
+    auto load_start = std::chrono::steady_clock::now();
+    std::vector<LoadedSimulation> simulations;
+    simulations.reserve(valid_annotations.size());
+
+    for (auto const& ann : valid_annotations) {
+        LoadedSimulation sim;
+        if (sim.load(ann)) {
+            simulations.push_back(std::move(sim));
+        } else {
+            std::cerr << "Failed to load: " << ann.data_path << "\n";
+        }
+    }
+
+    auto load_end = std::chrono::steady_clock::now();
+    double load_time = std::chrono::duration<double>(load_end - load_start).count();
+    std::cout << "Loaded " << simulations.size() << " simulations in "
+              << std::fixed << std::setprecision(2) << load_time << "s\n\n";
+
+    if (simulations.empty()) {
+        std::cerr << "No simulations loaded successfully.\n";
+        return 1;
+    }
 
     // Generate parameter grid
     auto grid = generateParameterGrid();
@@ -378,17 +415,17 @@ int main(int argc, char* argv[]) {
         int boom_samples = 0;
         int peak_samples = 0;
 
-        for (auto const& ann : valid_annotations) {
+        for (auto const& sim : simulations) {
             double peak_frame = -1;
-            auto boom = evaluateSimulation(ann.data_path, params.metrics, params.boom, peak_frame);
+            auto boom = evaluateSimulation(sim, params.metrics, params.boom, peak_frame);
 
-            if (ann.boom_frame >= 0 && boom.frame >= 0) {
-                boom_error_sum += std::abs(boom.frame - ann.boom_frame);
+            if (sim.boom_frame_truth >= 0 && boom.frame >= 0) {
+                boom_error_sum += std::abs(boom.frame - sim.boom_frame_truth);
                 boom_samples++;
             }
 
-            if (ann.peak_frame >= 0 && peak_frame >= 0) {
-                peak_error_sum += std::abs(peak_frame - ann.peak_frame);
+            if (sim.peak_frame_truth >= 0 && peak_frame >= 0) {
+                peak_error_sum += std::abs(peak_frame - sim.peak_frame_truth);
                 peak_samples++;
             }
         }
