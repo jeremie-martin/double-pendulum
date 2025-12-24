@@ -288,7 +288,8 @@ struct ParameterizedMetric {
 
         // Show relevant params based on metric type
         if (metric_name == "angular_causticness" || metric_name == "tip_causticness" ||
-            metric_name == "organization_causticness") {
+            metric_name == "organization_causticness" || metric_name == "r1_concentration" ||
+            metric_name == "r2_concentration" || metric_name == "joint_concentration") {
             int eff = N > 0 ? computeEffectiveSectors(N, params) : params.max_sectors;
             oss << " sec=" << eff;
         } else if (metric_name == "cv_causticness") {
@@ -323,7 +324,8 @@ struct ParameterizedMetric {
         oss << metric_name;
 
         if (metric_name == "angular_causticness" || metric_name == "tip_causticness" ||
-            metric_name == "organization_causticness") {
+            metric_name == "organization_causticness" || metric_name == "r1_concentration" ||
+            metric_name == "r2_concentration" || metric_name == "joint_concentration") {
             oss << "_sec" << computeEffectiveSectors(N, params);
         } else if (metric_name == "cv_causticness") {
             oss << "_sec" << computeEffectiveSectors(N, params) << "_cvn"
