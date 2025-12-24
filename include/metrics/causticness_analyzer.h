@@ -45,17 +45,19 @@ struct CausticnessMetrics {
     double post_boom_duration = 0.0;    // Window duration used
 
     // Normalized quality score (0-1)
+    // Causticness values are typically in 0-1 range
     double qualityScore() const {
-        // Peak is most important, but sustained quality matters too
-        double peak_score = std::min(1.0, peak_causticness / 100.0);
+        // Peak causticness (0-1 range, saturates at 1.0)
+        double peak_score = std::min(1.0, peak_causticness);
 
-        // Average contributes to overall quality
-        double avg_score = std::min(1.0, average_causticness / 50.0);
+        // Post-boom sustain shows visual interest continues
+        double sustain_score = post_boom_area_normalized;
 
-        // Time above threshold shows sustained quality
-        double duration_score = std::min(1.0, time_above_threshold / 5.0);
+        // Peak clarity penalizes competing peaks before main
+        double clarity_score = peak_clarity_score;
 
-        return peak_score * 0.4 + avg_score * 0.35 + duration_score * 0.25;
+        // Weight: clarity most important, then peak, then sustain
+        return clarity_score * 0.4 + peak_score * 0.35 + sustain_score * 0.25;
     }
 };
 
@@ -129,7 +131,7 @@ private:
     std::vector<CausticnessPeak> findPeaks(std::vector<double> const& values) const;
     void computePeakClarity(std::vector<double> const& values);
     void computePostBoomArea(std::vector<double> const& values);
-    double quality_threshold_ = 20.0;          // Minimum causticness to count
+    double quality_threshold_ = 0.25;          // Minimum causticness to count
     double post_boom_window_seconds_ = 10.0;   // Post-boom area window (user requested)
     double sampling_interval_ = 0.5;           // Sample every N seconds
     double min_peak_separation_ = 0.3;         // Min seconds between peaks (user: 0.3s)
