@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 
 class SimulationConfig(BaseModel):
@@ -38,11 +38,9 @@ class SimulationConfig(BaseModel):
 class SimulationResults(BaseModel):
     """Results from the simulation run."""
 
-    model_config = ConfigDict(populate_by_name=True)  # Accept both field name and alias
-
     frames_completed: int
     boom_frame: Optional[int] = None
-    boom_causticness: Optional[float] = Field(None, alias="boom_variance")  # Backward compat
+    boom_causticness: Optional[float] = None
     chaos_frame: Optional[int] = None
     chaos_variance: Optional[float] = None
     final_uniformity: float = 0.0  # Distribution uniformity on disk (0=concentrated, 1=uniform)

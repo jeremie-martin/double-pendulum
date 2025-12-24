@@ -1,7 +1,6 @@
 #include "color_scheme.h"
 #include "config.h"
 #include "gl_renderer.h"
-#include "metrics/boom_analyzer.h"
 #include "metrics/boom_detection.h"
 #include "metrics/causticness_analyzer.h"
 #include "metrics/event_detector.h"
@@ -137,9 +136,7 @@ struct AppState {
     std::vector<Color> colors;
     metrics::MetricsCollector metrics_collector;
     metrics::EventDetector event_detector;
-    metrics::BoomAnalyzer boom_analyzer;
     metrics::CausticnessAnalyzer causticness_analyzer;
-    MetricFlags highlevel_flags;  // For High-Level Analysis window
     MetricFlags detailed_flags;   // For Detailed Analysis window
 
     // Frame history for timeline scrubbing
@@ -217,11 +214,11 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
     // Initialize metrics system using common helper
     state.updateFrameDuration();  // Cache frame_duration and set on analyzer
     metrics::resetMetricsSystem(state.metrics_collector, state.event_detector,
-                                state.boom_analyzer, state.causticness_analyzer);
+                                state.causticness_analyzer);
     metrics::initializeMetricsSystem(
         state.metrics_collector, state.event_detector, state.causticness_analyzer,
         state.config.detection.chaos_threshold, state.config.detection.chaos_confirmation,
-        state.frame_duration, /*with_gpu=*/true, state.boom_analyzer);
+        state.frame_duration, /*with_gpu=*/true);
 
     state.boom_frame.reset();
     state.chaos_frame.reset();
@@ -297,11 +294,11 @@ bool loadSimulationData(AppState& state, GLRenderer& renderer, std::string const
     // Compute all physics metrics for the loaded data
     state.updateFrameDuration();
     metrics::resetMetricsSystem(state.metrics_collector, state.event_detector,
-                                state.boom_analyzer, state.causticness_analyzer);
+                                state.causticness_analyzer);
     metrics::initializeMetricsSystem(
         state.metrics_collector, state.event_detector, state.causticness_analyzer,
         state.config.detection.chaos_threshold, state.config.detection.chaos_confirmation,
-        state.frame_duration, /*with_gpu=*/true, state.boom_analyzer);
+        state.frame_duration, /*with_gpu=*/true);
 
     std::vector<double> angle1s, angle2s;
     for (uint32_t f = 0; f < reader->frameCount(); ++f) {
@@ -336,8 +333,7 @@ bool loadSimulationData(AppState& state, GLRenderer& renderer, std::string const
         state.chaos_frame.reset();
     }
 
-    // Run analyzers
-    state.boom_analyzer.analyze(state.metrics_collector, state.event_detector);
+    // Run analyzer
     state.causticness_analyzer.analyze(state.metrics_collector, state.event_detector);
 
     // Setup state for replay
@@ -552,9 +548,8 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
         metrics::forceBoomEvent(state.event_detector, boom, variance_at_boom);
     }
 
-    // Run analyzers periodically after boom (every 30 frames)
+    // Run analyzer periodically after boom (every 30 frames)
     if (state.boom_frame && (state.current_frame % 30 == 0)) {
-        state.boom_analyzer.analyze(state.metrics_collector, state.event_detector);
         state.causticness_analyzer.analyze(state.metrics_collector, state.event_detector);
     }
 
@@ -574,136 +569,6 @@ double getMetricAtFrame(metrics::MetricsCollector const& collector,
     auto const& values = series->values();
     size_t idx = std::min(static_cast<size_t>(frame), values.size() - 1);
     return values[idx];
-}
-
-// Draw analysis graph with selected metrics
-void drawAnalysisGraph(AppState& state, MetricFlags const& flags, ImVec2 size) {
-    auto* variance_series = state.metrics_collector.getMetric(metrics::MetricNames::Variance);
-    if (!variance_series || variance_series->empty()) {
-        ImGui::Text("No data yet");
-        return;
-    }
-
-    size_t data_size = variance_series->size();
-
-    std::vector<double> frames(data_size);
-    for (size_t i = 0; i < data_size; ++i) {
-        frames[i] = static_cast<double>(i);
-    }
-
-    double current_frame_d = static_cast<double>(state.display_frame);
-
-    // Metric colors
-    const ImVec4 color_variance(0.4f, 0.8f, 0.4f, 1.0f);
-    const ImVec4 color_brightness(0.9f, 0.7f, 0.2f, 1.0f);
-    const ImVec4 color_uniformity(0.2f, 0.6f, 0.9f, 1.0f);
-    const ImVec4 color_causticness(0.9f, 0.3f, 0.5f, 1.0f);
-    const ImVec4 color_energy(0.6f, 0.4f, 0.8f, 1.0f);
-
-    if (ImPlot::BeginPlot("##Analysis", size, ImPlotFlags_NoTitle)) {
-        // Use multi-axis: Y1 for large scale (variance, energy), Y2 for normalized (0-1)
-        ImPlot::SetupAxes("Frame", "Value", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-        ImPlot::SetupAxis(ImAxis_Y2, "[0-1]", ImPlotAxisFlags_AuxDefault | ImPlotAxisFlags_AutoFit);
-
-        // Plot variance (Y1 - large scale)
-        if (flags.variance) {
-            auto const& values = variance_series->values();
-            ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-            ImPlot::SetNextLineStyle(color_variance, 2.0f);
-            ImPlot::PlotLine("Variance", frames.data(), values.data(), data_size);
-
-            // Threshold lines only when variance is shown
-            double boom_line = state.config.detection.boom_threshold;
-            double chaos_line = state.config.detection.chaos_threshold;
-            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 0.5f), 1.0f);
-            ImPlot::PlotInfLines("##boom", &boom_line, 1, ImPlotInfLinesFlags_Horizontal);
-            ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 0.5f), 1.0f);
-            ImPlot::PlotInfLines("##chaos", &chaos_line, 1, ImPlotInfLinesFlags_Horizontal);
-        }
-
-        // Plot energy (Y1 - large scale)
-        if (flags.energy) {
-            auto* series = state.metrics_collector.getMetric(metrics::MetricNames::TotalEnergy);
-            if (series && !series->empty()) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-                ImPlot::SetNextLineStyle(color_energy, 2.0f);
-                ImPlot::PlotLine("Energy", frames.data(), series->values().data(),
-                                std::min(data_size, series->size()));
-            }
-        }
-
-        // Plot brightness (Y2 - normalized)
-        if (flags.brightness) {
-            auto* series = state.metrics_collector.getMetric(metrics::MetricNames::Brightness);
-            if (series && !series->empty()) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                ImPlot::SetNextLineStyle(color_brightness, 2.0f);
-                ImPlot::PlotLine("Brightness", frames.data(), series->values().data(),
-                                std::min(data_size, series->size()));
-            }
-        }
-
-        // Plot uniformity (Y2 - normalized)
-        if (flags.uniformity) {
-            auto* series = state.metrics_collector.getMetric(metrics::MetricNames::CircularSpread);
-            if (series && !series->empty()) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                ImPlot::SetNextLineStyle(color_uniformity, 2.0f);
-                ImPlot::PlotLine("Uniformity", frames.data(), series->values().data(),
-                                std::min(data_size, series->size()));
-            }
-        }
-
-        // Plot angular causticness (Y2 - normalized 0-1 range)
-        if (flags.causticness) {
-            auto* series = state.metrics_collector.getMetric(metrics::MetricNames::AngularCausticness);
-            if (series && !series->empty()) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                ImPlot::SetNextLineStyle(color_causticness, 2.0f);
-                ImPlot::PlotLine("AngCaustic", frames.data(), series->values().data(),
-                                std::min(data_size, series->size()));
-            }
-        }
-
-        // Plot coverage (Y2 - normalized 0-1)
-        if (flags.coverage) {
-            auto* series = state.metrics_collector.getMetric(metrics::MetricNames::Coverage);
-            if (series && !series->empty()) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                ImPlot::SetNextLineStyle(ImVec4(0.5f, 0.8f, 0.5f, 1.0f), 2.0f);
-                ImPlot::PlotLine("Coverage", frames.data(), series->values().data(),
-                                std::min(data_size, series->size()));
-            }
-        }
-
-        // Boom marker (vertical line)
-        if (state.boom_frame.has_value()) {
-            double boom_x = static_cast<double>(*state.boom_frame);
-            ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), 2.0f);
-            ImPlot::PlotInfLines("##boom_marker", &boom_x, 1);
-        }
-
-        // Chaos marker (vertical line)
-        if (state.chaos_frame.has_value()) {
-            double chaos_x = static_cast<double>(*state.chaos_frame);
-            ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-            ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), 2.0f);
-            ImPlot::PlotInfLines("##chaos_marker", &chaos_x, 1);
-        }
-
-        // Draggable current frame marker
-        ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-        ImPlot::SetNextLineStyle(ImVec4(0.0f, 0.8f, 1.0f, 1.0f), 2.0f);
-        if (ImPlot::DragLineX(0, &current_frame_d, ImVec4(0.0f, 0.8f, 1.0f, 1.0f))) {
-            state.display_frame =
-                std::clamp(static_cast<int>(current_frame_d), 0, static_cast<int>(data_size) - 1);
-            state.scrubbing = true;
-            state.needs_redraw = true;
-        }
-
-        ImPlot::EndPlot();
-    }
 }
 
 void drawMetricGraph(AppState& state, ImVec2 size) {
@@ -2110,29 +1975,6 @@ int main(int argc, char* argv[]) {
                      preview_size, ImVec2(0, 0), ImVec2(1, 1));
         ImGui::End();
 
-        // High-Level Analysis - metric graph with simple selectors
-        ImGui::Begin("High-Level Analysis");
-
-        // Metric checkboxes - row 1
-        ImGui::Checkbox("Var", &state.highlevel_flags.variance);
-        ImGui::SameLine();
-        ImGui::Checkbox("Bright", &state.highlevel_flags.brightness);
-        ImGui::SameLine();
-        ImGui::Checkbox("Unif", &state.highlevel_flags.uniformity);
-        ImGui::SameLine();
-        ImGui::Checkbox("Caustic", &state.highlevel_flags.causticness);
-        ImGui::SameLine();
-        ImGui::Checkbox("Energy", &state.highlevel_flags.energy);
-        ImGui::SameLine();
-        ImGui::Checkbox("Coverage", &state.highlevel_flags.coverage);
-
-        // Graph with selected metrics
-        ImVec2 graph_size = ImGui::GetContentRegionAvail();
-        graph_size.y = std::max(100.0f, graph_size.y);
-        drawAnalysisGraph(state, state.highlevel_flags, graph_size);
-
-        ImGui::End();
-
         // Quality Scores window (separate)
         // Primary score is based on causticness (angular distribution quality).
         // Boom timing is detected from max causticness, so causticness is the
@@ -2212,22 +2054,6 @@ int main(int argc, char* argv[]) {
                 ImGui::TreePop();
             }
 
-            // Legacy boom analysis (collapsed by default, kept for comparison)
-            if (state.boom_analyzer.hasResults()) {
-                if (ImGui::TreeNode("Variance Analysis (Legacy)")) {
-                    ImGui::TextDisabled("Note: Boom is now detected from causticness.");
-                    ImGui::TextDisabled("This shows variance-based analysis for comparison.");
-
-                    auto boom_results = state.boom_analyzer.toJSON();
-                    double boom_score = state.boom_analyzer.score();
-                    double sharpness = boom_results.value("sharpness_ratio", 0.0);
-                    std::string type = boom_results.value("boom_type", "unknown");
-
-                    ImGui::Text("Variance Score: %.2f", boom_score);
-                    ImGui::Text("Type: %s | Sharpness: %.2f", type.c_str(), sharpness);
-                    ImGui::TreePop();
-                }
-            }
         } else {
             ImGui::TextDisabled("No quality data yet");
             ImGui::TextDisabled("Run simulation to analyze");

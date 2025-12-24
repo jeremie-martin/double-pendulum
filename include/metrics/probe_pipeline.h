@@ -1,7 +1,6 @@
 #pragma once
 
 #include "metrics/analyzer.h"
-#include "metrics/boom_analyzer.h"
 #include "metrics/boom_detection.h"
 #include "metrics/causticness_analyzer.h"
 #include "metrics/event_detector.h"
@@ -56,9 +55,6 @@ struct ProbePhaseResults {
     // Scores from analyzers (matches SimulationResults.score naming)
     SimulationScore score;
 
-    // Quality metrics
-    std::optional<BoomQuality> boom_quality;
-
     // Helpers
     bool hasBoom() const { return boom_frame.has_value(); }
     bool hasChaos() const { return chaos_frame.has_value(); }
@@ -86,7 +82,6 @@ public:
     void setChaosConfirmation(int frames);
 
     // Configure analyzers
-    void enableBoomAnalyzer(bool enable = true);
     void enableCausticnessAnalyzer(bool enable = true);
     // Set frame duration for time-based calculations.
     // Must be positive for boom detection to work in finalizePhase().
@@ -150,9 +145,7 @@ private:
     EventDetector event_detector_;
 
     // Analyzers
-    bool boom_analyzer_enabled_ = true;
     bool causticness_analyzer_enabled_ = true;
-    std::unique_ptr<BoomAnalyzer> boom_analyzer_;
     std::unique_ptr<CausticnessAnalyzer> causticness_analyzer_;
 
     // Callbacks

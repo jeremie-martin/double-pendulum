@@ -1,6 +1,5 @@
 #pragma once
 
-#include "metrics/boom_analyzer.h"
 #include "metrics/boom_detection.h"
 #include "metrics/causticness_analyzer.h"
 #include "metrics/event_detector.h"
@@ -24,9 +23,8 @@ namespace metrics {
 //   frame_duration: Seconds per frame (simulation.duration / total_frames)
 //   with_gpu: If true, also register GPU metrics (for rendering modes)
 //
-// Note: Boom detection is NOT configured here because it uses max causticness
-// (via findBoomFrame/forceBoomEvent) rather than threshold crossing.
-// Chaos detection requires boom to be detected first (see EventDetector::update).
+// Note: Boom detection uses max causticness (via findBoomFrame/forceBoomEvent)
+// rather than threshold crossing. Chaos detection still uses threshold.
 inline void initializeMetricsSystem(MetricsCollector& collector,
                                     EventDetector& detector,
                                     CausticnessAnalyzer& causticness_analyzer,
@@ -51,35 +49,12 @@ inline void initializeMetricsSystem(MetricsCollector& collector,
     causticness_analyzer.setFrameDuration(frame_duration);
 }
 
-// Overload that takes DetectionParams directly (convenience for config-based init)
-struct DetectionParams;  // Forward declaration
-
-// Overload that also resets BoomAnalyzer for consistency.
-// BoomAnalyzer has no configuration methods - it reads boom event from detector
-// and variance series from collector when analyze() is called. We just reset it
-// here so all analyzers start in a clean state together.
-inline void initializeMetricsSystem(MetricsCollector& collector,
-                                    EventDetector& detector,
-                                    CausticnessAnalyzer& causticness_analyzer,
-                                    double chaos_threshold,
-                                    int chaos_confirmation,
-                                    double frame_duration,
-                                    bool with_gpu,
-                                    BoomAnalyzer& boom_analyzer) {
-    initializeMetricsSystem(collector, detector, causticness_analyzer,
-                            chaos_threshold, chaos_confirmation,
-                            frame_duration, with_gpu);
-    boom_analyzer.reset();
-}
-
 // Reset all metrics components for a new simulation run
 inline void resetMetricsSystem(MetricsCollector& collector,
                                EventDetector& detector,
-                               BoomAnalyzer& boom_analyzer,
                                CausticnessAnalyzer& causticness_analyzer) {
     collector.reset();
     detector.reset();
-    boom_analyzer.reset();
     causticness_analyzer.reset();
 }
 
@@ -92,7 +67,6 @@ inline void resetMetricsSystem(MetricsCollector& collector,
 // Returns the BoomDetection result (frame may be -1 if no boom found)
 inline BoomDetection runPostSimulationAnalysis(MetricsCollector const& collector,
                                                EventDetector& detector,
-                                               BoomAnalyzer& boom_analyzer,
                                                CausticnessAnalyzer& causticness_analyzer,
                                                double frame_duration) {
     // Detect boom using max angular causticness
@@ -109,8 +83,7 @@ inline BoomDetection runPostSimulationAnalysis(MetricsCollector const& collector
         forceBoomEvent(detector, boom, variance_at_boom);
     }
 
-    // Run analyzers (they read boom event from detector)
-    boom_analyzer.analyze(collector, detector);
+    // Run analyzer
     causticness_analyzer.analyze(collector, detector);
 
     return boom;

@@ -3,8 +3,7 @@
 namespace metrics {
 
 ProbePipeline::ProbePipeline()
-    : boom_analyzer_(std::make_unique<BoomAnalyzer>()),
-      causticness_analyzer_(std::make_unique<CausticnessAnalyzer>()) {
+    : causticness_analyzer_(std::make_unique<CausticnessAnalyzer>()) {
 
     // Default phase 1 config (physics-only)
     phase1_config_.enabled = true;
@@ -48,10 +47,6 @@ void ProbePipeline::setChaosConfirmation(int frames) {
     chaos_confirmation_ = frames;
 }
 
-void ProbePipeline::enableBoomAnalyzer(bool enable) {
-    boom_analyzer_enabled_ = enable;
-}
-
 void ProbePipeline::enableCausticnessAnalyzer(bool enable) {
     causticness_analyzer_enabled_ = enable;
 }
@@ -67,7 +62,6 @@ void ProbePipeline::setTerminationCheck(TerminationCheck callback) {
 void ProbePipeline::reset() {
     collector_.reset();
     event_detector_.reset();
-    boom_analyzer_->reset();
     causticness_analyzer_->reset();
     current_phase_ = 0;
     current_frame_ = 0;
@@ -84,7 +78,6 @@ void ProbePipeline::beginPhase2() {
     // But do reset the collector for fresh metrics
     collector_.reset();
     event_detector_.reset();
-    boom_analyzer_->reset();
     causticness_analyzer_->reset();
 
     // Register GPU metrics for Phase 2
@@ -133,9 +126,6 @@ void ProbePipeline::feedGPUFrame(GPUMetricsBundle const& gpu_metrics) {
 }
 
 void ProbePipeline::runAnalyzers() {
-    if (boom_analyzer_enabled_) {
-        boom_analyzer_->analyze(collector_, event_detector_);
-    }
     if (causticness_analyzer_enabled_) {
         // Set frame duration if available
         if (frame_duration_ > 0.0) {
@@ -148,9 +138,6 @@ void ProbePipeline::runAnalyzers() {
 SimulationScore ProbePipeline::getScores() const {
     SimulationScore scores;
 
-    if (boom_analyzer_enabled_ && boom_analyzer_->hasResults()) {
-        scores.set(ScoreNames::Boom, boom_analyzer_->score());
-    }
     if (causticness_analyzer_enabled_ && causticness_analyzer_->hasResults()) {
         scores.set(ScoreNames::Causticness, causticness_analyzer_->score());
         // Add peak clarity and post-boom sustain scores for filtering
@@ -216,11 +203,6 @@ ProbePhaseResults ProbePipeline::buildResults(ProbeFilter const& filter) {
 
     // Get scores
     results.score = getScores();
-
-    // Get boom quality
-    if (boom_analyzer_enabled_ && boom_analyzer_->hasResults()) {
-        results.boom_quality = boom_analyzer_->getQuality();
-    }
 
     // Evaluate filter
     FilterResult filter_result =

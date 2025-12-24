@@ -9,10 +9,10 @@ presets = "config/presets.toml"          # Preset library file
 
 [probe]
 enabled = true           # Enable probe-based filtering
-pendulum_count = 1000    # Fast probing with fewer pendulums (no rendering)
-total_frames = 100       # Fewer frames for faster probing (0 = use base_config)
-max_dt = 0.02            # Larger timestep for faster probing (0 = use base_config)
-max_retries = 1000       # Retry with new params if probe fails
+pendulum_count = 20000    # Fast probing with fewer pendulums (no rendering)
+total_frames = 300       # Fewer frames for faster probing (0 = use base_config)
+max_dt = 0.005            # Larger timestep for faster probing (0 = use base_config)
+max_retries = 100000       # Retry with new params if probe fails
 
 [physics_ranges]
 # Random initial angles (in degrees)
@@ -21,14 +21,15 @@ initial_angle2_deg = [50.0, 180.0]
 # Random angle variation (in degrees)
 angle_variation_deg = [0.05, 0.1]
 # Random initial velocities (rad/s) - small values for variety
-initial_velocity1 = [-0.5, 0.5]
-initial_velocity2 = [-0.5, 0.5]
+initial_velocity1 = [-0.05, 0.05]
+initial_velocity2 = [-0.05, 0.05]
+
 
 [filter]
-min_boom_seconds = 5.0     # Boom must happen after this time
-max_boom_seconds = 20.0    # Boom must happen before this time
+min_boom_seconds = 7.0     # Boom must happen after this time
+max_boom_seconds = 14.0    # Boom must happen before this time
 min_uniformity = 0.9       # Minimum distribution uniformity (0=concentrated, 1=uniform)
-min_peak_clarity = 0.75    # Minimum peak clarity (0.5=equal peaks, 1.0=no competition)
+min_peak_clarity = 0.8    # Minimum peak clarity (0.5=equal peaks, 1.0=no competition)
 # min_post_boom_sustain = 0.3  # Minimum post-boom sustain (area under curve / max area)
 require_boom = true        # Reject simulations with no detectable boom
 require_valid_music = true # Fail if no music track has drop > boom time
@@ -41,5 +42,23 @@ random_selection = true
 # Randomization settings - which presets to randomly select from
 # Names must match presets defined in the preset library
 [randomize]
-color_presets = ["full_spectrum", "vibrant", "fire", "ice", "rainbow"]
-post_process_presets = ["default", "high_contrast", "cinematic", "vibrant"]
+color_presets = [
+  "full_spectrum",
+  "vibrant",
+  "fire",
+  "ice",
+  "rainbow",
+  "sunset_dusk",
+  "plasma_warm",
+  "viridis_bright"
+]
+
+post_process_presets = [
+  "default",
+  "cinematic",
+  "filmic",
+  "crisp",
+  "glassy",
+  "studio_neutral",
+  "vibrant"
+]

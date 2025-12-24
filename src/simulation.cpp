@@ -55,7 +55,7 @@ Simulation::Simulation(Config const& config) : config_(config), color_gen_(confi
     metrics::initializeMetricsSystem(
         metrics_collector_, event_detector_, causticness_analyzer_,
         config_.detection.chaos_threshold, config_.detection.chaos_confirmation,
-        frame_duration, /*with_gpu=*/true, boom_analyzer_);
+        frame_duration, /*with_gpu=*/true);
 }
 
 Simulation::~Simulation() {
@@ -508,13 +508,9 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
 
     // Run analyzers to compute quality scores
     // (frame_duration already set in constructor via initializeMetricsSystem)
-    boom_analyzer_.analyze(metrics_collector_, event_detector_);
     causticness_analyzer_.analyze(metrics_collector_, event_detector_);
 
     // Aggregate scores
-    if (boom_analyzer_.hasResults()) {
-        results.score.set(metrics::ScoreNames::Boom, boom_analyzer_.score());
-    }
     if (causticness_analyzer_.hasResults()) {
         results.score.set(metrics::ScoreNames::Causticness, causticness_analyzer_.score());
         results.score.set(metrics::ScoreNames::PeakClarity,
@@ -631,12 +627,11 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
 
     // Reset metrics system for fresh probe (physics-only, no GPU)
     double const frame_duration = config_.simulation.frameDuration();
-    metrics::resetMetricsSystem(metrics_collector_, event_detector_,
-                                boom_analyzer_, causticness_analyzer_);
+    metrics::resetMetricsSystem(metrics_collector_, event_detector_, causticness_analyzer_);
     metrics::initializeMetricsSystem(
         metrics_collector_, event_detector_, causticness_analyzer_,
         config_.detection.chaos_threshold, config_.detection.chaos_confirmation,
-        frame_duration, /*with_gpu=*/false, boom_analyzer_);
+        frame_duration, /*with_gpu=*/false);
 
     // Main physics loop
     for (int frame = 0; frame < total_frames; ++frame) {
@@ -682,8 +677,7 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
 
     // Run post-simulation analysis (boom detection + analyzers)
     auto boom = metrics::runPostSimulationAnalysis(
-        metrics_collector_, event_detector_,
-        boom_analyzer_, causticness_analyzer_, frame_duration);
+        metrics_collector_, event_detector_, causticness_analyzer_, frame_duration);
 
     if (boom.frame >= 0) {
         results.boom_frame = boom.frame;
@@ -699,13 +693,8 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
     results.final_uniformity = metrics_collector_.getUniformity();
 
     // Scores from analyzers
-    if (boom_analyzer_.hasResults()) {
-        results.score.set(metrics::ScoreNames::Boom, boom_analyzer_.score());
-        results.boom_quality = boom_analyzer_.getQuality();
-    }
     if (causticness_analyzer_.hasResults()) {
         results.score.set(metrics::ScoreNames::Causticness, causticness_analyzer_.score());
-        // Add peak clarity and post-boom sustain scores for filtering
         results.score.set(metrics::ScoreNames::PeakClarity,
                           causticness_analyzer_.peakClarityScore());
         results.score.set(metrics::ScoreNames::PostBoomSustain,

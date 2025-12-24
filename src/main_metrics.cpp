@@ -5,7 +5,6 @@
 #include "color_scheme.h"
 #include "metrics/metrics_collector.h"
 #include "metrics/event_detector.h"
-#include "metrics/boom_analyzer.h"
 #include "metrics/boom_detection.h"
 #include "metrics/causticness_analyzer.h"
 #include "metrics/metrics_init.h"
@@ -101,12 +100,11 @@ int computePhysicsMetrics(Options const& opts,
         config.simulation.duration_seconds / reader.frameCount();
     metrics::MetricsCollector collector;
     metrics::EventDetector detector;
-    metrics::BoomAnalyzer boom_analyzer;
     metrics::CausticnessAnalyzer causticness_analyzer;
     metrics::initializeMetricsSystem(
         collector, detector, causticness_analyzer,
         config.detection.chaos_threshold, config.detection.chaos_confirmation,
-        frame_duration, /*with_gpu=*/false, boom_analyzer);
+        frame_duration, /*with_gpu=*/false);
 
     std::vector<double> angle1s, angle2s;
 
@@ -139,7 +137,7 @@ int computePhysicsMetrics(Options const& opts,
 
     // Run post-simulation analysis (boom detection + analyzers)
     auto boom = metrics::runPostSimulationAnalysis(
-        collector, detector, boom_analyzer, causticness_analyzer, frame_duration);
+        collector, detector, causticness_analyzer, frame_duration);
 
     // Print results
     std::cout << "\nResults:\n";
@@ -162,11 +160,6 @@ int computePhysicsMetrics(Options const& opts,
 
     std::cout << "  Final uniformity: " << std::fixed << std::setprecision(4)
               << collector.getUniformity() << "\n";
-
-    if (boom_analyzer.hasResults()) {
-        std::cout << "  Boom score: " << std::fixed << std::setprecision(3)
-                  << boom_analyzer.score() << "\n";
-    }
 
     if (causticness_analyzer.hasResults()) {
         auto const& metrics = causticness_analyzer.getMetrics();
@@ -246,12 +239,11 @@ int computeGPUMetrics(Options const& opts,
         config.simulation.duration_seconds / reader.frameCount();
     metrics::MetricsCollector collector;
     metrics::EventDetector detector;
-    metrics::BoomAnalyzer boom_analyzer;
     metrics::CausticnessAnalyzer causticness_analyzer;
     metrics::initializeMetricsSystem(
         collector, detector, causticness_analyzer,
         config.detection.chaos_threshold, config.detection.chaos_confirmation,
-        frame_duration, /*with_gpu=*/true, boom_analyzer);
+        frame_duration, /*with_gpu=*/true);
 
     std::cout << "Re-rendering " << reader.frameCount() << " frames at "
               << config.render.width << "x" << config.render.height << "...\n";
@@ -333,7 +325,7 @@ int computeGPUMetrics(Options const& opts,
 
     // Run post-simulation analysis (boom detection + analyzers)
     auto boom = metrics::runPostSimulationAnalysis(
-        collector, detector, boom_analyzer, causticness_analyzer, frame_duration);
+        collector, detector, causticness_analyzer, frame_duration);
 
     // Print results
     std::cout << "\nResults:\n";
@@ -345,10 +337,6 @@ int computeGPUMetrics(Options const& opts,
                   << ", causticness=" << std::setprecision(4) << boom.causticness << "\n";
     }
 
-    if (boom_analyzer.hasResults()) {
-        std::cout << "  Boom score: " << std::fixed << std::setprecision(3)
-                  << boom_analyzer.score() << "\n";
-    }
     if (causticness_analyzer.hasResults()) {
         auto const& metrics = causticness_analyzer.getMetrics();
         std::cout << "  Causticness score: " << std::fixed << std::setprecision(3)

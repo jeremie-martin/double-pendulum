@@ -1,0 +1,52 @@
+[patterns]
+# Project-specific excludes (in addition to global config and defaults)
+exclude = [
+    "tests/fixtures/*",
+    "docs/build/*",
+    "*.generated.py",
+    "temp/*",
+    "external/"
+]
+
+# Only include these patterns (optional - useful for focused concatenation)
+# Uncomment to enable whitelist mode:
+# include = [
+#     "src/**/*.py",
+#     "*.md",
+# ]
+
+# For this project, respect .gitignore
+use_gitignore = true
+
+# You can also disable default excludes if needed
+# use_default_excludes = false
+
+
+[output]
+# Enable pretty output by default for this project
+pretty = true
+
+# Default output mode: "concat", "list", or "tree"
+mode = "tree"
+
+# Add file path headers in concatenated output
+add_header = true
+
+
+[files]
+# Include binary files for this project (e.g., if you have text-based binaries)
+# include_binary = false
+
+# Custom encoding for legacy files
+# encoding = "latin-1"
+
+# How to handle encoding errors
+# errors = "replace"
+
+
+[misc]
+# Show which binary files are being skipped
+# show_skipped = true
+
+# Verbose output by default
+# verbose = false

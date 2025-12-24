@@ -4,7 +4,6 @@
 #include "config.h"
 #include "gl_renderer.h"
 #include "headless_gl.h"
-#include "metrics/boom_analyzer.h"
 #include "metrics/causticness_analyzer.h"
 #include "metrics/event_detector.h"
 #include "metrics/metrics_collector.h"
@@ -65,7 +64,6 @@ private:
     ColorSchemeGenerator color_gen_;
     metrics::MetricsCollector metrics_collector_;
     metrics::EventDetector event_detector_;
-    metrics::BoomAnalyzer boom_analyzer_;
     metrics::CausticnessAnalyzer causticness_analyzer_;
     std::string run_directory_;
 
