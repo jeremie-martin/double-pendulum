@@ -244,7 +244,7 @@ inline BoomDetection findBoomFrame(MetricsCollector const& collector,
 }
 
 // Force boom event into EventDetector based on causticness detection
-// This allows analyzers (like BoomAnalyzer) to work with causticness-based boom
+// This allows analyzers (e.g., CausticnessAnalyzer) to work with causticness-based boom
 inline void forceBoomEvent(EventDetector& detector,
                            BoomDetection const& boom,
                            double variance_at_boom = 0.0) {

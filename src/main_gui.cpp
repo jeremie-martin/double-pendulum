@@ -2025,15 +2025,7 @@ void drawMetricParametersWindow(AppState& state) {
 
 void drawDetectionSection(AppState& state) {
     if (ImGui::CollapsingHeader("Detection")) {
-        auto boom_thresh = static_cast<float>(state.config.detection.boom_threshold);
-        if (ImGui::SliderFloat("Boom Threshold", &boom_thresh, 0.01f, 1.0f, "%.3f rad^2")) {
-            state.config.detection.boom_threshold = boom_thresh;
-        }
-        tooltip("Variance threshold for chaos onset detection");
-
-        ImGui::SliderInt("Boom Confirm", &state.config.detection.boom_confirmation, 1, 30);
-        tooltip("Consecutive frames above threshold to confirm boom");
-
+        // Chaos detection (active)
         auto chaos_thresh = static_cast<float>(state.config.detection.chaos_threshold);
         if (ImGui::InputFloat("Chaos Threshold", &chaos_thresh, 10.0f, 100.0f, "%.1f rad^2")) {
             state.config.detection.chaos_threshold = chaos_thresh;
@@ -2042,6 +2034,16 @@ void drawDetectionSection(AppState& state) {
 
         ImGui::SliderInt("Chaos Confirm", &state.config.detection.chaos_confirmation, 1, 30);
         tooltip("Consecutive frames above threshold to confirm chaos");
+
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Legacy (display only):");
+        tooltip("These parameters are deprecated. Boom is now detected via max causticness.");
+
+        ImGui::BeginDisabled();
+        auto boom_thresh = static_cast<float>(state.config.detection.boom_threshold);
+        ImGui::SliderFloat("Boom Threshold##deprecated", &boom_thresh, 0.01f, 1.0f, "%.3f rad^2");
+        ImGui::SliderInt("Boom Confirm##deprecated", &state.config.detection.boom_confirmation, 1, 30);
+        ImGui::EndDisabled();
     }
 }
 

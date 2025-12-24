@@ -33,6 +33,7 @@ C++20 double pendulum physics simulation with GPU-accelerated rendering. Simulat
 | `src/batch_generator.cpp` | Batch video generation with probe filtering |
 | `src/main_gui.cpp` | GUI application with real-time preview and analysis |
 | `src/main_metrics.cpp` | Metric iteration tool for recomputing metrics |
+| `src/main_optimize.cpp` | Metric parameter optimization via grid search |
 | `src/simulation_data.cpp` | ZSTD-compressed simulation data I/O |
 | `src/gl_renderer.cpp` | GPU line rendering with GLSL shaders |
 | `src/headless_gl.cpp` | EGL context for headless GPU rendering |
@@ -41,6 +42,7 @@ C++20 double pendulum physics simulation with GPU-accelerated rendering. Simulat
 | `include/simulation_data.h` | Binary data format and Reader/Writer classes |
 | `include/batch_generator.h` | Batch config, filter criteria, probe filter |
 | `include/metrics/` | Unified metrics system (see Metrics System below) |
+| `include/metrics/metrics_init.h` | Helper for initializing metrics system |
 
 ## Rendering Pipeline
 

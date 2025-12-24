@@ -1,0 +1,28 @@
+# Best parameters found by pendulum-optimize
+# Boom MAE: 21.23 frames
+# Peak MAE: 1000000000.00 frames
+# Samples evaluated: 30
+
+[metrics]
+min_sectors = 8
+max_sectors = 8
+target_per_sector = 468
+min_grid = 4
+max_grid = 32
+target_per_cell = 40
+max_radius = 2.00
+cv_normalization = 1.50
+log_ratio_normalization = 2.00
+min_spread_threshold = 0.05
+gini_chaos_baseline = 0.35
+gini_baseline_divisor = 0.65
+log_inverse_baseline = 1.00
+log_inverse_divisor = 2.50
+
+[boom_detection]
+metric_name = "organization_causticness"
+method = "derivative_peak"
+offset_seconds = -0.25
+peak_percent_threshold = 0.60
+min_peak_prominence = 0.05
+smoothing_window = 1

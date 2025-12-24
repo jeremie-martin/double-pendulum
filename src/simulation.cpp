@@ -524,7 +524,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         results.boom_frame = boom.frame;
         results.boom_causticness = boom.causticness;
 
-        // Force boom event for analyzers (like BoomAnalyzer) to use
+        // Force boom event for analyzers (e.g., CausticnessAnalyzer) to use
         double variance_at_boom = 0.0;
         if (auto* var_series = metrics_collector_.getMetric(metrics::MetricNames::Variance)) {
             if (boom.frame < static_cast<int>(var_series->size())) {

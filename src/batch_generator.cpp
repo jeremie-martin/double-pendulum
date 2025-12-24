@@ -118,8 +118,10 @@ BatchConfig BatchConfig::load(std::string const& path) {
             if (auto min_unif = filter->get("min_uniformity")) {
                 config.filter.min_uniformity = min_unif->value<double>().value_or(0.0);
             } else if (auto min_spread = filter->get("min_spread_ratio")) {
-                // Legacy support - convert spread_ratio threshold to approximate uniformity
-                // Note: these metrics are different, so this is just for compatibility
+                // Legacy support - warn that this metric is deprecated
+                std::cerr << "WARNING: 'min_spread_ratio' is deprecated, use 'min_uniformity' instead.\n"
+                          << "  Note: spread_ratio (fraction above horizontal) != uniformity (circular spread).\n"
+                          << "  Recommended: min_uniformity = 0.9 for good distribution.\n";
                 config.filter.min_uniformity = min_spread->value<double>().value_or(0.0);
             }
             if (auto req_boom = filter->get("require_boom")) {
@@ -434,6 +436,32 @@ bool BatchGenerator::generateOne(int index) {
                     // Replace original with muxed version
                     std::filesystem::remove(video_path);
                     std::filesystem::rename(output_path, video_path);
+
+                    // Update metadata.json with music track info
+                    std::filesystem::path metadata_path =
+                        std::filesystem::path(config.output.directory) / "metadata.json";
+                    if (std::filesystem::exists(metadata_path)) {
+                        // Read existing metadata
+                        std::ifstream in(metadata_path);
+                        std::string content((std::istreambuf_iterator<char>(in)),
+                                            std::istreambuf_iterator<char>());
+                        in.close();
+
+                        // Insert music info before the closing brace
+                        size_t pos = content.rfind('}');
+                        if (pos != std::string::npos) {
+                            std::ostringstream music_json;
+                            music_json << ",\n  \"music\": {\n";
+                            music_json << "    \"track_id\": \"" << track->id << "\",\n";
+                            music_json << "    \"title\": \"" << track->title << "\",\n";
+                            music_json << "    \"drop_time_ms\": " << track->drop_time_ms << "\n";
+                            music_json << "  }\n";
+                            content.replace(pos, 1, music_json.str() + "}");
+
+                            std::ofstream out(metadata_path);
+                            out << content;
+                        }
+                    }
                 }
             } else if (config_.filter.require_valid_music) {
                 // No valid music track found (drop not after boom) - fail and retry
@@ -698,7 +726,7 @@ void BatchGenerator::printSummary() const {
               << "║\n";
 
     std::cout << "╠════════════════════════════════════════════════════════════════════════════╣\n";
-    std::cout << "║  Name                              Status  Boom(s)  Spread  Retries  Time  ║\n";
+    std::cout << "║  Name                              Status  Boom(s) Uniform  Retries  Time  ║\n";
     std::cout << "╠════════════════════════════════════════════════════════════════════════════╣\n";
 
     for (auto const& r : progress_.results) {

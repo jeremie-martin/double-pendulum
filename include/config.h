@@ -185,7 +185,8 @@ struct DetectionParams {
 
 enum class OutputFormat { PNG, Video };
 
-// Output directory mode
+// Output directory mode (internal use only - not configurable via TOML)
+// This is set programmatically by batch mode; single runs always use Timestamped
 enum class OutputMode {
     Timestamped,  // Create run_YYYYMMDD_HHMMSS subdirectory (default for single runs)
     Direct        // Write directly to output.directory (used by batch mode)
@@ -198,7 +199,7 @@ struct OutputParams {
     std::string video_codec = "libx264";
     int video_crf = 23;
     int video_fps = 60; // Only affects video encoding, not simulation
-    OutputMode mode = OutputMode::Timestamped;
+    OutputMode mode = OutputMode::Timestamped;  // Internal: set by batch mode, not TOML
 
     // Save raw simulation data for metric iteration
     // When enabled, saves simulation_data.bin alongside video/frames

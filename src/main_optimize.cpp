@@ -609,9 +609,26 @@ std::vector<BoomConfig> generateBoomConfigs() {
     std::vector<BoomConfig> configs;
 
     // Metrics to try for boom detection
-    std::vector<std::string> metric_names = {"angular_causticness",   "tip_causticness",
-                                             "spatial_concentration", "cv_causticness",
-                                             "fold_causticness",      "local_coherence"};
+    // Include all causticness-related metrics that could indicate boom moment
+    std::vector<std::string> metric_names = {
+        // Primary causticness metrics
+        "angular_causticness",
+        "tip_causticness",
+        "spatial_concentration",
+        "cv_causticness",
+        "fold_causticness",
+        "local_coherence",
+        // Additional metrics worth testing
+        "variance",                  // Original standard metric
+        "organization_causticness",  // Organization-based causticness
+        "trajectory_smoothness",     // Trajectory coherence
+        "curvature",                 // Curvature metric
+        "true_folds",                // True fold detection
+        // Concentration metrics
+        "r1_concentration",
+        "r2_concentration",
+        "joint_concentration",
+    };
 
     // Boom detection variations - comprehensive search since phase 2 is fast
     std::vector<double> offset_vals;
