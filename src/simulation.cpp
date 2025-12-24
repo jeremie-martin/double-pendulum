@@ -49,8 +49,8 @@ void savePNGFile(char const* path, uint8_t const* data, int width, int height) {
 } // namespace
 
 Simulation::Simulation(Config const& config) : config_(config), color_gen_(config.color) {
-    // Apply metric parameters from config (must be done before registerStandardMetrics)
-    metrics_collector_.setMetricParams(config_.metrics);
+    // Apply per-metric parameters from config (must be done before registerStandardMetrics)
+    metrics_collector_.setAllMetricConfigs(config_.metric_configs);
 
     // Initialize metrics system using common helper
     // frame_duration is computed from config (duration_seconds / total_frames)
@@ -519,7 +519,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     }
 
     // Detect boom using configured method and metric
-    auto boom = metrics::findBoomFrame(metrics_collector_, frame_duration, config_.boom);
+    auto boom = metrics::findBoomFrame(metrics_collector_, frame_duration, config_.getBoomParams());
     if (boom.frame >= 0) {
         results.boom_frame = boom.frame;
         results.boom_causticness = boom.causticness;
@@ -712,7 +712,7 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
 
     // Run post-simulation analysis (boom detection + analyzers)
     auto boom = metrics::runPostSimulationAnalysis(
-        metrics_collector_, event_detector_, causticness_analyzer_, frame_duration, config_.boom);
+        metrics_collector_, event_detector_, causticness_analyzer_, frame_duration, config_.getBoomParams());
 
     if (boom.frame >= 0) {
         results.boom_frame = boom.frame;

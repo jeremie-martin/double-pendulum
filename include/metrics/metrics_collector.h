@@ -66,9 +66,22 @@ public:
     MetricsCollector();
     ~MetricsCollector();
 
-    // Metric parameters (runtime configurable)
-    void setMetricParams(MetricParams const& params) { params_ = params; }
-    MetricParams const& getMetricParams() const { return params_; }
+    // Per-metric configuration (runtime configurable)
+    void setMetricConfig(std::string const& name, MetricConfig const& config);
+    void setAllMetricConfigs(std::unordered_map<std::string, MetricConfig> const& configs);
+    MetricConfig const* getMetricConfig(std::string const& name) const;
+
+    // Helper to get typed params for a specific metric (returns defaults if not configured)
+    template<typename T>
+    T getMetricParams(std::string const& name) const {
+        if (auto const* mc = getMetricConfig(name)) {
+            if (auto const* p = std::get_if<T>(&mc->params)) {
+                return *p;
+            }
+        }
+        // Return default-constructed params
+        return T{};
+    }
 
     // Metric registration (call during initialization)
     void registerMetric(std::string const& name, MetricType type);
@@ -142,7 +155,7 @@ public:
 private:
     std::unordered_map<std::string, MetricSeries<double>> metrics_;
     std::unordered_map<std::string, MetricType> metric_types_;
-    MetricParams params_;  // Runtime-configurable metric computation parameters
+    std::unordered_map<std::string, MetricConfig> metric_configs_;  // Per-metric parameters
 
     int current_frame_ = -1;
     SpreadMetrics current_spread_;
@@ -183,7 +196,8 @@ private:
                                        std::vector<double> const& y2s) const;
 
     // Helper: compute causticness from any angle vector (shared by angular and tip)
-    double computeCausticnessFromAngles(std::vector<double> const& angles) const;
+    double computeCausticnessFromAngles(std::vector<double> const& angles,
+                                        SectorMetricParams const& params) const;
 
     // Alternative: CV-based causticness (coefficient of variation instead of Gini)
     double computeCVCausticness(std::vector<double> const& angle1s,

@@ -102,8 +102,8 @@ int computePhysicsMetrics(Options const& opts,
     metrics::EventDetector detector;
     metrics::CausticnessAnalyzer causticness_analyzer;
 
-    // Apply metric parameters from config
-    collector.setMetricParams(config.metrics);
+    // Apply per-metric parameters from config
+    collector.setAllMetricConfigs(config.metric_configs);
 
     metrics::initializeMetricsSystem(
         collector, detector, causticness_analyzer,
@@ -140,7 +140,7 @@ int computePhysicsMetrics(Options const& opts,
 
     // Run post-simulation analysis (boom detection + analyzers)
     auto boom = metrics::runPostSimulationAnalysis(
-        collector, detector, causticness_analyzer, frame_duration, config.boom);
+        collector, detector, causticness_analyzer, frame_duration, config.getBoomParams());
 
     // Print results
     std::cout << "\nResults:\n";
@@ -260,8 +260,8 @@ int computeGPUMetrics(Options const& opts,
     metrics::EventDetector detector;
     metrics::CausticnessAnalyzer causticness_analyzer;
 
-    // Apply metric parameters from config
-    collector.setMetricParams(config.metrics);
+    // Apply per-metric parameters from config
+    collector.setAllMetricConfigs(config.metric_configs);
 
     metrics::initializeMetricsSystem(
         collector, detector, causticness_analyzer,
@@ -345,7 +345,7 @@ int computeGPUMetrics(Options const& opts,
 
     // Run post-simulation analysis (boom detection + analyzers)
     auto boom = metrics::runPostSimulationAnalysis(
-        collector, detector, causticness_analyzer, frame_duration, config.boom);
+        collector, detector, causticness_analyzer, frame_duration, config.getBoomParams());
 
     // Print results
     std::cout << "\nResults:\n";

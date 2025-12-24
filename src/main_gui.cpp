@@ -251,8 +251,8 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
         state.config.detection.chaos_threshold, state.config.detection.chaos_confirmation,
         state.frame_duration, /*with_gpu=*/true);
 
-    // Apply metric params from config
-    state.metrics_collector.setMetricParams(state.config.metrics);
+    // Apply per-metric configs from config
+    state.metrics_collector.setAllMetricConfigs(state.config.metric_configs);
 
     state.boom_frame.reset();
     state.chaos_frame.reset();
@@ -1799,8 +1799,8 @@ void drawPostProcessSection(AppState& state) {
 void recomputeMetrics(AppState& state) {
     if (state.frame_history.empty()) return;
 
-    // Update metric params on collector
-    state.metrics_collector.setMetricParams(state.config.metrics);
+    // Update per-metric configs on collector
+    state.metrics_collector.setAllMetricConfigs(state.config.metric_configs);
 
     // Reset metrics collector
     state.metrics_collector.reset();
@@ -1815,7 +1815,7 @@ void recomputeMetrics(AppState& state) {
     // Re-detect boom with new params
     auto boom = metrics::findBoomFrame(state.metrics_collector,
                                        state.frame_duration,
-                                       state.config.boom);
+                                       state.config.getBoomParams());
     if (boom.frame >= 0) {
         state.boom_frame = boom.frame;
         state.boom_causticness = boom.causticness;
@@ -1842,101 +1842,30 @@ void drawMetricParametersWindow(AppState& state) {
     }
 
     bool params_changed = false;
-    auto& params = state.config.metrics;
-    auto& boom_params = state.config.boom;
 
-    // Sector Algorithm section
-    if (ImGui::CollapsingHeader("Sector Algorithm", ImGuiTreeNodeFlags_DefaultOpen)) {
-        params_changed |= ImGui::SliderInt("Min Sectors", &params.min_sectors, 4, 24);
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Minimum number of sectors for angle binning");
-
-        params_changed |= ImGui::SliderInt("Max Sectors", &params.max_sectors, 24, 144);
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Maximum number of sectors for angle binning");
-
-        params_changed |= ImGui::SliderInt("Target/Sector", &params.target_per_sector, 10, 100);
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Target pendulums per sector (controls N-scaling)");
+    // Get the active boom metric name and its config
+    std::string active_metric = state.config.boom_metric;
+    if (active_metric.empty()) {
+        active_metric = "angular_causticness";
     }
 
-    // Grid Algorithm section
-    if (ImGui::CollapsingHeader("Grid Algorithm")) {
-        params_changed |= ImGui::SliderInt("Min Grid", &params.min_grid, 2, 16);
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Minimum grid size for spatial metrics");
-
-        params_changed |= ImGui::SliderInt("Max Grid", &params.max_grid, 16, 64);
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Maximum grid size for spatial metrics");
-
-        params_changed |= ImGui::SliderInt("Target/Cell", &params.target_per_cell, 10, 100);
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Target pendulums per grid cell");
+    // Get or create config for active metric
+    auto& metric_configs = state.config.metric_configs;
+    if (metric_configs.find(active_metric) == metric_configs.end()) {
+        // Create default config for the metric
+        MetricConfig mc;
+        mc.name = active_metric;
+        mc.params = SectorMetricParams{};  // Default to sector params
+        metric_configs[active_metric] = mc;
     }
+    auto& active_config = metric_configs[active_metric];
 
-    // Normalization section
-    if (ImGui::CollapsingHeader("Normalization")) {
-        float max_radius = static_cast<float>(params.max_radius);
-        if (ImGui::SliderFloat("Max Radius", &max_radius, 1.0f, 4.0f, "%.2f")) {
-            params.max_radius = max_radius;
-            params_changed = true;
-        }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Maximum tip radius (L1 + L2)");
+    // Get boom params from active config
+    BoomDetectionParams boom_params = std::visit([](auto const& p) -> BoomDetectionParams {
+        return p.boom;
+    }, active_config.params);
 
-        float cv_norm = static_cast<float>(params.cv_normalization);
-        if (ImGui::SliderFloat("CV Norm", &cv_norm, 0.5f, 3.0f, "%.2f")) {
-            params.cv_normalization = cv_norm;
-            params_changed = true;
-        }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("CV normalization divisor");
-
-        float log_ratio_norm = static_cast<float>(params.log_ratio_normalization);
-        if (ImGui::SliderFloat("Log Ratio Norm", &log_ratio_norm, 1.0f, 4.0f, "%.2f")) {
-            params.log_ratio_normalization = log_ratio_norm;
-            params_changed = true;
-        }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("P90/P10 log ratio normalization");
-
-        float spread_thresh = static_cast<float>(params.min_spread_threshold);
-        if (ImGui::SliderFloat("Min Spread", &spread_thresh, 0.01f, 0.2f, "%.3f")) {
-            params.min_spread_threshold = spread_thresh;
-            params_changed = true;
-        }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Minimum spread to compute coherence metrics");
-    }
-
-    // Gini Baseline section
-    if (ImGui::CollapsingHeader("Gini Baseline")) {
-        float gini_baseline = static_cast<float>(params.gini_chaos_baseline);
-        if (ImGui::SliderFloat("Chaos Baseline", &gini_baseline, 0.0f, 0.6f, "%.3f")) {
-            params.gini_chaos_baseline = gini_baseline;
-            params_changed = true;
-        }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Gini coefficient noise floor in chaos");
-
-        float gini_divisor = static_cast<float>(params.gini_baseline_divisor);
-        if (ImGui::SliderFloat("Baseline Divisor", &gini_divisor, 0.2f, 1.0f, "%.3f")) {
-            params.gini_baseline_divisor = gini_divisor;
-            params_changed = true;
-        }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Divisor for normalized Gini");
-    }
-
-    // Local Coherence section
-    if (ImGui::CollapsingHeader("Local Coherence")) {
-        float log_baseline = static_cast<float>(params.log_inverse_baseline);
-        if (ImGui::SliderFloat("Log Baseline", &log_baseline, 0.0f, 2.0f, "%.2f")) {
-            params.log_inverse_baseline = log_baseline;
-            params_changed = true;
-        }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Log inverse baseline for min/median ratio");
-
-        float log_divisor = static_cast<float>(params.log_inverse_divisor);
-        if (ImGui::SliderFloat("Log Divisor", &log_divisor, 1.0f, 5.0f, "%.2f")) {
-            params.log_inverse_divisor = log_divisor;
-            params_changed = true;
-        }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Divisor for log inverse normalization");
-    }
-
-    ImGui::Separator();
-
-    // Boom Detection section
+    // Boom Detection section (primary focus)
     if (ImGui::CollapsingHeader("Boom Detection", ImGuiTreeNodeFlags_DefaultOpen)) {
         // Metric selector
         const char* metric_names[] = {
@@ -1949,13 +1878,13 @@ void drawMetricParametersWindow(AppState& state) {
         };
         int metric_idx = 0;
         for (int i = 0; i < 6; ++i) {
-            if (boom_params.metric_name == metric_names[i]) {
+            if (active_metric == metric_names[i]) {
                 metric_idx = i;
                 break;
             }
         }
         if (ImGui::Combo("Metric", &metric_idx, metric_names, 6)) {
-            boom_params.metric_name = metric_names[metric_idx];
+            state.config.boom_metric = metric_names[metric_idx];
             params_changed = true;
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Which metric to use for boom detection");
@@ -1969,7 +1898,7 @@ void drawMetricParametersWindow(AppState& state) {
             params_changed = true;
         }
 
-        // Offset is applied to ALL methods now (applied centrally in BoomDetector::detect)
+        // Offset is applied to ALL methods now
         float offset = static_cast<float>(boom_params.offset_seconds);
         if (ImGui::SliderFloat("Offset (s)", &offset, -0.5f, 1.0f, "%.2f")) {
             boom_params.offset_seconds = offset;
@@ -1979,7 +1908,6 @@ void drawMetricParametersWindow(AppState& state) {
 
         // Method-specific parameters
         if (boom_params.method == BoomDetectionMethod::FirstPeakPercent) {
-            // Display as percentage (0-100) but store as fraction (0.0-1.0)
             float peak_pct_display = static_cast<float>(boom_params.peak_percent_threshold) * 100.0f;
             if (ImGui::SliderFloat("Peak %", &peak_pct_display, 30.0f, 90.0f, "%.0f%%")) {
                 boom_params.peak_percent_threshold = peak_pct_display / 100.0;
@@ -2016,14 +1944,58 @@ void drawMetricParametersWindow(AppState& state) {
             params_changed = true;
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Minimum peak prominence (fraction of max)");
+
+        // Apply boom params changes back to config
+        if (params_changed) {
+            std::visit([&boom_params](auto& p) {
+                p.boom = boom_params;
+            }, active_config.params);
+        }
+    }
+
+    // Show metric-specific parameters (read from active config)
+    if (ImGui::CollapsingHeader("Metric Parameters")) {
+        std::visit([&](auto& p) {
+            using T = std::decay_t<decltype(p)>;
+            if constexpr (std::is_same_v<T, SectorMetricParams> || std::is_same_v<T, CVSectorMetricParams>) {
+                if (ImGui::SliderInt("Min Sectors", &p.min_sectors, 4, 24)) params_changed = true;
+                if (ImGui::SliderInt("Max Sectors", &p.max_sectors, 24, 144)) params_changed = true;
+                if (ImGui::SliderInt("Target/Sector", &p.target_per_sector, 10, 100)) params_changed = true;
+            }
+            if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
+                float cv = static_cast<float>(p.cv_normalization);
+                if (ImGui::SliderFloat("CV Norm", &cv, 0.5f, 3.0f, "%.2f")) {
+                    p.cv_normalization = cv;
+                    params_changed = true;
+                }
+            }
+            if constexpr (std::is_same_v<T, GridMetricParams>) {
+                if (ImGui::SliderInt("Min Grid", &p.min_grid, 2, 16)) params_changed = true;
+                if (ImGui::SliderInt("Max Grid", &p.max_grid, 16, 64)) params_changed = true;
+                if (ImGui::SliderInt("Target/Cell", &p.target_per_cell, 10, 100)) params_changed = true;
+            }
+            if constexpr (std::is_same_v<T, FoldMetricParams>) {
+                float r = static_cast<float>(p.max_radius);
+                if (ImGui::SliderFloat("Max Radius", &r, 1.0f, 4.0f)) { p.max_radius = r; params_changed = true; }
+                float cv = static_cast<float>(p.cv_normalization);
+                if (ImGui::SliderFloat("CV Norm", &cv, 0.5f, 3.0f)) { p.cv_normalization = cv; params_changed = true; }
+            }
+            if constexpr (std::is_same_v<T, TrajectoryMetricParams> || std::is_same_v<T, CurvatureMetricParams> ||
+                          std::is_same_v<T, TrueFoldsMetricParams> || std::is_same_v<T, LocalCoherenceMetricParams>) {
+                float r = static_cast<float>(p.max_radius);
+                if (ImGui::SliderFloat("Max Radius", &r, 1.0f, 4.0f)) { p.max_radius = r; params_changed = true; }
+                float s = static_cast<float>(p.min_spread_threshold);
+                if (ImGui::SliderFloat("Min Spread", &s, 0.01f, 0.2f, "%.3f")) { p.min_spread_threshold = s; params_changed = true; }
+            }
+        }, active_config.params);
     }
 
     ImGui::Separator();
 
     // Action buttons
     if (ImGui::Button("Reset Defaults")) {
-        state.config.metrics = MetricParams{};
-        state.config.boom = BoomDetectionParams{};
+        state.config.metric_configs.clear();
+        state.config.boom_metric = "angular_causticness";
         params_changed = true;
     }
     ImGui::SameLine();

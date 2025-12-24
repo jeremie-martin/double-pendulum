@@ -20,6 +20,20 @@ constexpr double HALF_PI = PI / 2.0;
 MetricsCollector::MetricsCollector() = default;
 MetricsCollector::~MetricsCollector() = default;
 
+void MetricsCollector::setMetricConfig(std::string const& name, MetricConfig const& config) {
+    metric_configs_[name] = config;
+}
+
+void MetricsCollector::setAllMetricConfigs(
+    std::unordered_map<std::string, MetricConfig> const& configs) {
+    metric_configs_ = configs;
+}
+
+MetricConfig const* MetricsCollector::getMetricConfig(std::string const& name) const {
+    auto it = metric_configs_.find(name);
+    return it != metric_configs_.end() ? &it->second : nullptr;
+}
+
 void MetricsCollector::registerMetric(std::string const& name, MetricType type) {
     if (metrics_.find(name) == metrics_.end()) {
         metrics_[name] = MetricSeries<double>();
@@ -426,12 +440,15 @@ double MetricsCollector::computeAngularCausticness(
         return 0.0;
     }
 
+    // Get per-metric params (falls back to defaults if not configured)
+    auto params = getMetricParams<SectorMetricParams>(MetricNames::AngularCausticness);
+
     // Scale number of sectors based on N for consistent statistics
     // Target: ~30-50 pendulums per sector for meaningful statistics
     // This makes the metric independent of pendulum count
     int N = static_cast<int>(angle1s.size());
-    int num_sectors = std::max(params_.min_sectors,
-                               std::min(params_.max_sectors, N / params_.target_per_sector));
+    int num_sectors = std::max(params.min_sectors,
+                               std::min(params.max_sectors, N / params.target_per_sector));
     double sector_width = TWO_PI / num_sectors;
 
     // Use vector for dynamic sector count
@@ -506,8 +523,10 @@ void MetricsCollector::updateFromStates(std::vector<PendulumState> const& states
     // Compute new caustic metrics - Tier 1: angle-based
     // Use causticness formula (coverage × gini) instead of raw concentration
     // This gives the desired low→high→low pattern instead of high→low
-    double r1 = computeCausticnessFromAngles(angle1s);
-    double r2 = computeCausticnessFromAngles(angle2s);
+    auto r1_params = getMetricParams<SectorMetricParams>(MetricNames::R1);
+    auto r2_params = getMetricParams<SectorMetricParams>(MetricNames::R2);
+    double r1 = computeCausticnessFromAngles(angle1s, r1_params);
+    double r2 = computeCausticnessFromAngles(angle2s, r2_params);
     setMetric(MetricNames::R1, r1);
     setMetric(MetricNames::R2, r2);
     setMetric(MetricNames::JointConcentration, r1 * r2);
@@ -565,8 +584,10 @@ void MetricsCollector::updateFromPackedStates(
     updateFromAngles(angle1_buf_, angle2_buf_);
 
     // Compute new caustic metrics - Tier 1: angle-based
-    double r1 = computeCausticnessFromAngles(angle1_buf_);
-    double r2 = computeCausticnessFromAngles(angle2_buf_);
+    auto r1_params = getMetricParams<SectorMetricParams>(MetricNames::R1);
+    auto r2_params = getMetricParams<SectorMetricParams>(MetricNames::R2);
+    double r1 = computeCausticnessFromAngles(angle1_buf_, r1_params);
+    double r2 = computeCausticnessFromAngles(angle2_buf_, r2_params);
     setMetric(MetricNames::R1, r1);
     setMetric(MetricNames::R2, r2);
     setMetric(MetricNames::JointConcentration, r1 * r2);
@@ -603,13 +624,14 @@ void MetricsCollector::updateFromPackedStates(
 }
 
 double MetricsCollector::computeCausticnessFromAngles(
-    std::vector<double> const& angles) const {
+    std::vector<double> const& angles,
+    SectorMetricParams const& params) const {
     if (angles.empty()) return 0.0;
 
     // Scale number of sectors based on N for consistent statistics
     int N = static_cast<int>(angles.size());
-    int num_sectors = std::max(params_.min_sectors,
-                               std::min(params_.max_sectors, N / params_.target_per_sector));
+    int num_sectors = std::max(params.min_sectors,
+                               std::min(params.max_sectors, N / params.target_per_sector));
     double sector_width = TWO_PI / num_sectors;
 
     std::vector<int> sector_counts(num_sectors, 0);
@@ -653,6 +675,9 @@ double MetricsCollector::computeTipCausticness(
     std::vector<double> const& y2s) const {
     if (x2s.empty() || x2s.size() != y2s.size()) return 0.0;
 
+    // Get per-metric params
+    auto params = getMetricParams<SectorMetricParams>(MetricNames::TipCausticness);
+
     // Compute actual tip angles from Cartesian positions
     // atan2(x, y) gives angle from vertical (y-axis), matching pendulum convention
     std::vector<double> tip_angles;
@@ -665,7 +690,7 @@ double MetricsCollector::computeTipCausticness(
     }
 
     // Use same causticness algorithm as angular_causticness
-    return computeCausticnessFromAngles(tip_angles);
+    return computeCausticnessFromAngles(tip_angles, params);
 }
 
 double MetricsCollector::computeSpatialConcentration(
@@ -673,12 +698,15 @@ double MetricsCollector::computeSpatialConcentration(
     std::vector<double> const& y2s) const {
     if (x2s.empty() || x2s.size() != y2s.size()) return 0.0;
 
+    // Get per-metric params
+    auto params = getMetricParams<GridMetricParams>(MetricNames::SpatialConcentration);
+
     int N = static_cast<int>(x2s.size());
 
     // Adaptive grid size: target ~40 pendulums per cell for statistical stability
     // This makes the metric N-independent
-    int grid_size = std::max(params_.min_grid, std::min(params_.max_grid,
-        static_cast<int>(std::sqrt(static_cast<double>(N) / params_.target_per_cell))));
+    int grid_size = std::max(params.min_grid, std::min(params.max_grid,
+        static_cast<int>(std::sqrt(static_cast<double>(N) / params.target_per_cell))));
 
     // Find bounds
     double min_x = *std::min_element(x2s.begin(), x2s.end());
@@ -739,10 +767,13 @@ double MetricsCollector::computeCVCausticness(
 
     if (angle1s.empty() || angle1s.size() != angle2s.size()) return 0.0;
 
+    // Get per-metric params
+    auto params = getMetricParams<CVSectorMetricParams>(MetricNames::CVCausticness);
+
     // Scale sectors adaptively for N-independence
     int N = static_cast<int>(angle1s.size());
-    int num_sectors = std::max(params_.min_sectors,
-                               std::min(params_.max_sectors, N / params_.target_per_sector));
+    int num_sectors = std::max(params.min_sectors,
+                               std::min(params.max_sectors, N / params.target_per_sector));
     double sector_width = TWO_PI / num_sectors;
 
     std::vector<int> sector_counts(num_sectors, 0);
@@ -777,7 +808,7 @@ double MetricsCollector::computeCVCausticness(
 
     // Normalize CV to roughly 0-1 range (CV can be 0-2+ for very spiky data)
     // Then multiply by coverage for the desired low→high→low pattern
-    double normalized_cv = std::min(1.0, cv / params_.cv_normalization);
+    double normalized_cv = std::min(1.0, cv / params.cv_normalization);
 
     return coverage * normalized_cv;
 }
@@ -791,6 +822,9 @@ double MetricsCollector::computeOrganizationCausticness(
     // - Coverage ensures we're actually exploring the space
 
     if (angle1s.empty() || angle1s.size() != angle2s.size()) return 0.0;
+
+    // Get per-metric params
+    auto params = getMetricParams<SectorMetricParams>(MetricNames::OrganizationCausticness);
 
     // Compute R1 (mean resultant length for angle1)
     double cos_sum1 = 0.0, sin_sum1 = 0.0;
@@ -811,8 +845,8 @@ double MetricsCollector::computeOrganizationCausticness(
 
     // Compute sector coverage for combined tip angle
     int N = static_cast<int>(angle1s.size());
-    int num_sectors = std::max(params_.min_sectors,
-                               std::min(params_.max_sectors, N / params_.target_per_sector));
+    int num_sectors = std::max(params.min_sectors,
+                               std::min(params.max_sectors, N / params.target_per_sector));
     double sector_width = TWO_PI / num_sectors;
 
     std::vector<bool> occupied(num_sectors, false);
@@ -850,6 +884,9 @@ double MetricsCollector::computeFoldCausticness(
 
     if (x2s.size() < 2 || x2s.size() != y2s.size()) return 0.0;
 
+    // Get per-metric params
+    auto params = getMetricParams<FoldMetricParams>(MetricNames::FoldCausticness);
+
     int N = static_cast<int>(x2s.size());
 
     // 1. Compute spatial spread (how far tips are from center)
@@ -858,7 +895,7 @@ double MetricsCollector::computeFoldCausticness(
         sum_r += std::sqrt(x2s[i] * x2s[i] + y2s[i] * y2s[i]);
     }
     double mean_radius = sum_r / N;
-    double spread = std::min(1.0, mean_radius / params_.max_radius);
+    double spread = std::min(1.0, mean_radius / params.max_radius);
 
     // 2. Compute adjacent-pair distance statistics
     // Pendulums are ordered by initial angle, so adjacent pairs started nearly identical
@@ -878,7 +915,7 @@ double MetricsCollector::computeFoldCausticness(
     double cv = (mean_d > 1e-10) ? std_d / mean_d : 0.0;
 
     // Normalize CV to roughly 0-1 range
-    double clustering = std::min(1.0, cv / params_.cv_normalization);
+    double clustering = std::min(1.0, cv / params.cv_normalization);
 
     // 3. Combine: need high spread AND high CV
     // - Start: spread≈0 → metric≈0 (all tips at same spot)
@@ -906,6 +943,9 @@ double MetricsCollector::computeTrajectorySmoothness(
 
     if (x2s.size() < 4 || x2s.size() != y2s.size()) return 0.0;
 
+    // Get per-metric params
+    auto params = getMetricParams<TrajectoryMetricParams>(MetricNames::TrajectorySmoothness);
+
     int N = static_cast<int>(x2s.size());
 
     // Compute spread (circular_spread from angle data is better, but use spatial as fallback)
@@ -919,10 +959,10 @@ double MetricsCollector::computeTrajectorySmoothness(
         for (int i = 0; i < N; ++i) {
             sum_r += std::sqrt(x2s[i] * x2s[i] + y2s[i] * y2s[i]);
         }
-        spread = std::min(1.0, (sum_r / N) / params_.max_radius);
+        spread = std::min(1.0, (sum_r / N) / params.max_radius);
     }
 
-    if (spread < params_.min_spread_threshold) return 0.0;  // Not spread enough yet
+    if (spread < params.min_spread_threshold) return 0.0;  // Not spread enough yet
 
     // Compute neighbor distances
     std::vector<double> distances;
@@ -981,6 +1021,9 @@ double MetricsCollector::computeCurvature(
 
     if (x2s.size() < 10 || x2s.size() != y2s.size()) return 0.0;
 
+    // Get per-metric params
+    auto params = getMetricParams<CurvatureMetricParams>(MetricNames::Curvature);
+
     int N = static_cast<int>(x2s.size());
 
     // Compute spread
@@ -993,10 +1036,10 @@ double MetricsCollector::computeCurvature(
         for (int i = 0; i < N; ++i) {
             sum_r += std::sqrt(x2s[i] * x2s[i] + y2s[i] * y2s[i]);
         }
-        spread = std::min(1.0, (sum_r / N) / params_.max_radius);
+        spread = std::min(1.0, (sum_r / N) / params.max_radius);
     }
 
-    if (spread < params_.min_spread_threshold) return 0.0;
+    if (spread < params.min_spread_threshold) return 0.0;
 
     // Compute neighbor distances
     std::vector<double> distances;
@@ -1033,7 +1076,7 @@ double MetricsCollector::computeCurvature(
     double log_ratio = std::log10(std::max(1.0, ratio));
 
     // Normalize to 0-1 range (ratio of 10-50 is typical for good caustics)
-    double normalized = std::min(1.0, log_ratio / params_.log_ratio_normalization);
+    double normalized = std::min(1.0, log_ratio / params.log_ratio_normalization);
 
     // Combine with spread
     return spread * normalized;
@@ -1055,6 +1098,9 @@ double MetricsCollector::computeTrueFolds(
 
     if (x2s.size() < 10 || x2s.size() != y2s.size()) return 0.0;
 
+    // Get per-metric params
+    auto params = getMetricParams<TrueFoldsMetricParams>(MetricNames::TrueFolds);
+
     int N = static_cast<int>(x2s.size());
 
     // Compute spread
@@ -1067,10 +1113,10 @@ double MetricsCollector::computeTrueFolds(
         for (int i = 0; i < N; ++i) {
             sum_r += std::sqrt(x2s[i] * x2s[i] + y2s[i] * y2s[i]);
         }
-        spread = std::min(1.0, (sum_r / N) / params_.max_radius);
+        spread = std::min(1.0, (sum_r / N) / params.max_radius);
     }
 
-    if (spread < params_.min_spread_threshold) return 0.0;
+    if (spread < params.min_spread_threshold) return 0.0;
 
     // Compute neighbor distances
     std::vector<double> distances;
@@ -1104,7 +1150,7 @@ double MetricsCollector::computeTrueFolds(
     //
     // Subtract the "chaos baseline"
     double adjusted_gini = std::max(0.0,
-        (gini - params_.gini_chaos_baseline) / params_.gini_baseline_divisor);
+        (gini - params.gini_chaos_baseline) / params.gini_baseline_divisor);
 
     return spread * adjusted_gini;
 }
@@ -1124,6 +1170,9 @@ double MetricsCollector::computeLocalCoherence(
 
     if (x2s.size() < 10 || x2s.size() != y2s.size()) return 0.0;
 
+    // Get per-metric params
+    auto params = getMetricParams<LocalCoherenceMetricParams>(MetricNames::LocalCoherence);
+
     int N = static_cast<int>(x2s.size());
 
     // Compute spread
@@ -1136,10 +1185,10 @@ double MetricsCollector::computeLocalCoherence(
         for (int i = 0; i < N; ++i) {
             sum_r += std::sqrt(x2s[i] * x2s[i] + y2s[i] * y2s[i]);
         }
-        spread = std::min(1.0, (sum_r / N) / params_.max_radius);
+        spread = std::min(1.0, (sum_r / N) / params.max_radius);
     }
 
-    if (spread < params_.min_spread_threshold) return 0.0;
+    if (spread < params.min_spread_threshold) return 0.0;
 
     // Compute neighbor distances
     std::vector<double> distances;
@@ -1176,7 +1225,7 @@ double MetricsCollector::computeLocalCoherence(
     // Normalize: log_inverse ranges 0-6, typical caustic is 1.5-3
     // Subtract chaos baseline
     double adjusted = std::max(0.0,
-        (log_inverse - params_.log_inverse_baseline) / params_.log_inverse_divisor);
+        (log_inverse - params.log_inverse_baseline) / params.log_inverse_divisor);
 
     return spread * std::min(1.0, adjusted);
 }

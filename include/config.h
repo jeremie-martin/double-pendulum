@@ -1,7 +1,10 @@
 #pragma once
 
 #include <cmath>
+#include <optional>
 #include <string>
+#include <unordered_map>
+#include <variant>
 
 // Conversion utilities
 inline double deg2rad(double degrees) {
@@ -111,35 +114,6 @@ struct ColorParams {
     double end = 1.0;   // Range end [0, 1]
 };
 
-// Metric computation parameters - controls how causticness metrics are calculated
-// All defaults match previous hardcoded values for backward compatibility
-struct MetricParams {
-    // Sector-based algorithm parameters (for angular causticness, tip causticness, etc.)
-    // Sectors scale with N to maintain N-independence: num_sectors = clamp(N/target, min, max)
-    int min_sectors = 8;
-    int max_sectors = 72;
-    int target_per_sector = 40;
-
-    // Grid-based spatial metrics (for spatial_concentration)
-    int min_grid = 4;
-    int max_grid = 32;
-    int target_per_cell = 40;
-
-    // Normalization thresholds
-    double max_radius = 2.0;               // Maximum tip radius (L1 + L2 for unit lengths)
-    double cv_normalization = 1.5;         // CV divisor for 0-1 normalization
-    double log_ratio_normalization = 2.0;  // Log ratio divisor for P90/P10 metric
-    double min_spread_threshold = 0.05;    // Minimum spread to compute coherence metrics
-
-    // Gini baseline adjustment (subtracts chaos noise floor from distance-based Gini)
-    double gini_chaos_baseline = 0.35;
-    double gini_baseline_divisor = 0.65;
-
-    // Local coherence parameters (for min/median ratio metric)
-    double log_inverse_baseline = 1.0;
-    double log_inverse_divisor = 2.5;
-};
-
 // Boom detection method
 enum class BoomDetectionMethod {
     MaxCausticness,       // Find frame with max causticness (peak visual richness)
@@ -174,6 +148,194 @@ struct BoomDetectionParams {
     // Which metric to use for detection
     std::string metric_name = "angular_causticness";
 };
+
+// ============================================================================
+// PER-METRIC PARAMETER STRUCTS
+// Each metric type has its own parameter struct containing only relevant params
+// plus embedded boom detection settings for that metric.
+// ============================================================================
+
+// For sector-based metrics: angular_causticness, tip_causticness,
+// organization_causticness, r1_concentration, r2_concentration, joint_concentration
+struct SectorMetricParams {
+    int min_sectors = 8;
+    int max_sectors = 72;
+    int target_per_sector = 40;
+    BoomDetectionParams boom;
+};
+
+// For CV-based sector metrics: cv_causticness
+struct CVSectorMetricParams {
+    int min_sectors = 8;
+    int max_sectors = 72;
+    int target_per_sector = 40;
+    double cv_normalization = 1.5;
+    BoomDetectionParams boom;
+};
+
+// For grid-based metrics: spatial_concentration
+struct GridMetricParams {
+    int min_grid = 4;
+    int max_grid = 32;
+    int target_per_cell = 40;
+    BoomDetectionParams boom;
+};
+
+// For fold detection: fold_causticness
+struct FoldMetricParams {
+    double max_radius = 2.0;
+    double cv_normalization = 1.5;
+    BoomDetectionParams boom;
+};
+
+// For trajectory analysis: trajectory_smoothness
+struct TrajectoryMetricParams {
+    double max_radius = 2.0;
+    double min_spread_threshold = 0.05;
+    BoomDetectionParams boom;
+};
+
+// For curvature metric
+struct CurvatureMetricParams {
+    double max_radius = 2.0;
+    double min_spread_threshold = 0.05;
+    double log_ratio_normalization = 2.0;
+    BoomDetectionParams boom;
+};
+
+// For true_folds metric
+struct TrueFoldsMetricParams {
+    double max_radius = 2.0;
+    double min_spread_threshold = 0.05;
+    double gini_chaos_baseline = 0.35;
+    double gini_baseline_divisor = 0.65;
+    BoomDetectionParams boom;
+};
+
+// For local_coherence metric
+struct LocalCoherenceMetricParams {
+    double max_radius = 2.0;
+    double min_spread_threshold = 0.05;
+    double log_inverse_baseline = 1.0;
+    double log_inverse_divisor = 2.5;
+    BoomDetectionParams boom;
+};
+
+// Variant type for unified per-metric parameter storage
+using MetricParamsVariant = std::variant<
+    SectorMetricParams,
+    CVSectorMetricParams,
+    GridMetricParams,
+    FoldMetricParams,
+    TrajectoryMetricParams,
+    CurvatureMetricParams,
+    TrueFoldsMetricParams,
+    LocalCoherenceMetricParams
+>;
+
+// Configuration for a single metric (name + params + boom detection)
+struct MetricConfig {
+    std::string name;
+    MetricParamsVariant params;
+
+    // Get boom detection params from the variant
+    BoomDetectionParams const& getBoomParams() const {
+        return std::visit([](auto const& p) -> BoomDetectionParams const& {
+            return p.boom;
+        }, params);
+    }
+
+    // Set boom detection params in the variant
+    void setBoomParams(BoomDetectionParams const& bp) {
+        std::visit([&bp](auto& p) {
+            p.boom = bp;
+        }, params);
+    }
+};
+
+// Metric type enumeration for type dispatch
+enum class MetricType {
+    Sector,         // angular_causticness, tip_causticness, etc.
+    CVSector,       // cv_causticness
+    Grid,           // spatial_concentration
+    Fold,           // fold_causticness
+    Trajectory,     // trajectory_smoothness
+    Curvature,      // curvature
+    TrueFolds,      // true_folds
+    LocalCoherence, // local_coherence
+    None            // variance, spread_ratio, etc. (no configurable params)
+};
+
+// Get the metric type for a given metric name
+inline MetricType getMetricType(std::string const& name) {
+    if (name == "angular_causticness" || name == "tip_causticness" ||
+        name == "organization_causticness" || name == "r1_concentration" ||
+        name == "r2_concentration" || name == "joint_concentration") {
+        return MetricType::Sector;
+    } else if (name == "cv_causticness") {
+        return MetricType::CVSector;
+    } else if (name == "spatial_concentration") {
+        return MetricType::Grid;
+    } else if (name == "fold_causticness") {
+        return MetricType::Fold;
+    } else if (name == "trajectory_smoothness") {
+        return MetricType::Trajectory;
+    } else if (name == "curvature") {
+        return MetricType::Curvature;
+    } else if (name == "true_folds") {
+        return MetricType::TrueFolds;
+    } else if (name == "local_coherence") {
+        return MetricType::LocalCoherence;
+    }
+    return MetricType::None;
+}
+
+// Create default MetricConfig for a given metric name
+inline MetricConfig createDefaultMetricConfig(std::string const& name) {
+    MetricConfig config;
+    config.name = name;
+    config.params = SectorMetricParams{};  // Default
+
+    switch (getMetricType(name)) {
+    case MetricType::Sector:
+        config.params = SectorMetricParams{};
+        break;
+    case MetricType::CVSector:
+        config.params = CVSectorMetricParams{};
+        break;
+    case MetricType::Grid:
+        config.params = GridMetricParams{};
+        break;
+    case MetricType::Fold:
+        config.params = FoldMetricParams{};
+        break;
+    case MetricType::Trajectory:
+        config.params = TrajectoryMetricParams{};
+        break;
+    case MetricType::Curvature:
+        config.params = CurvatureMetricParams{};
+        break;
+    case MetricType::TrueFolds:
+        config.params = TrueFoldsMetricParams{};
+        break;
+    case MetricType::LocalCoherence:
+        config.params = LocalCoherenceMetricParams{};
+        break;
+    case MetricType::None:
+        // Use SectorMetricParams as a placeholder for unparameterized metrics
+        config.params = SectorMetricParams{};
+        break;
+    }
+
+    // Set the metric_name in boom params
+    config.setBoomParams([&name]() {
+        BoomDetectionParams bp;
+        bp.metric_name = name;
+        return bp;
+    }());
+
+    return config;
+}
 
 // Thresholds for detecting events from variance data
 struct DetectionParams {
@@ -225,11 +387,42 @@ struct Config {
     RenderParams render;
     PostProcessParams post_process;
     ColorParams color;
-    MetricParams metrics;
-    BoomDetectionParams boom;
+
+    // Per-metric configuration (replaces old MetricParams and BoomDetectionParams)
+    std::unordered_map<std::string, MetricConfig> metric_configs;
+
+    // Which metric to use for boom detection
+    std::string boom_metric = "angular_causticness";
+
     DetectionParams detection;
     OutputParams output;
     AnalysisParams analysis;
+
+    // Get config for a specific metric (returns nullptr if not configured)
+    MetricConfig const* getMetricConfig(std::string const& name) const {
+        auto it = metric_configs.find(name);
+        return it != metric_configs.end() ? &it->second : nullptr;
+    }
+
+    // Get or create config for a metric (creates with defaults if not exists)
+    MetricConfig& getOrCreateMetricConfig(std::string const& name) {
+        auto it = metric_configs.find(name);
+        if (it == metric_configs.end()) {
+            metric_configs[name] = createDefaultMetricConfig(name);
+            return metric_configs[name];
+        }
+        return it->second;
+    }
+
+    // Get boom detection params for the active boom metric
+    BoomDetectionParams getBoomParams() const {
+        if (auto const* mc = getMetricConfig(boom_metric)) {
+            return mc->getBoomParams();
+        }
+        BoomDetectionParams defaults;
+        defaults.metric_name = boom_metric;
+        return defaults;
+    }
 
     // Load from TOML file
     static Config load(std::string const& path);

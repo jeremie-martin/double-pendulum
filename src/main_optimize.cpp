@@ -55,7 +55,7 @@ struct Annotation {
 
 // Parameter set being tested
 struct ParameterSet {
-    MetricParams metrics;
+    ::MetricConfig metric_config;  // Per-metric config (using global MetricConfig, not local one)
     BoomDetectionParams boom;
     int effective_sectors = 0; // Computed for actual N
 
@@ -102,9 +102,6 @@ struct ParameterSet {
         oss << describeShort();
         if (effective_sectors > 0) {
             oss << " [eff_sec=" << effective_sectors << "]";
-        } else {
-            oss << " [sec=" << metrics.min_sectors << "-" << metrics.max_sectors
-                << " tgt=" << metrics.target_per_sector << "]";
         }
         return oss.str();
     }
@@ -215,8 +212,9 @@ struct ComputedMetrics {
     metrics::MetricsCollector collector;
 };
 
-// Phase 1: Compute all metrics for a simulation (expensive, done once per MetricParams)
-void computeMetrics(LoadedSimulation const& sim, MetricParams const& metric_params,
+// Phase 1: Compute all metrics for a simulation (expensive, done once per metric config)
+void computeMetrics(LoadedSimulation const& sim,
+                    std::unordered_map<std::string, ::MetricConfig> const& metric_configs,
                     ComputedMetrics& out) {
     auto const& header = sim.reader.header();
     int frame_count = header.frame_count;
@@ -225,8 +223,8 @@ void computeMetrics(LoadedSimulation const& sim, MetricParams const& metric_para
     out.frame_duration = sim.frame_duration;
     out.boom_frame_truth = sim.boom_frame_truth;
 
-    // Create metrics collector with our parameters
-    out.collector.setMetricParams(metric_params);
+    // Create metrics collector with our per-metric parameters
+    out.collector.setAllMetricConfigs(metric_configs);
     out.collector.registerStandardMetrics();
 
     // Process all frames using zero-copy packed state access
@@ -246,14 +244,14 @@ metrics::BoomDetection evaluateBoomDetection(ComputedMetrics const& computed,
     return metrics::findBoomFrame(computed.collector, computed.frame_duration, boom_params);
 }
 
-// Compute effective sector count for a given pendulum count and params
-int computeEffectiveSectors(int pendulum_count, MetricParams const& params) {
+// Compute effective sector count for sector-based metrics
+int computeEffectiveSectors(int pendulum_count, SectorMetricParams const& params) {
     return std::max(params.min_sectors,
                     std::min(params.max_sectors, pendulum_count / params.target_per_sector));
 }
 
 // Compute effective grid size for spatial metrics
-int computeEffectiveGrid(int pendulum_count, MetricParams const& params) {
+int computeEffectiveGrid(int pendulum_count, GridMetricParams const& params) {
     return std::max(
         params.min_grid,
         std::min(params.max_grid, static_cast<int>(std::sqrt(static_cast<double>(pendulum_count) /
@@ -266,10 +264,10 @@ int computeEffectiveGrid(int pendulum_count, MetricParams const& params) {
 // those parameters independently for each metric type.
 // ============================================================================
 
-// A parameterized metric: metric name + its specific parameter values
+// A parameterized metric: metric name + its specific parameter values (using global MetricConfig)
 struct ParameterizedMetric {
     std::string metric_name;
-    MetricParams params;
+    ::MetricConfig config;  // Uses the global MetricConfig type
 
     // Human-readable description showing only relevant params
     std::string describe(int N = 0) const {
@@ -286,35 +284,37 @@ struct ParameterizedMetric {
         }
         oss << short_name;
 
-        // Show relevant params based on metric type
-        if (metric_name == "angular_causticness" || metric_name == "tip_causticness" ||
-            metric_name == "organization_causticness" || metric_name == "r1_concentration" ||
-            metric_name == "r2_concentration" || metric_name == "joint_concentration") {
-            int eff = N > 0 ? computeEffectiveSectors(N, params) : params.max_sectors;
-            oss << " sec=" << eff;
-        } else if (metric_name == "cv_causticness") {
-            int eff = N > 0 ? computeEffectiveSectors(N, params) : params.max_sectors;
-            oss << " sec=" << eff << " cvn=" << std::fixed << std::setprecision(2)
-                << params.cv_normalization;
-        } else if (metric_name == "spatial_concentration") {
-            int eff = N > 0 ? computeEffectiveGrid(N, params) : params.max_grid;
-            oss << " grid=" << eff;
-        } else if (metric_name == "fold_causticness") {
-            oss << " rad=" << std::fixed << std::setprecision(1) << params.max_radius
-                << " cvn=" << std::setprecision(2) << params.cv_normalization;
-        } else if (metric_name == "trajectory_smoothness") {
-            oss << " rad=" << std::fixed << std::setprecision(1) << params.max_radius
-                << " spr=" << std::setprecision(2) << params.min_spread_threshold;
-        } else if (metric_name == "curvature") {
-            oss << " rad=" << std::fixed << std::setprecision(1) << params.max_radius
-                << " lrn=" << std::setprecision(1) << params.log_ratio_normalization;
-        } else if (metric_name == "true_folds") {
-            oss << " gini=" << std::fixed << std::setprecision(2) << params.gini_chaos_baseline
-                << "/" << params.gini_baseline_divisor;
-        } else if (metric_name == "local_coherence") {
-            oss << " log=" << std::fixed << std::setprecision(1) << params.log_inverse_baseline
-                << "/" << params.log_inverse_divisor;
-        }
+        // Show relevant params based on metric type using std::visit
+        std::visit([&](auto const& p) {
+            using T = std::decay_t<decltype(p)>;
+            if constexpr (std::is_same_v<T, SectorMetricParams>) {
+                int eff = N > 0 ? computeEffectiveSectors(N, p) : p.max_sectors;
+                oss << " sec=" << eff;
+            } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
+                SectorMetricParams sp{p.min_sectors, p.max_sectors, p.target_per_sector, {}};
+                int eff = N > 0 ? computeEffectiveSectors(N, sp) : p.max_sectors;
+                oss << " sec=" << eff << " cvn=" << std::fixed << std::setprecision(2)
+                    << p.cv_normalization;
+            } else if constexpr (std::is_same_v<T, GridMetricParams>) {
+                int eff = N > 0 ? computeEffectiveGrid(N, p) : p.max_grid;
+                oss << " grid=" << eff;
+            } else if constexpr (std::is_same_v<T, FoldMetricParams>) {
+                oss << " rad=" << std::fixed << std::setprecision(1) << p.max_radius
+                    << " cvn=" << std::setprecision(2) << p.cv_normalization;
+            } else if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
+                oss << " rad=" << std::fixed << std::setprecision(1) << p.max_radius
+                    << " spr=" << std::setprecision(2) << p.min_spread_threshold;
+            } else if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
+                oss << " rad=" << std::fixed << std::setprecision(1) << p.max_radius
+                    << " lrn=" << std::setprecision(1) << p.log_ratio_normalization;
+            } else if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
+                oss << " gini=" << std::fixed << std::setprecision(2) << p.gini_chaos_baseline
+                    << "/" << p.gini_baseline_divisor;
+            } else if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
+                oss << " log=" << std::fixed << std::setprecision(1) << p.log_inverse_baseline
+                    << "/" << p.log_inverse_divisor;
+            }
+        }, config.params);
         return oss.str();
     }
 
@@ -323,87 +323,121 @@ struct ParameterizedMetric {
         std::ostringstream oss;
         oss << metric_name;
 
-        if (metric_name == "angular_causticness" || metric_name == "tip_causticness" ||
-            metric_name == "organization_causticness" || metric_name == "r1_concentration" ||
-            metric_name == "r2_concentration" || metric_name == "joint_concentration") {
-            oss << "_sec" << computeEffectiveSectors(N, params);
-        } else if (metric_name == "cv_causticness") {
-            oss << "_sec" << computeEffectiveSectors(N, params) << "_cvn"
-                << static_cast<int>(params.cv_normalization * 100);
-        } else if (metric_name == "spatial_concentration") {
-            oss << "_grid" << computeEffectiveGrid(N, params);
-        } else if (metric_name == "fold_causticness") {
-            oss << "_rad" << static_cast<int>(params.max_radius * 10) << "_cvn"
-                << static_cast<int>(params.cv_normalization * 100);
-        } else if (metric_name == "trajectory_smoothness") {
-            oss << "_rad" << static_cast<int>(params.max_radius * 10) << "_spr"
-                << static_cast<int>(params.min_spread_threshold * 1000);
-        } else if (metric_name == "curvature") {
-            oss << "_rad" << static_cast<int>(params.max_radius * 10) << "_spr"
-                << static_cast<int>(params.min_spread_threshold * 1000) << "_lrn"
-                << static_cast<int>(params.log_ratio_normalization * 10);
-        } else if (metric_name == "true_folds") {
-            oss << "_rad" << static_cast<int>(params.max_radius * 10) << "_spr"
-                << static_cast<int>(params.min_spread_threshold * 1000) << "_gb"
-                << static_cast<int>(params.gini_chaos_baseline * 100) << "_gd"
-                << static_cast<int>(params.gini_baseline_divisor * 100);
-        } else if (metric_name == "local_coherence") {
-            oss << "_rad" << static_cast<int>(params.max_radius * 10) << "_spr"
-                << static_cast<int>(params.min_spread_threshold * 1000) << "_lb"
-                << static_cast<int>(params.log_inverse_baseline * 10) << "_ld"
-                << static_cast<int>(params.log_inverse_divisor * 10);
-        }
+        std::visit([&](auto const& p) {
+            using T = std::decay_t<decltype(p)>;
+            if constexpr (std::is_same_v<T, SectorMetricParams>) {
+                oss << "_sec" << computeEffectiveSectors(N, p);
+            } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
+                SectorMetricParams sp{p.min_sectors, p.max_sectors, p.target_per_sector, {}};
+                oss << "_sec" << computeEffectiveSectors(N, sp) << "_cvn"
+                    << static_cast<int>(p.cv_normalization * 100);
+            } else if constexpr (std::is_same_v<T, GridMetricParams>) {
+                oss << "_grid" << computeEffectiveGrid(N, p);
+            } else if constexpr (std::is_same_v<T, FoldMetricParams>) {
+                oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_cvn"
+                    << static_cast<int>(p.cv_normalization * 100);
+            } else if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
+                oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_spr"
+                    << static_cast<int>(p.min_spread_threshold * 1000);
+            } else if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
+                oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_spr"
+                    << static_cast<int>(p.min_spread_threshold * 1000) << "_lrn"
+                    << static_cast<int>(p.log_ratio_normalization * 10);
+            } else if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
+                oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_spr"
+                    << static_cast<int>(p.min_spread_threshold * 1000) << "_gb"
+                    << static_cast<int>(p.gini_chaos_baseline * 100) << "_gd"
+                    << static_cast<int>(p.gini_baseline_divisor * 100);
+            } else if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
+                oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_spr"
+                    << static_cast<int>(p.min_spread_threshold * 1000) << "_lb"
+                    << static_cast<int>(p.log_inverse_baseline * 10) << "_ld"
+                    << static_cast<int>(p.log_inverse_divisor * 10);
+            }
+        }, config.params);
         return oss.str();
     }
 };
 
-// Unique key for MetricParams (for grouping computations)
-std::string metricParamsKey(MetricParams const& p, int N) {
+// Helper to create SectorMetricParams with effective sector count
+SectorMetricParams makeSectorParams(int eff_sec, int N) {
+    SectorMetricParams p;
+    p.max_sectors = eff_sec;
+    p.min_sectors = std::min(8, eff_sec);
+    p.target_per_sector = std::max(1, N / (eff_sec * 2));
+    return p;
+}
+
+// Helper to create CVSectorMetricParams with effective sector count and cv_normalization
+CVSectorMetricParams makeCVSectorParams(int eff_sec, double cv_norm, int N) {
+    CVSectorMetricParams p;
+    p.max_sectors = eff_sec;
+    p.min_sectors = std::min(8, eff_sec);
+    p.target_per_sector = std::max(1, N / (eff_sec * 2));
+    p.cv_normalization = cv_norm;
+    return p;
+}
+
+// Helper to create GridMetricParams with effective grid size
+GridMetricParams makeGridParams(int eff_grid, int N) {
+    GridMetricParams p;
+    p.max_grid = eff_grid;
+    p.min_grid = std::min(4, eff_grid);
+    p.target_per_cell = std::max(1, N / (eff_grid * eff_grid * 2));
+    return p;
+}
+
+// Helper to create a ::MetricConfig with the appropriate variant type
+::MetricConfig makeMetricConfig(std::string const& name, MetricParamsVariant const& params) {
+    ::MetricConfig config;
+    config.name = name;
+    config.params = params;
+    return config;
+}
+
+// Generate unique key for a metric config (for deduplication and grouping)
+std::string metricConfigKey(std::string const& metric_name, ::MetricConfig const& config, int N) {
     std::ostringstream oss;
-    oss << "sec" << computeEffectiveSectors(N, p) << "_grid" << computeEffectiveGrid(N, p) << "_rad"
-        << static_cast<int>(p.max_radius * 10) << "_cvn"
-        << static_cast<int>(p.cv_normalization * 100) << "_lrn"
-        << static_cast<int>(p.log_ratio_normalization * 10) << "_spr"
-        << static_cast<int>(p.min_spread_threshold * 1000) << "_gb"
-        << static_cast<int>(p.gini_chaos_baseline * 100) << "_gd"
-        << static_cast<int>(p.gini_baseline_divisor * 100) << "_lb"
-        << static_cast<int>(p.log_inverse_baseline * 10) << "_ld"
-        << static_cast<int>(p.log_inverse_divisor * 10);
+    oss << metric_name;
+
+    std::visit([&](auto const& p) {
+        using T = std::decay_t<decltype(p)>;
+        if constexpr (std::is_same_v<T, SectorMetricParams>) {
+            oss << "_sec" << computeEffectiveSectors(N, p);
+        } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
+            SectorMetricParams sp{p.min_sectors, p.max_sectors, p.target_per_sector, {}};
+            oss << "_sec" << computeEffectiveSectors(N, sp) << "_cvn"
+                << static_cast<int>(p.cv_normalization * 100);
+        } else if constexpr (std::is_same_v<T, GridMetricParams>) {
+            oss << "_grid" << computeEffectiveGrid(N, p);
+        } else if constexpr (std::is_same_v<T, FoldMetricParams>) {
+            oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_cvn"
+                << static_cast<int>(p.cv_normalization * 100);
+        } else if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
+            oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_spr"
+                << static_cast<int>(p.min_spread_threshold * 1000);
+        } else if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
+            oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_spr"
+                << static_cast<int>(p.min_spread_threshold * 1000) << "_lrn"
+                << static_cast<int>(p.log_ratio_normalization * 10);
+        } else if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
+            oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_spr"
+                << static_cast<int>(p.min_spread_threshold * 1000) << "_gb"
+                << static_cast<int>(p.gini_chaos_baseline * 100) << "_gd"
+                << static_cast<int>(p.gini_baseline_divisor * 100);
+        } else if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
+            oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_spr"
+                << static_cast<int>(p.min_spread_threshold * 1000) << "_lb"
+                << static_cast<int>(p.log_inverse_baseline * 10) << "_ld"
+                << static_cast<int>(p.log_inverse_divisor * 10);
+        }
+    }, config.params);
     return oss.str();
-}
-
-// Legacy metric config for backward compat
-struct MetricConfig {
-    MetricParams params;
-    int effective_sectors = 0;
-
-    bool operator==(MetricConfig const& other) const {
-        return params.min_sectors == other.params.min_sectors &&
-               params.max_sectors == other.params.max_sectors &&
-               params.target_per_sector == other.params.target_per_sector;
-    }
-};
-
-// Helper to set effective sectors in MetricParams
-MetricParams withEffectiveSectors(MetricParams base, int eff_sec, int N) {
-    base.max_sectors = eff_sec;
-    base.min_sectors = std::min(8, eff_sec);
-    base.target_per_sector = std::max(1, N / (eff_sec * 2));
-    return base;
-}
-
-// Helper to set effective grid size in MetricParams
-MetricParams withEffectiveGrid(MetricParams base, int eff_grid, int N) {
-    base.max_grid = eff_grid;
-    base.min_grid = std::min(4, eff_grid);
-    base.target_per_cell = std::max(1, N / (eff_grid * eff_grid * 2));
-    return base;
 }
 
 // Generate all parameterized metrics for comprehensive optimization
 std::vector<ParameterizedMetric> generateParameterizedMetrics(int N) {
     std::vector<ParameterizedMetric> result;
-    MetricParams defaults;
 
     // Parameter value ranges for each type
     std::vector<int> sector_values = {8, 16, 24, 32, 48, 64, 80, 96};
@@ -419,98 +453,104 @@ std::vector<ParameterizedMetric> generateParameterizedMetrics(int N) {
 
     // ================================================================
     // SECTOR-BASED METRICS (vary effective_sectors only)
+    // These metrics use SectorMetricParams
     // ================================================================
+    std::vector<std::string> sector_metrics = {
+        "angular_causticness", "tip_causticness", "organization_causticness",
+        "r1_concentration", "r2_concentration", "joint_concentration"
+    };
     for (int eff_sec : sector_values) {
         if (eff_sec > N / 2)
             continue;
-        MetricParams params = withEffectiveSectors(defaults, eff_sec, N);
-
-        result.push_back({"angular_causticness", params});
-        result.push_back({"tip_causticness", params});
-        result.push_back({"organization_causticness", params});
-        result.push_back({"r1_concentration", params});
-        result.push_back({"r2_concentration", params});
-        result.push_back({"joint_concentration", params});
+        SectorMetricParams params = makeSectorParams(eff_sec, N);
+        for (auto const& metric_name : sector_metrics) {
+            result.push_back({metric_name, makeMetricConfig(metric_name, params)});
+        }
     }
 
     // ================================================================
-    // VARIANCE (no parameterization needed - just use defaults)
+    // VARIANCE (no parameterization needed - use default SectorMetricParams)
     // ================================================================
-    result.push_back({"variance", defaults});
+    result.push_back({"variance", makeMetricConfig("variance", SectorMetricParams{})});
 
     // ================================================================
     // CV_CAUSTICNESS (vary effective_sectors × cv_normalization)
+    // Uses CVSectorMetricParams
     // ================================================================
     for (int eff_sec : sector_values) {
         if (eff_sec > N / 2)
             continue;
         for (double cv_norm : cv_norm_values) {
-            MetricParams params = withEffectiveSectors(defaults, eff_sec, N);
-            params.cv_normalization = cv_norm;
-            result.push_back({"cv_causticness", params});
+            CVSectorMetricParams params = makeCVSectorParams(eff_sec, cv_norm, N);
+            result.push_back({"cv_causticness", makeMetricConfig("cv_causticness", params)});
         }
     }
 
     // ================================================================
     // SPATIAL_CONCENTRATION (vary effective_grid)
+    // Uses GridMetricParams
     // ================================================================
     for (int eff_grid : grid_values) {
-        MetricParams params = withEffectiveGrid(defaults, eff_grid, N);
-        result.push_back({"spatial_concentration", params});
+        GridMetricParams params = makeGridParams(eff_grid, N);
+        result.push_back({"spatial_concentration", makeMetricConfig("spatial_concentration", params)});
     }
 
     // ================================================================
     // FOLD_CAUSTICNESS (vary max_radius × cv_normalization)
+    // Uses FoldMetricParams
     // ================================================================
     for (double max_rad : max_radius_values) {
         for (double cv_norm : cv_norm_values) {
-            MetricParams params = defaults;
+            FoldMetricParams params;
             params.max_radius = max_rad;
             params.cv_normalization = cv_norm;
-            result.push_back({"fold_causticness", params});
+            result.push_back({"fold_causticness", makeMetricConfig("fold_causticness", params)});
         }
     }
 
     // ================================================================
     // TRAJECTORY_SMOOTHNESS (vary max_radius × min_spread_threshold)
+    // Uses TrajectoryMetricParams
     // ================================================================
     for (double max_rad : max_radius_values) {
         for (double min_spr : min_spread_values) {
-            MetricParams params = defaults;
+            TrajectoryMetricParams params;
             params.max_radius = max_rad;
             params.min_spread_threshold = min_spr;
-            result.push_back({"trajectory_smoothness", params});
+            result.push_back({"trajectory_smoothness", makeMetricConfig("trajectory_smoothness", params)});
         }
     }
 
     // ================================================================
     // CURVATURE (vary max_radius × min_spread × log_ratio_normalization)
+    // Uses CurvatureMetricParams
     // ================================================================
     for (double max_rad : max_radius_values) {
         for (double min_spr : min_spread_values) {
             for (double log_ratio : log_ratio_norm_values) {
-                MetricParams params = defaults;
+                CurvatureMetricParams params;
                 params.max_radius = max_rad;
                 params.min_spread_threshold = min_spr;
                 params.log_ratio_normalization = log_ratio;
-                result.push_back({"curvature", params});
+                result.push_back({"curvature", makeMetricConfig("curvature", params)});
             }
         }
     }
 
     // ================================================================
     // TRUE_FOLDS (vary max_radius × min_spread × gini params)
+    // Uses TrueFoldsMetricParams
     // ================================================================
     for (double max_rad : max_radius_values) {
         for (double min_spr : min_spread_values) {
             for (double gini_base : gini_baseline_values) {
                 for (double gini_div : gini_divisor_values) {
-                    MetricParams params = defaults;
+                    TrueFoldsMetricParams params;
                     params.max_radius = max_rad;
                     params.min_spread_threshold = min_spr;
                     params.gini_chaos_baseline = gini_base;
                     params.gini_baseline_divisor = gini_div;
-                    result.push_back({"true_folds", params});
+                    result.push_back({"true_folds", makeMetricConfig("true_folds", params)});
                 }
             }
         }
@@ -518,17 +558,18 @@ std::vector<ParameterizedMetric> generateParameterizedMetrics(int N) {
 
     // ================================================================
     // LOCAL_COHERENCE (vary max_radius × min_spread × log_inverse params)
+    // Uses LocalCoherenceMetricParams
     // ================================================================
     for (double max_rad : max_radius_values) {
         for (double min_spr : min_spread_values) {
             for (double log_base : log_inv_baseline_values) {
                 for (double log_div : log_inv_divisor_values) {
-                    MetricParams params = defaults;
+                    LocalCoherenceMetricParams params;
                     params.max_radius = max_rad;
                     params.min_spread_threshold = min_spr;
                     params.log_inverse_baseline = log_base;
                     params.log_inverse_divisor = log_div;
-                    result.push_back({"local_coherence", params});
+                    result.push_back({"local_coherence", makeMetricConfig("local_coherence", params)});
                 }
             }
         }
@@ -554,24 +595,43 @@ deduplicateParameterizedMetrics(std::vector<ParameterizedMetric> const& metrics,
     return result;
 }
 
-// Extract unique MetricParams from parameterized metrics (for Phase 1 computation grouping)
-std::vector<MetricParams> extractUniqueMetricParams(std::vector<ParameterizedMetric> const& metrics,
-                                                    int N) {
-    std::map<std::string, MetricParams> unique;
-    for (auto const& pm : metrics) {
-        std::string k = metricParamsKey(pm.params, N);
-        if (unique.find(k) == unique.end()) {
-            unique[k] = pm.params;
-        }
+// Generate unique key for a metric config map (for Phase 1 grouping)
+std::string metricConfigMapKey(std::unordered_map<std::string, ::MetricConfig> const& configs, int N) {
+    std::ostringstream oss;
+    // Sort keys for deterministic ordering
+    std::vector<std::string> keys;
+    for (auto const& [name, config] : configs) {
+        keys.push_back(name);
     }
-    std::vector<MetricParams> result;
-    for (auto const& [k, p] : unique) {
-        result.push_back(p);
+    std::sort(keys.begin(), keys.end());
+
+    for (auto const& name : keys) {
+        auto const& config = configs.at(name);
+        oss << metricConfigKey(name, config, N) << ";";
+    }
+    return oss.str();
+}
+
+// Extract unique metric config maps from parameterized metrics (for Phase 1 computation grouping)
+// Returns a map from unique key -> metric config map
+std::map<std::string, std::unordered_map<std::string, ::MetricConfig>>
+extractUniqueMetricConfigMaps(std::vector<ParameterizedMetric> const& metrics, int N) {
+    std::map<std::string, std::unordered_map<std::string, ::MetricConfig>> result;
+
+    for (auto const& pm : metrics) {
+        // Create a metric config map with just this metric's config
+        std::unordered_map<std::string, ::MetricConfig> config_map;
+        config_map[pm.metric_name] = pm.config;
+
+        std::string key = metricConfigKey(pm.metric_name, pm.config, N);
+        if (result.find(key) == result.end()) {
+            result[key] = config_map;
+        }
     }
     return result;
 }
 
-// Save best parameters to TOML file
+// Save best parameters to TOML file (using new per-metric format)
 void saveBestParams(std::string const& path, EvaluationResult const& best) {
     std::ofstream file(path);
     if (!file.is_open()) {
@@ -584,30 +644,51 @@ void saveBestParams(std::string const& path, EvaluationResult const& best) {
     file << "# Peak MAE: " << std::fixed << std::setprecision(2) << best.peak_mae << " frames\n";
     file << "# Samples evaluated: " << best.samples_evaluated << "\n\n";
 
-    file << "[metrics]\n";
-    // Sector-based algorithm parameters
-    file << "min_sectors = " << best.params.metrics.min_sectors << "\n";
-    file << "max_sectors = " << best.params.metrics.max_sectors << "\n";
-    file << "target_per_sector = " << best.params.metrics.target_per_sector << "\n";
-    // Grid-based spatial metrics
-    file << "min_grid = " << best.params.metrics.min_grid << "\n";
-    file << "max_grid = " << best.params.metrics.max_grid << "\n";
-    file << "target_per_cell = " << best.params.metrics.target_per_cell << "\n";
-    // Normalization thresholds
-    file << "max_radius = " << std::fixed << std::setprecision(2) << best.params.metrics.max_radius
-         << "\n";
-    file << "cv_normalization = " << best.params.metrics.cv_normalization << "\n";
-    file << "log_ratio_normalization = " << best.params.metrics.log_ratio_normalization << "\n";
-    file << "min_spread_threshold = " << best.params.metrics.min_spread_threshold << "\n";
-    // Gini baseline adjustment
-    file << "gini_chaos_baseline = " << best.params.metrics.gini_chaos_baseline << "\n";
-    file << "gini_baseline_divisor = " << best.params.metrics.gini_baseline_divisor << "\n";
-    // Local coherence parameters
-    file << "log_inverse_baseline = " << best.params.metrics.log_inverse_baseline << "\n";
-    file << "log_inverse_divisor = " << best.params.metrics.log_inverse_divisor << "\n\n";
+    // Output the metric-specific configuration
+    std::string const& metric_name = best.params.boom.metric_name;
+    file << "[metrics." << metric_name << "]\n";
 
-    file << "[boom_detection]\n";
-    file << "metric_name = \"" << best.params.boom.metric_name << "\"\n";
+    // Output parameters based on variant type
+    std::visit([&](auto const& p) {
+        using T = std::decay_t<decltype(p)>;
+        if constexpr (std::is_same_v<T, SectorMetricParams>) {
+            file << "min_sectors = " << p.min_sectors << "\n";
+            file << "max_sectors = " << p.max_sectors << "\n";
+            file << "target_per_sector = " << p.target_per_sector << "\n";
+        } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
+            file << "min_sectors = " << p.min_sectors << "\n";
+            file << "max_sectors = " << p.max_sectors << "\n";
+            file << "target_per_sector = " << p.target_per_sector << "\n";
+            file << "cv_normalization = " << std::fixed << std::setprecision(2) << p.cv_normalization << "\n";
+        } else if constexpr (std::is_same_v<T, GridMetricParams>) {
+            file << "min_grid = " << p.min_grid << "\n";
+            file << "max_grid = " << p.max_grid << "\n";
+            file << "target_per_cell = " << p.target_per_cell << "\n";
+        } else if constexpr (std::is_same_v<T, FoldMetricParams>) {
+            file << "max_radius = " << std::fixed << std::setprecision(2) << p.max_radius << "\n";
+            file << "cv_normalization = " << std::fixed << std::setprecision(2) << p.cv_normalization << "\n";
+        } else if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
+            file << "max_radius = " << std::fixed << std::setprecision(2) << p.max_radius << "\n";
+            file << "min_spread_threshold = " << std::fixed << std::setprecision(3) << p.min_spread_threshold << "\n";
+        } else if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
+            file << "max_radius = " << std::fixed << std::setprecision(2) << p.max_radius << "\n";
+            file << "min_spread_threshold = " << std::fixed << std::setprecision(3) << p.min_spread_threshold << "\n";
+            file << "log_ratio_normalization = " << std::fixed << std::setprecision(2) << p.log_ratio_normalization << "\n";
+        } else if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
+            file << "max_radius = " << std::fixed << std::setprecision(2) << p.max_radius << "\n";
+            file << "min_spread_threshold = " << std::fixed << std::setprecision(3) << p.min_spread_threshold << "\n";
+            file << "gini_chaos_baseline = " << std::fixed << std::setprecision(2) << p.gini_chaos_baseline << "\n";
+            file << "gini_baseline_divisor = " << std::fixed << std::setprecision(2) << p.gini_baseline_divisor << "\n";
+        } else if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
+            file << "max_radius = " << std::fixed << std::setprecision(2) << p.max_radius << "\n";
+            file << "min_spread_threshold = " << std::fixed << std::setprecision(3) << p.min_spread_threshold << "\n";
+            file << "log_inverse_baseline = " << std::fixed << std::setprecision(2) << p.log_inverse_baseline << "\n";
+            file << "log_inverse_divisor = " << std::fixed << std::setprecision(2) << p.log_inverse_divisor << "\n";
+        }
+    }, best.params.metric_config.params);
+
+    // Output boom detection parameters embedded in the metric section
+    file << "\n[metrics." << metric_name << ".boom]\n";
     switch (best.params.boom.method) {
     case BoomDetectionMethod::MaxCausticness:
         file << "method = \"max_causticness\"\n";
@@ -625,7 +706,6 @@ void saveBestParams(std::string const& path, EvaluationResult const& best) {
         file << "method = \"second_derivative_peak\"\n";
         break;
     }
-    // Always save all boom parameters (offset applies to all methods now)
     file << "offset_seconds = " << std::fixed << std::setprecision(2)
          << best.params.boom.offset_seconds << "\n";
     file << "peak_percent_threshold = " << std::fixed << std::setprecision(2)
@@ -636,6 +716,10 @@ void saveBestParams(std::string const& path, EvaluationResult const& best) {
     file << "crossing_threshold = " << std::fixed << std::setprecision(2)
          << best.params.boom.crossing_threshold << "\n";
     file << "crossing_confirmation = " << best.params.boom.crossing_confirmation << "\n";
+
+    // Output global boom detection settings
+    file << "\n[boom_detection]\n";
+    file << "active_metric = \"" << metric_name << "\"\n";
 
     std::cout << "Best parameters saved to: " << path << "\n";
 }
@@ -764,9 +848,9 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "\n";
 
-    // Extract unique MetricParams for Phase 1 computation
-    auto unique_params = extractUniqueMetricParams(param_metrics, N);
-    std::cout << "Unique MetricParams configurations: " << unique_params.size() << "\n\n";
+    // Extract unique metric config maps for Phase 1 computation
+    auto unique_config_maps = extractUniqueMetricConfigMaps(param_metrics, N);
+    std::cout << "Unique metric configurations: " << unique_config_maps.size() << "\n\n";
 
     // Generate boom method configurations (used in Phase 2)
     std::vector<double> peak_pct_vals;
@@ -808,7 +892,7 @@ int main(int argc, char* argv[]) {
     size_t total_phase2_evals = param_metrics.size() * num_boom_methods;
 
     std::cout << "=== Parameterized Metrics Optimization ===\n";
-    std::cout << "Phase 1: " << unique_params.size() << " unique param configs × "
+    std::cout << "Phase 1: " << unique_config_maps.size() << " unique metric configs × "
               << simulations.size() << " simulations (expensive)\n";
     std::cout << "Phase 2: " << param_metrics.size() << " parameterized metrics × "
               << num_boom_methods << " boom methods = " << total_phase2_evals << " evaluations\n";
@@ -817,32 +901,24 @@ int main(int argc, char* argv[]) {
     auto start_time = std::chrono::steady_clock::now();
 
     // ============================================
-    // PHASE 1: Compute metrics for each unique MetricParams
+    // PHASE 1: Compute metrics for each unique metric config
     // ============================================
-    size_t total_phase1_work = unique_params.size() * simulations.size();
+    size_t total_phase1_work = unique_config_maps.size() * simulations.size();
     std::cout << "Phase 1: Computing metrics (" << total_phase1_work << " work items)...\n";
 
-    // Create index from MetricParams key to computed metrics
-    // computed_by_params[params_key][sim_idx] = ComputedMetrics
-    std::map<std::string, std::vector<ComputedMetrics>> computed_by_params;
-    for (auto const& params : unique_params) {
-        std::string key = metricParamsKey(params, N);
-        computed_by_params[key].resize(simulations.size());
+    // Create index from config key to computed metrics
+    // computed_by_config[config_key][sim_idx] = ComputedMetrics
+    std::map<std::string, std::vector<ComputedMetrics>> computed_by_config;
+    for (auto const& [key, config_map] : unique_config_maps) {
+        computed_by_config[key].resize(simulations.size());
     }
 
-    // Flatten work items: (params_key, sim_idx)
+    // Flatten work items: (config_key, sim_idx)
     std::vector<std::pair<std::string, size_t>> work_items;
-    for (auto const& params : unique_params) {
-        std::string key = metricParamsKey(params, N);
+    for (auto const& [key, config_map] : unique_config_maps) {
         for (size_t sim = 0; sim < simulations.size(); ++sim) {
-            work_items.push_back({key, sim});
+            work_items.emplace_back(key, sim);
         }
-    }
-
-    // Map from key to params for lookup
-    std::map<std::string, MetricParams> params_by_key;
-    for (auto const& params : unique_params) {
-        params_by_key[metricParamsKey(params, N)] = params;
     }
 
     std::atomic<size_t> work_idx{0};
@@ -881,14 +957,14 @@ int main(int argc, char* argv[]) {
                 }
 
                 auto const& [key, sim] = work_items[idx];
-                auto const& params = params_by_key.at(key);
+                auto const& config_map = unique_config_maps.at(key);
 
                 ComputedMetrics cm;
-                computeMetrics(simulations[sim], params, cm);
+                computeMetrics(simulations[sim], config_map, cm);
 
                 {
                     std::lock_guard<std::mutex> lock(computed_mutex);
-                    computed_by_params[key][sim] = std::move(cm);
+                    computed_by_config[key][sim] = std::move(cm);
                 }
 
                 completed.fetch_add(1);
@@ -946,15 +1022,15 @@ int main(int argc, char* argv[]) {
                 }
 
                 auto const& pm = param_metrics[idx];
-                std::string params_key = metricParamsKey(pm.params, N);
-                auto const& computed_for_params = computed_by_params.at(params_key);
+                std::string config_key = metricConfigKey(pm.metric_name, pm.config, N);
+                auto const& computed_for_config = computed_by_config.at(config_key);
 
                 // Evaluate all boom methods for this parameterized metric
                 auto evaluateBoomMethod = [&](BoomDetectionParams const& boom_params) {
                     std::vector<int> errors;
-                    errors.reserve(computed_for_params.size());
+                    errors.reserve(computed_for_config.size());
 
-                    for (auto const& computed : computed_for_params) {
+                    for (auto const& computed : computed_for_config) {
                         auto boom = evaluateBoomDetection(computed, boom_params);
 
                         if (computed.boom_frame_truth >= 0 && boom.frame >= 0) {
@@ -964,9 +1040,20 @@ int main(int argc, char* argv[]) {
                     }
 
                     EvaluationResult result;
-                    result.params.metrics = pm.params;
+                    result.params.metric_config = pm.config;
                     result.params.boom = boom_params;
-                    result.params.effective_sectors = computeEffectiveSectors(N, pm.params);
+                    // Compute effective sectors if applicable
+                    result.params.effective_sectors = std::visit([&](auto const& p) -> int {
+                        using T = std::decay_t<decltype(p)>;
+                        if constexpr (std::is_same_v<T, SectorMetricParams>) {
+                            return computeEffectiveSectors(N, p);
+                        } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
+                            SectorMetricParams sp{p.min_sectors, p.max_sectors, p.target_per_sector, {}};
+                            return computeEffectiveSectors(N, sp);
+                        } else {
+                            return 0;  // Non-sector metrics
+                        }
+                    }, pm.config.params);
                     result.samples_evaluated = static_cast<int>(errors.size());
                     result.per_sim_errors = errors;
 
@@ -1269,10 +1356,46 @@ int main(int argc, char* argv[]) {
             break;
         }
         std::cout << "  Effective Sectors: " << winner.params.effective_sectors << "\n";
-        std::cout << "  MetricParams:     min_sectors=" << winner.params.metrics.min_sectors
-                  << ", max_sectors=" << winner.params.metrics.max_sectors
-                  << ", target=" << winner.params.metrics.target_per_sector << "\n";
-        std::cout << "\n";
+        // Print metric-specific parameters
+        std::cout << "  Params:           ";
+        std::visit([&](auto const& p) {
+            using T = std::decay_t<decltype(p)>;
+            if constexpr (std::is_same_v<T, SectorMetricParams>) {
+                std::cout << "min_sectors=" << p.min_sectors
+                          << ", max_sectors=" << p.max_sectors
+                          << ", target=" << p.target_per_sector;
+            } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
+                std::cout << "min_sectors=" << p.min_sectors
+                          << ", max_sectors=" << p.max_sectors
+                          << ", target=" << p.target_per_sector
+                          << ", cv_norm=" << p.cv_normalization;
+            } else if constexpr (std::is_same_v<T, GridMetricParams>) {
+                std::cout << "min_grid=" << p.min_grid
+                          << ", max_grid=" << p.max_grid
+                          << ", target=" << p.target_per_cell;
+            } else if constexpr (std::is_same_v<T, FoldMetricParams>) {
+                std::cout << "max_radius=" << p.max_radius
+                          << ", cv_norm=" << p.cv_normalization;
+            } else if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
+                std::cout << "max_radius=" << p.max_radius
+                          << ", min_spread=" << p.min_spread_threshold;
+            } else if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
+                std::cout << "max_radius=" << p.max_radius
+                          << ", min_spread=" << p.min_spread_threshold
+                          << ", log_ratio_norm=" << p.log_ratio_normalization;
+            } else if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
+                std::cout << "max_radius=" << p.max_radius
+                          << ", min_spread=" << p.min_spread_threshold
+                          << ", gini_baseline=" << p.gini_chaos_baseline
+                          << ", gini_divisor=" << p.gini_baseline_divisor;
+            } else if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
+                std::cout << "max_radius=" << p.max_radius
+                          << ", min_spread=" << p.min_spread_threshold
+                          << ", log_baseline=" << p.log_inverse_baseline
+                          << ", log_divisor=" << p.log_inverse_divisor;
+            }
+        }, winner.params.metric_config.params);
+        std::cout << "\n\n";
         std::cout << "  Statistics:\n";
         std::cout << "    Mean Absolute Error:   " << std::fixed << std::setprecision(2)
                   << winner.boom_mae << " frames\n";

@@ -188,39 +188,115 @@ static void loadConfigFromTable(Config& config, toml::table const& tbl) {
         config.color.end = get_or(*color, "end", config.color.end);
     }
 
-    // Metrics parameters
+    // Per-metric configuration (new format: [metrics.metric_name])
     if (auto metrics_tbl = tbl["metrics"].as_table()) {
-        config.metrics.min_sectors = get_or(*metrics_tbl, "min_sectors", config.metrics.min_sectors);
-        config.metrics.max_sectors = get_or(*metrics_tbl, "max_sectors", config.metrics.max_sectors);
-        config.metrics.target_per_sector = get_or(*metrics_tbl, "target_per_sector", config.metrics.target_per_sector);
-        config.metrics.min_grid = get_or(*metrics_tbl, "min_grid", config.metrics.min_grid);
-        config.metrics.max_grid = get_or(*metrics_tbl, "max_grid", config.metrics.max_grid);
-        config.metrics.target_per_cell = get_or(*metrics_tbl, "target_per_cell", config.metrics.target_per_cell);
-        config.metrics.max_radius = get_or(*metrics_tbl, "max_radius", config.metrics.max_radius);
-        config.metrics.cv_normalization = get_or(*metrics_tbl, "cv_normalization", config.metrics.cv_normalization);
-        config.metrics.log_ratio_normalization = get_or(*metrics_tbl, "log_ratio_normalization", config.metrics.log_ratio_normalization);
-        config.metrics.min_spread_threshold = get_or(*metrics_tbl, "min_spread_threshold", config.metrics.min_spread_threshold);
-        config.metrics.gini_chaos_baseline = get_or(*metrics_tbl, "gini_chaos_baseline", config.metrics.gini_chaos_baseline);
-        config.metrics.gini_baseline_divisor = get_or(*metrics_tbl, "gini_baseline_divisor", config.metrics.gini_baseline_divisor);
-        config.metrics.log_inverse_baseline = get_or(*metrics_tbl, "log_inverse_baseline", config.metrics.log_inverse_baseline);
-        config.metrics.log_inverse_divisor = get_or(*metrics_tbl, "log_inverse_divisor", config.metrics.log_inverse_divisor);
+        // Check for deprecated old format (has direct min_sectors, etc.)
+        if (metrics_tbl->contains("min_sectors") || metrics_tbl->contains("max_sectors")) {
+            throw std::runtime_error(
+                "Old [metrics] format deprecated. Use [metrics.metric_name] sections.\n"
+                "Example: [metrics.angular_causticness] with min_sectors, max_sectors, etc.");
+        }
+
+        // Parse each per-metric section
+        for (auto const& [key, value] : *metrics_tbl) {
+            if (auto metric_tbl = value.as_table()) {
+                std::string metric_name(key);
+                MetricConfig mc = createDefaultMetricConfig(metric_name);
+
+                // Parse boom detection subsection if present
+                if (auto boom_sub = metric_tbl->get("boom")) {
+                    if (auto boom_tbl = boom_sub->as_table()) {
+                        BoomDetectionParams bp = mc.getBoomParams();
+                        bp.metric_name = metric_name;  // Ensure metric_name matches
+                        auto method_str = get_string_or(*boom_tbl, "method", "");
+                        if (!method_str.empty()) {
+                            bp.method = parseBoomDetectionMethod(method_str);
+                        }
+                        bp.offset_seconds = get_or(*boom_tbl, "offset_seconds", bp.offset_seconds);
+                        bp.peak_percent_threshold = get_or(*boom_tbl, "peak_percent_threshold", bp.peak_percent_threshold);
+                        bp.min_peak_prominence = get_or(*boom_tbl, "min_peak_prominence", bp.min_peak_prominence);
+                        bp.smoothing_window = get_or(*boom_tbl, "smoothing_window", bp.smoothing_window);
+                        bp.crossing_threshold = get_or(*boom_tbl, "crossing_threshold", bp.crossing_threshold);
+                        bp.crossing_confirmation = get_or(*boom_tbl, "crossing_confirmation", bp.crossing_confirmation);
+                        mc.setBoomParams(bp);
+                    }
+                }
+
+                // Parse metric-specific params based on type
+                MetricType type = getMetricType(metric_name);
+                switch (type) {
+                case MetricType::Sector: {
+                    auto& p = std::get<SectorMetricParams>(mc.params);
+                    p.min_sectors = get_or(*metric_tbl, "min_sectors", p.min_sectors);
+                    p.max_sectors = get_or(*metric_tbl, "max_sectors", p.max_sectors);
+                    p.target_per_sector = get_or(*metric_tbl, "target_per_sector", p.target_per_sector);
+                    break;
+                }
+                case MetricType::CVSector: {
+                    auto& p = std::get<CVSectorMetricParams>(mc.params);
+                    p.min_sectors = get_or(*metric_tbl, "min_sectors", p.min_sectors);
+                    p.max_sectors = get_or(*metric_tbl, "max_sectors", p.max_sectors);
+                    p.target_per_sector = get_or(*metric_tbl, "target_per_sector", p.target_per_sector);
+                    p.cv_normalization = get_or(*metric_tbl, "cv_normalization", p.cv_normalization);
+                    break;
+                }
+                case MetricType::Grid: {
+                    auto& p = std::get<GridMetricParams>(mc.params);
+                    p.min_grid = get_or(*metric_tbl, "min_grid", p.min_grid);
+                    p.max_grid = get_or(*metric_tbl, "max_grid", p.max_grid);
+                    p.target_per_cell = get_or(*metric_tbl, "target_per_cell", p.target_per_cell);
+                    break;
+                }
+                case MetricType::Fold: {
+                    auto& p = std::get<FoldMetricParams>(mc.params);
+                    p.max_radius = get_or(*metric_tbl, "max_radius", p.max_radius);
+                    p.cv_normalization = get_or(*metric_tbl, "cv_normalization", p.cv_normalization);
+                    break;
+                }
+                case MetricType::Trajectory: {
+                    auto& p = std::get<TrajectoryMetricParams>(mc.params);
+                    p.max_radius = get_or(*metric_tbl, "max_radius", p.max_radius);
+                    p.min_spread_threshold = get_or(*metric_tbl, "min_spread_threshold", p.min_spread_threshold);
+                    break;
+                }
+                case MetricType::Curvature: {
+                    auto& p = std::get<CurvatureMetricParams>(mc.params);
+                    p.max_radius = get_or(*metric_tbl, "max_radius", p.max_radius);
+                    p.min_spread_threshold = get_or(*metric_tbl, "min_spread_threshold", p.min_spread_threshold);
+                    p.log_ratio_normalization = get_or(*metric_tbl, "log_ratio_normalization", p.log_ratio_normalization);
+                    break;
+                }
+                case MetricType::TrueFolds: {
+                    auto& p = std::get<TrueFoldsMetricParams>(mc.params);
+                    p.max_radius = get_or(*metric_tbl, "max_radius", p.max_radius);
+                    p.min_spread_threshold = get_or(*metric_tbl, "min_spread_threshold", p.min_spread_threshold);
+                    p.gini_chaos_baseline = get_or(*metric_tbl, "gini_chaos_baseline", p.gini_chaos_baseline);
+                    p.gini_baseline_divisor = get_or(*metric_tbl, "gini_baseline_divisor", p.gini_baseline_divisor);
+                    break;
+                }
+                case MetricType::LocalCoherence: {
+                    auto& p = std::get<LocalCoherenceMetricParams>(mc.params);
+                    p.max_radius = get_or(*metric_tbl, "max_radius", p.max_radius);
+                    p.min_spread_threshold = get_or(*metric_tbl, "min_spread_threshold", p.min_spread_threshold);
+                    p.log_inverse_baseline = get_or(*metric_tbl, "log_inverse_baseline", p.log_inverse_baseline);
+                    p.log_inverse_divisor = get_or(*metric_tbl, "log_inverse_divisor", p.log_inverse_divisor);
+                    break;
+                }
+                case MetricType::None:
+                    // No parameters to parse for parameter-less metrics
+                    break;
+                }
+
+                config.metric_configs[metric_name] = mc;
+            }
+        }
     }
 
-    // Boom detection parameters
+    // Boom detection - which metric to use
     if (auto boom_tbl = tbl["boom_detection"].as_table()) {
-        auto method_str = get_string_or(*boom_tbl, "method", "");
-        if (!method_str.empty()) {
-            config.boom.method = parseBoomDetectionMethod(method_str);
-        }
-        config.boom.offset_seconds = get_or(*boom_tbl, "offset_seconds", config.boom.offset_seconds);
-        config.boom.peak_percent_threshold = get_or(*boom_tbl, "peak_percent_threshold", config.boom.peak_percent_threshold);
-        config.boom.min_peak_prominence = get_or(*boom_tbl, "min_peak_prominence", config.boom.min_peak_prominence);
-        config.boom.smoothing_window = get_or(*boom_tbl, "smoothing_window", config.boom.smoothing_window);
-        config.boom.crossing_threshold = get_or(*boom_tbl, "crossing_threshold", config.boom.crossing_threshold);
-        config.boom.crossing_confirmation = get_or(*boom_tbl, "crossing_confirmation", config.boom.crossing_confirmation);
-        auto metric_name = get_string_or(*boom_tbl, "metric_name", "");
-        if (!metric_name.empty()) {
-            config.boom.metric_name = metric_name;
+        auto active_metric = get_string_or(*boom_tbl, "active_metric", "");
+        if (!active_metric.empty()) {
+            config.boom_metric = active_metric;
         }
     }
 
@@ -534,59 +610,123 @@ bool Config::applyOverride(std::string const& key, std::string const& value) {
                 return false;
             }
         }
-        // Metrics parameters
+        // Per-metric parameters (format: metrics.metric_name.param or metrics.metric_name.boom.param)
         else if (section == "metrics") {
-            if (param == "min_sectors") {
-                metrics.min_sectors = std::stoi(value);
-            } else if (param == "max_sectors") {
-                metrics.max_sectors = std::stoi(value);
-            } else if (param == "target_per_sector") {
-                metrics.target_per_sector = std::stoi(value);
-            } else if (param == "min_grid") {
-                metrics.min_grid = std::stoi(value);
-            } else if (param == "max_grid") {
-                metrics.max_grid = std::stoi(value);
-            } else if (param == "target_per_cell") {
-                metrics.target_per_cell = std::stoi(value);
-            } else if (param == "max_radius") {
-                metrics.max_radius = std::stod(value);
-            } else if (param == "cv_normalization") {
-                metrics.cv_normalization = std::stod(value);
-            } else if (param == "log_ratio_normalization") {
-                metrics.log_ratio_normalization = std::stod(value);
-            } else if (param == "min_spread_threshold") {
-                metrics.min_spread_threshold = std::stod(value);
-            } else if (param == "gini_chaos_baseline") {
-                metrics.gini_chaos_baseline = std::stod(value);
-            } else if (param == "gini_baseline_divisor") {
-                metrics.gini_baseline_divisor = std::stod(value);
-            } else if (param == "log_inverse_baseline") {
-                metrics.log_inverse_baseline = std::stod(value);
-            } else if (param == "log_inverse_divisor") {
-                metrics.log_inverse_divisor = std::stod(value);
-            } else {
-                std::cerr << "Unknown metrics parameter: " << param << "\n";
+            // Parse: metrics.angular_causticness.min_sectors -> metric_name=angular_causticness, param=min_sectors
+            // Or: metrics.angular_causticness.boom.method -> metric_name=angular_causticness, boom_param=method
+            auto second_dot = param.find('.');
+            if (second_dot == std::string::npos) {
+                std::cerr << "Invalid metrics key format. Use metrics.metric_name.param\n";
                 return false;
             }
+
+            std::string metric_name = param.substr(0, second_dot);
+            std::string rest = param.substr(second_dot + 1);
+
+            // Get or create metric config
+            MetricConfig& mc = getOrCreateMetricConfig(metric_name);
+            MetricType type = getMetricType(metric_name);
+
+            // Check if this is a boom parameter
+            if (rest.substr(0, 5) == "boom.") {
+                std::string boom_param = rest.substr(5);
+                BoomDetectionParams bp = mc.getBoomParams();
+
+                if (boom_param == "method") {
+                    bp.method = parseBoomDetectionMethod(value);
+                } else if (boom_param == "offset_seconds") {
+                    bp.offset_seconds = std::stod(value);
+                } else if (boom_param == "peak_percent_threshold") {
+                    bp.peak_percent_threshold = std::stod(value);
+                } else if (boom_param == "min_peak_prominence") {
+                    bp.min_peak_prominence = std::stod(value);
+                } else if (boom_param == "smoothing_window") {
+                    bp.smoothing_window = std::stoi(value);
+                } else if (boom_param == "crossing_threshold") {
+                    bp.crossing_threshold = std::stod(value);
+                } else if (boom_param == "crossing_confirmation") {
+                    bp.crossing_confirmation = std::stoi(value);
+                } else {
+                    std::cerr << "Unknown boom parameter: " << boom_param << "\n";
+                    return false;
+                }
+                mc.setBoomParams(bp);
+            } else {
+                // Metric-specific parameter
+                bool handled = false;
+                switch (type) {
+                case MetricType::Sector: {
+                    auto& p = std::get<SectorMetricParams>(mc.params);
+                    if (rest == "min_sectors") { p.min_sectors = std::stoi(value); handled = true; }
+                    else if (rest == "max_sectors") { p.max_sectors = std::stoi(value); handled = true; }
+                    else if (rest == "target_per_sector") { p.target_per_sector = std::stoi(value); handled = true; }
+                    break;
+                }
+                case MetricType::CVSector: {
+                    auto& p = std::get<CVSectorMetricParams>(mc.params);
+                    if (rest == "min_sectors") { p.min_sectors = std::stoi(value); handled = true; }
+                    else if (rest == "max_sectors") { p.max_sectors = std::stoi(value); handled = true; }
+                    else if (rest == "target_per_sector") { p.target_per_sector = std::stoi(value); handled = true; }
+                    else if (rest == "cv_normalization") { p.cv_normalization = std::stod(value); handled = true; }
+                    break;
+                }
+                case MetricType::Grid: {
+                    auto& p = std::get<GridMetricParams>(mc.params);
+                    if (rest == "min_grid") { p.min_grid = std::stoi(value); handled = true; }
+                    else if (rest == "max_grid") { p.max_grid = std::stoi(value); handled = true; }
+                    else if (rest == "target_per_cell") { p.target_per_cell = std::stoi(value); handled = true; }
+                    break;
+                }
+                case MetricType::Fold: {
+                    auto& p = std::get<FoldMetricParams>(mc.params);
+                    if (rest == "max_radius") { p.max_radius = std::stod(value); handled = true; }
+                    else if (rest == "cv_normalization") { p.cv_normalization = std::stod(value); handled = true; }
+                    break;
+                }
+                case MetricType::Trajectory: {
+                    auto& p = std::get<TrajectoryMetricParams>(mc.params);
+                    if (rest == "max_radius") { p.max_radius = std::stod(value); handled = true; }
+                    else if (rest == "min_spread_threshold") { p.min_spread_threshold = std::stod(value); handled = true; }
+                    break;
+                }
+                case MetricType::Curvature: {
+                    auto& p = std::get<CurvatureMetricParams>(mc.params);
+                    if (rest == "max_radius") { p.max_radius = std::stod(value); handled = true; }
+                    else if (rest == "min_spread_threshold") { p.min_spread_threshold = std::stod(value); handled = true; }
+                    else if (rest == "log_ratio_normalization") { p.log_ratio_normalization = std::stod(value); handled = true; }
+                    break;
+                }
+                case MetricType::TrueFolds: {
+                    auto& p = std::get<TrueFoldsMetricParams>(mc.params);
+                    if (rest == "max_radius") { p.max_radius = std::stod(value); handled = true; }
+                    else if (rest == "min_spread_threshold") { p.min_spread_threshold = std::stod(value); handled = true; }
+                    else if (rest == "gini_chaos_baseline") { p.gini_chaos_baseline = std::stod(value); handled = true; }
+                    else if (rest == "gini_baseline_divisor") { p.gini_baseline_divisor = std::stod(value); handled = true; }
+                    break;
+                }
+                case MetricType::LocalCoherence: {
+                    auto& p = std::get<LocalCoherenceMetricParams>(mc.params);
+                    if (rest == "max_radius") { p.max_radius = std::stod(value); handled = true; }
+                    else if (rest == "min_spread_threshold") { p.min_spread_threshold = std::stod(value); handled = true; }
+                    else if (rest == "log_inverse_baseline") { p.log_inverse_baseline = std::stod(value); handled = true; }
+                    else if (rest == "log_inverse_divisor") { p.log_inverse_divisor = std::stod(value); handled = true; }
+                    break;
+                }
+                case MetricType::None:
+                    // Parameter-less metrics don't have params to set
+                    break;
+                }
+
+                if (!handled) {
+                    std::cerr << "Unknown parameter '" << rest << "' for metric " << metric_name << "\n";
+                    return false;
+                }
+            }
         }
-        // Boom detection parameters
-        else if (section == "boom_detection" || section == "boom") {
-            if (param == "method") {
-                boom.method = parseBoomDetectionMethod(value);
-            } else if (param == "offset_seconds") {
-                boom.offset_seconds = std::stod(value);
-            } else if (param == "peak_percent_threshold") {
-                boom.peak_percent_threshold = std::stod(value);
-            } else if (param == "min_peak_prominence") {
-                boom.min_peak_prominence = std::stod(value);
-            } else if (param == "smoothing_window") {
-                boom.smoothing_window = std::stoi(value);
-            } else if (param == "crossing_threshold") {
-                boom.crossing_threshold = std::stod(value);
-            } else if (param == "crossing_confirmation") {
-                boom.crossing_confirmation = std::stoi(value);
-            } else if (param == "metric_name") {
-                boom.metric_name = value;
+        // Boom detection - which metric to use
+        else if (section == "boom_detection") {
+            if (param == "active_metric") {
+                boom_metric = value;
             } else {
                 std::cerr << "Unknown boom_detection parameter: " << param << "\n";
                 return false;
@@ -723,34 +863,91 @@ void Config::save(std::string const& path) const {
     file << "end = " << color.end << "\n";
     file << "\n";
 
-    // Metrics section
-    file << "[metrics]\n";
-    file << "min_sectors = " << metrics.min_sectors << "\n";
-    file << "max_sectors = " << metrics.max_sectors << "\n";
-    file << "target_per_sector = " << metrics.target_per_sector << "\n";
-    file << "min_grid = " << metrics.min_grid << "\n";
-    file << "max_grid = " << metrics.max_grid << "\n";
-    file << "target_per_cell = " << metrics.target_per_cell << "\n";
-    file << "max_radius = " << metrics.max_radius << "\n";
-    file << "cv_normalization = " << metrics.cv_normalization << "\n";
-    file << "log_ratio_normalization = " << metrics.log_ratio_normalization << "\n";
-    file << "min_spread_threshold = " << metrics.min_spread_threshold << "\n";
-    file << "gini_chaos_baseline = " << metrics.gini_chaos_baseline << "\n";
-    file << "gini_baseline_divisor = " << metrics.gini_baseline_divisor << "\n";
-    file << "log_inverse_baseline = " << metrics.log_inverse_baseline << "\n";
-    file << "log_inverse_divisor = " << metrics.log_inverse_divisor << "\n";
-    file << "\n";
+    // Per-metric configuration sections
+    for (auto const& [name, mc] : metric_configs) {
+        file << "[metrics." << name << "]\n";
 
-    // Boom detection section
+        // Write metric-specific params based on type
+        MetricType type = getMetricType(name);
+        switch (type) {
+        case MetricType::Sector: {
+            auto const& p = std::get<SectorMetricParams>(mc.params);
+            file << "min_sectors = " << p.min_sectors << "\n";
+            file << "max_sectors = " << p.max_sectors << "\n";
+            file << "target_per_sector = " << p.target_per_sector << "\n";
+            break;
+        }
+        case MetricType::CVSector: {
+            auto const& p = std::get<CVSectorMetricParams>(mc.params);
+            file << "min_sectors = " << p.min_sectors << "\n";
+            file << "max_sectors = " << p.max_sectors << "\n";
+            file << "target_per_sector = " << p.target_per_sector << "\n";
+            file << "cv_normalization = " << p.cv_normalization << "\n";
+            break;
+        }
+        case MetricType::Grid: {
+            auto const& p = std::get<GridMetricParams>(mc.params);
+            file << "min_grid = " << p.min_grid << "\n";
+            file << "max_grid = " << p.max_grid << "\n";
+            file << "target_per_cell = " << p.target_per_cell << "\n";
+            break;
+        }
+        case MetricType::Fold: {
+            auto const& p = std::get<FoldMetricParams>(mc.params);
+            file << "max_radius = " << p.max_radius << "\n";
+            file << "cv_normalization = " << p.cv_normalization << "\n";
+            break;
+        }
+        case MetricType::Trajectory: {
+            auto const& p = std::get<TrajectoryMetricParams>(mc.params);
+            file << "max_radius = " << p.max_radius << "\n";
+            file << "min_spread_threshold = " << p.min_spread_threshold << "\n";
+            break;
+        }
+        case MetricType::Curvature: {
+            auto const& p = std::get<CurvatureMetricParams>(mc.params);
+            file << "max_radius = " << p.max_radius << "\n";
+            file << "min_spread_threshold = " << p.min_spread_threshold << "\n";
+            file << "log_ratio_normalization = " << p.log_ratio_normalization << "\n";
+            break;
+        }
+        case MetricType::TrueFolds: {
+            auto const& p = std::get<TrueFoldsMetricParams>(mc.params);
+            file << "max_radius = " << p.max_radius << "\n";
+            file << "min_spread_threshold = " << p.min_spread_threshold << "\n";
+            file << "gini_chaos_baseline = " << p.gini_chaos_baseline << "\n";
+            file << "gini_baseline_divisor = " << p.gini_baseline_divisor << "\n";
+            break;
+        }
+        case MetricType::LocalCoherence: {
+            auto const& p = std::get<LocalCoherenceMetricParams>(mc.params);
+            file << "max_radius = " << p.max_radius << "\n";
+            file << "min_spread_threshold = " << p.min_spread_threshold << "\n";
+            file << "log_inverse_baseline = " << p.log_inverse_baseline << "\n";
+            file << "log_inverse_divisor = " << p.log_inverse_divisor << "\n";
+            break;
+        }
+        case MetricType::None:
+            // No parameters to write for parameter-less metrics
+            break;
+        }
+
+        // Write boom params subsection
+        auto const& bp = mc.getBoomParams();
+        file << "\n[metrics." << name << ".boom]\n";
+        file << "method = \"" << boomDetectionMethodToString(bp.method) << "\"\n";
+        file << "offset_seconds = " << bp.offset_seconds << "\n";
+        file << "peak_percent_threshold = " << bp.peak_percent_threshold << "\n";
+        file << "min_peak_prominence = " << bp.min_peak_prominence << "\n";
+        file << "smoothing_window = " << bp.smoothing_window << "\n";
+        file << "crossing_threshold = " << bp.crossing_threshold << "\n";
+        file << "crossing_confirmation = " << bp.crossing_confirmation << "\n";
+        file << "\n";
+    }
+
+    // Boom detection - which metric is active
     file << "[boom_detection]\n";
-    file << "method = \"" << boomDetectionMethodToString(boom.method) << "\"\n";
-    file << "offset_seconds = " << boom.offset_seconds << "\n";
-    file << "peak_percent_threshold = " << boom.peak_percent_threshold << "\n";
-    file << "min_peak_prominence = " << boom.min_peak_prominence << "\n";
-    file << "smoothing_window = " << boom.smoothing_window << "\n";
-    file << "crossing_threshold = " << boom.crossing_threshold << "\n";
-    file << "crossing_confirmation = " << boom.crossing_confirmation << "\n";
-    file << "metric_name = \"" << boom.metric_name << "\"\n";
+    file << "active_metric = \"" << boom_metric << "\"\n";
     file << "\n";
 
     // Detection section
