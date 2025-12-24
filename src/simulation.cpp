@@ -201,6 +201,24 @@ void Simulation::saveMetricsCSV() {
     auto* angular_range = metrics_collector_.getMetric(metrics::MetricNames::AngularRange);
     auto* angular_causticness =
         metrics_collector_.getMetric(metrics::MetricNames::AngularCausticness);
+    // New caustic metrics
+    auto* r1 = metrics_collector_.getMetric(metrics::MetricNames::R1);
+    auto* r2 = metrics_collector_.getMetric(metrics::MetricNames::R2);
+    auto* joint_concentration =
+        metrics_collector_.getMetric(metrics::MetricNames::JointConcentration);
+    auto* tip_causticness = metrics_collector_.getMetric(metrics::MetricNames::TipCausticness);
+    auto* spatial_concentration =
+        metrics_collector_.getMetric(metrics::MetricNames::SpatialConcentration);
+    // Alternative caustic metrics (experimental)
+    auto* cv_causticness = metrics_collector_.getMetric(metrics::MetricNames::CVCausticness);
+    auto* organization = metrics_collector_.getMetric(metrics::MetricNames::OrganizationCausticness);
+    auto* fold_causticness = metrics_collector_.getMetric(metrics::MetricNames::FoldCausticness);
+    // New paradigm metrics (local coherence based)
+    auto* smoothness = metrics_collector_.getMetric(metrics::MetricNames::TrajectorySmoothness);
+    auto* curvature = metrics_collector_.getMetric(metrics::MetricNames::Curvature);
+    auto* true_folds = metrics_collector_.getMetric(metrics::MetricNames::TrueFolds);
+    auto* local_coherence = metrics_collector_.getMetric(metrics::MetricNames::LocalCoherence);
+    // GPU and energy metrics
     auto* brightness = metrics_collector_.getMetric(metrics::MetricNames::Brightness);
     auto* coverage = metrics_collector_.getMetric(metrics::MetricNames::Coverage);
     auto* total_energy = metrics_collector_.getMetric(metrics::MetricNames::TotalEnergy);
@@ -217,8 +235,12 @@ void Simulation::saveMetricsCSV() {
 
     // Write header - CANONICAL COLUMN ORDER for simulation metrics CSV
     // This order is intentional and matches what downstream tools expect.
-    // Physics metrics first, then GPU metrics, then energy.
+    // Physics metrics first, then new caustic metrics, then GPU metrics, then energy.
     out << "frame,variance,circular_spread,spread_ratio,angular_range,angular_causticness,"
+        << "r1_concentration,r2_concentration,joint_concentration,"
+        << "tip_causticness,spatial_concentration,"
+        << "cv_causticness,organization_causticness,fold_causticness,"
+        << "trajectory_smoothness,curvature,true_folds,local_coherence,"
         << "brightness,coverage,total_energy\n";
     out << std::fixed << std::setprecision(6);
 
@@ -230,6 +252,22 @@ void Simulation::saveMetricsCSV() {
         out << "," << getValue(spread_ratio, i);
         out << "," << getValue(angular_range, i);
         out << "," << getValue(angular_causticness, i);
+        // New caustic metrics
+        out << "," << getValue(r1, i);
+        out << "," << getValue(r2, i);
+        out << "," << getValue(joint_concentration, i);
+        out << "," << getValue(tip_causticness, i);
+        out << "," << getValue(spatial_concentration, i);
+        // Alternative caustic metrics
+        out << "," << getValue(cv_causticness, i);
+        out << "," << getValue(organization, i);
+        out << "," << getValue(fold_causticness, i);
+        // New paradigm metrics
+        out << "," << getValue(smoothness, i);
+        out << "," << getValue(curvature, i);
+        out << "," << getValue(true_folds, i);
+        out << "," << getValue(local_coherence, i);
+        // GPU and energy metrics
         out << "," << getValue(brightness, i);
         out << "," << getValue(coverage, i);
         out << "," << getValue(total_energy, i);
@@ -344,15 +382,9 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         // Begin frame for metrics collection
         metrics_collector_.beginFrame(frame);
 
-        // Track variance and spread via new metrics system
-        std::vector<double> angle1s, angle2s;
-        angle1s.reserve(pendulum_count);
-        angle2s.reserve(pendulum_count);
-        for (auto const& state : states) {
-            angle1s.push_back(state.th1); // First pendulum angle (for spread)
-            angle2s.push_back(state.th2); // Second pendulum angle (for variance)
-        }
-        metrics_collector_.updateFromAngles(angle1s, angle2s);
+        // Track all physics metrics (variance, spread, causticness metrics)
+        // using full state data for position-based metrics
+        metrics_collector_.updateFromStates(states);
 
         // Compute total energy (physics metric)
         double total_energy = 0.0;

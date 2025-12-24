@@ -63,6 +63,33 @@ struct MetricFlags {
     bool coverage_deriv = false;
     bool causticness = true;   // Angular causticness (physics-based)
     bool causticness_deriv = false;
+    // New caustic metrics
+    bool r1 = false;           // First arm concentration
+    bool r1_deriv = false;
+    bool r2 = false;           // Second arm concentration
+    bool r2_deriv = false;
+    bool joint_conc = false;   // Joint concentration (R1 * R2)
+    bool joint_conc_deriv = false;
+    bool tip_caustic = false;  // Geometrically correct tip causticness
+    bool tip_caustic_deriv = false;
+    bool spatial_conc = false; // Spatial concentration
+    bool spatial_conc_deriv = false;
+    // Alternative caustic metrics (experimental)
+    bool cv_caustic = false;   // CV-based causticness
+    bool cv_caustic_deriv = false;
+    bool organization = false; // Organization causticness
+    bool organization_deriv = false;
+    bool fold_caustic = false; // Fold causticness (adjacent-pair CV)
+    bool fold_caustic_deriv = false;
+    // New paradigm metrics (local coherence based)
+    bool smoothness = false;   // Trajectory smoothness
+    bool smoothness_deriv = false;
+    bool curvature = false;    // Curvature of θ→(x,y) mapping
+    bool curvature_deriv = false;
+    bool true_folds = false;   // True fold detection
+    bool true_folds_deriv = false;
+    bool local_coh = false;    // Local coherence
+    bool local_coh_deriv = false;
 };
 
 // Export state (thread-safe)
@@ -300,11 +327,10 @@ bool loadSimulationData(AppState& state, GLRenderer& renderer, std::string const
         state.config.detection.chaos_threshold, state.config.detection.chaos_confirmation,
         state.frame_duration, /*with_gpu=*/true);
 
-    std::vector<double> angle1s, angle2s;
     for (uint32_t f = 0; f < reader->frameCount(); ++f) {
-        reader->getAnglesForFrame(f, angle1s, angle2s);
+        auto states = reader->getFrame(f);
         state.metrics_collector.beginFrame(static_cast<int>(f));
-        state.metrics_collector.updateFromAngles(angle1s, angle2s);
+        state.metrics_collector.updateFromStates(states);
         state.metrics_collector.endFrame();
         state.event_detector.update(state.metrics_collector, state.frame_duration);
     }
@@ -481,15 +507,9 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     // Begin frame for metrics collection
     state.metrics_collector.beginFrame(state.current_frame);
 
-    // Track variance and spread via new metrics system
-    std::vector<double> angle1s, angle2s;
-    angle1s.reserve(n);
-    angle2s.reserve(n);
-    for (auto const& s : state.states) {
-        angle1s.push_back(s.th1);
-        angle2s.push_back(s.th2);
-    }
-    state.metrics_collector.updateFromAngles(angle1s, angle2s);
+    // Track all physics metrics (variance, spread, causticness metrics)
+    // using full state data for position-based metrics
+    state.metrics_collector.updateFromStates(state.states);
 
     // Compute total energy for extended analysis
     double total_energy = 0.0;
@@ -788,6 +808,296 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
             if (!derivs.empty()) {
                 auto normalized = normalizeData(derivs);
                 ImPlot::PlotLine("AngCaustic'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // ============== NEW CAUSTIC METRICS ==============
+
+        // Plot R1 concentration (Y2 - 0-1 scale)
+        auto const* r1_series = state.metrics_collector.getMetric(metrics::MetricNames::R1);
+        if (state.detailed_flags.r1 && r1_series != nullptr && !r1_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            auto const& values = r1_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(0.8f, 0.4f, 1.0f, 1.0f), 2.0f);  // Purple
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("R1", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("R1", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.r1_deriv && r1_series != nullptr && r1_series->size() > 1) {
+            auto derivs = r1_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.8f, 0.4f, 1.0f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("R1'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // Plot R2 concentration (Y2 - 0-1 scale)
+        auto const* r2_series = state.metrics_collector.getMetric(metrics::MetricNames::R2);
+        if (state.detailed_flags.r2 && r2_series != nullptr && !r2_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            auto const& values = r2_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.4f, 0.8f, 1.0f), 2.0f);  // Magenta
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("R2", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("R2", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.r2_deriv && r2_series != nullptr && r2_series->size() > 1) {
+            auto derivs = r2_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.4f, 0.8f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("R2'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // Plot joint concentration (Y2 - 0-1 scale)
+        auto const* joint_series = state.metrics_collector.getMetric(metrics::MetricNames::JointConcentration);
+        if (state.detailed_flags.joint_conc && joint_series != nullptr && !joint_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            auto const& values = joint_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), 2.0f);  // Cyan
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("Joint", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("Joint", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.joint_conc_deriv && joint_series != nullptr && joint_series->size() > 1) {
+            auto derivs = joint_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.8f, 1.0f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("Joint'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // Plot tip causticness (Y2 - 0-1 scale)
+        auto const* tip_series = state.metrics_collector.getMetric(metrics::MetricNames::TipCausticness);
+        if (state.detailed_flags.tip_caustic && tip_series != nullptr && !tip_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            auto const& values = tip_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(0.6f, 1.0f, 0.4f, 1.0f), 2.0f);  // Lime
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("TipCaustic", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("TipCaustic", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.tip_caustic_deriv && tip_series != nullptr && tip_series->size() > 1) {
+            auto derivs = tip_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.6f, 1.0f, 0.4f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("TipCaustic'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // Plot spatial concentration (Y3 - medium scale, typically 1-10+)
+        auto const* spatial_series = state.metrics_collector.getMetric(metrics::MetricNames::SpatialConcentration);
+        if (state.detailed_flags.spatial_conc && spatial_series != nullptr && !spatial_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y3);
+            }
+            auto const& values = spatial_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.6f, 1.0f), 2.0f);  // Pink
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("SpatialConc", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("SpatialConc", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.spatial_conc_deriv && spatial_series != nullptr && spatial_series->size() > 1) {
+            auto derivs = spatial_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.6f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("SpatialConc'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // Plot CV causticness (Y2 - normalized 0-1)
+        auto const* cv_series = state.metrics_collector.getMetric(metrics::MetricNames::CVCausticness);
+        if (state.detailed_flags.cv_caustic && cv_series != nullptr && !cv_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            auto const& values = cv_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), 2.0f);  // Orange
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("CV", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("CV", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.cv_caustic_deriv && cv_series != nullptr && cv_series->size() > 1) {
+            auto derivs = cv_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.5f, 0.0f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("CV'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // Plot organization causticness (Y2 - normalized 0-1)
+        auto const* org_series = state.metrics_collector.getMetric(metrics::MetricNames::OrganizationCausticness);
+        if (state.detailed_flags.organization && org_series != nullptr && !org_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            auto const& values = org_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(0.5f, 1.0f, 1.0f, 1.0f), 2.0f);  // Cyan/Teal
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("Org", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("Org", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.organization_deriv && org_series != nullptr && org_series->size() > 1) {
+            auto derivs = org_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.5f, 1.0f, 1.0f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("Org'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // Plot fold causticness (Y2 - normalized 0-1)
+        auto const* fold_series = state.metrics_collector.getMetric(metrics::MetricNames::FoldCausticness);
+        if (state.detailed_flags.fold_caustic && fold_series != nullptr && !fold_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            auto const& values = fold_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 0.3f, 1.0f), 2.0f);  // Yellow
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("Fold", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("Fold", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.fold_caustic_deriv && fold_series != nullptr && fold_series->size() > 1) {
+            auto derivs = fold_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 0.3f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("Fold'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // Plot trajectory smoothness (Y2 - normalized 0-1)
+        auto const* smooth_series = state.metrics_collector.getMetric(metrics::MetricNames::TrajectorySmoothness);
+        if (state.detailed_flags.smoothness && smooth_series != nullptr && !smooth_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            auto const& values = smooth_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(0.3f, 0.9f, 0.3f, 1.0f), 2.0f);  // Bright green
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("Smooth", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("Smooth", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.smoothness_deriv && smooth_series != nullptr && smooth_series->size() > 1) {
+            auto derivs = smooth_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.3f, 0.9f, 0.3f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("Smooth'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // Plot curvature (Y2 - normalized 0-1)
+        auto const* curv_series = state.metrics_collector.getMetric(metrics::MetricNames::Curvature);
+        if (state.detailed_flags.curvature && curv_series != nullptr && !curv_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            auto const& values = curv_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(0.9f, 0.3f, 0.9f, 1.0f), 2.0f);  // Magenta
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("Curv", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("Curv", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.curvature_deriv && curv_series != nullptr && curv_series->size() > 1) {
+            auto derivs = curv_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.9f, 0.3f, 0.9f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("Curv'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // Plot true folds (Y2 - normalized 0-1)
+        auto const* tfold_series = state.metrics_collector.getMetric(metrics::MetricNames::TrueFolds);
+        if (state.detailed_flags.true_folds && tfold_series != nullptr && !tfold_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            auto const& values = tfold_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.0f, 1.0f), 2.0f);  // Orange
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("TrueFold", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("TrueFold", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.true_folds_deriv && tfold_series != nullptr && tfold_series->size() > 1) {
+            auto derivs = tfold_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.6f, 0.0f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("TrueFold'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // Plot local coherence (Y2 - normalized 0-1)
+        auto const* lcoh_series = state.metrics_collector.getMetric(metrics::MetricNames::LocalCoherence);
+        if (state.detailed_flags.local_coh && lcoh_series != nullptr && !lcoh_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            auto const& values = lcoh_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(0.3f, 0.7f, 1.0f, 1.0f), 2.0f);  // Light blue
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("LocalCoh", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("LocalCoh", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.local_coh_deriv && lcoh_series != nullptr && lcoh_series->size() > 1) {
+            auto derivs = lcoh_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.3f, 0.7f, 1.0f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("LocalCoh'", frames.data() + 1, normalized.data(), derivs.size());
             }
         }
 
@@ -2104,6 +2414,39 @@ int main(int argc, char* argv[]) {
         // Second row of metrics
         metricWithDeriv("Energy", &state.detailed_flags.energy, &state.detailed_flags.energy_deriv, "energy");
 
+        // Third row: new caustic metrics
+        ImGui::Text("Caustic:");
+        ImGui::SameLine();
+        metricWithDeriv("R1", &state.detailed_flags.r1, &state.detailed_flags.r1_deriv, "r1");
+        ImGui::SameLine();
+        metricWithDeriv("R2", &state.detailed_flags.r2, &state.detailed_flags.r2_deriv, "r2");
+        ImGui::SameLine();
+        metricWithDeriv("Joint", &state.detailed_flags.joint_conc, &state.detailed_flags.joint_conc_deriv, "joint");
+        ImGui::SameLine();
+        metricWithDeriv("TipCaustic", &state.detailed_flags.tip_caustic, &state.detailed_flags.tip_caustic_deriv, "tip");
+        ImGui::SameLine();
+        metricWithDeriv("SpatialConc", &state.detailed_flags.spatial_conc, &state.detailed_flags.spatial_conc_deriv, "spatial");
+
+        // Fourth row: alternative caustic metrics (experimental)
+        ImGui::Text("Alt:");
+        ImGui::SameLine();
+        metricWithDeriv("CV", &state.detailed_flags.cv_caustic, &state.detailed_flags.cv_caustic_deriv, "cv");
+        ImGui::SameLine();
+        metricWithDeriv("Org", &state.detailed_flags.organization, &state.detailed_flags.organization_deriv, "org");
+        ImGui::SameLine();
+        metricWithDeriv("Fold", &state.detailed_flags.fold_caustic, &state.detailed_flags.fold_caustic_deriv, "fold");
+
+        // Fifth row: new paradigm metrics (local coherence based)
+        ImGui::Text("New:");
+        ImGui::SameLine();
+        metricWithDeriv("Smooth", &state.detailed_flags.smoothness, &state.detailed_flags.smoothness_deriv, "smooth");
+        ImGui::SameLine();
+        metricWithDeriv("Curv", &state.detailed_flags.curvature, &state.detailed_flags.curvature_deriv, "curv");
+        ImGui::SameLine();
+        metricWithDeriv("TrueFold", &state.detailed_flags.true_folds, &state.detailed_flags.true_folds_deriv, "tfold");
+        ImGui::SameLine();
+        metricWithDeriv("LocalCoh", &state.detailed_flags.local_coh, &state.detailed_flags.local_coh_deriv, "lcoh");
+
         // Full metric graph
         ImVec2 metrics_graph_size = ImGui::GetContentRegionAvail();
         metrics_graph_size.y = std::max(150.0f, metrics_graph_size.y - 100.0f);
@@ -2138,6 +2481,31 @@ int main(int argc, char* argv[]) {
             ImGui::TableNextRow();
             showMetric("Causticness", metrics::MetricNames::AngularCausticness);
             showMetric("Coverage", metrics::MetricNames::Coverage);
+
+            // New caustic metrics
+            ImGui::TableNextRow();
+            showMetric("R1", metrics::MetricNames::R1);
+            showMetric("R2", metrics::MetricNames::R2);
+
+            ImGui::TableNextRow();
+            showMetric("Joint", metrics::MetricNames::JointConcentration);
+            showMetric("TipCaustic", metrics::MetricNames::TipCausticness);
+
+            ImGui::TableNextRow();
+            showMetric("SpatialConc", metrics::MetricNames::SpatialConcentration);
+            showMetric("CV", metrics::MetricNames::CVCausticness);
+
+            ImGui::TableNextRow();
+            showMetric("Org", metrics::MetricNames::OrganizationCausticness);
+            showMetric("Fold", metrics::MetricNames::FoldCausticness);
+
+            ImGui::TableNextRow();
+            showMetric("Smooth", metrics::MetricNames::TrajectorySmoothness);
+            showMetric("Curv", metrics::MetricNames::Curvature);
+
+            ImGui::TableNextRow();
+            showMetric("TrueFold", metrics::MetricNames::TrueFolds);
+            showMetric("LocalCoh", metrics::MetricNames::LocalCoherence);
 
             ImGui::EndTable();
         }

@@ -106,15 +106,14 @@ int computePhysicsMetrics(Options const& opts,
         config.detection.chaos_threshold, config.detection.chaos_confirmation,
         frame_duration, /*with_gpu=*/false);
 
-    std::vector<double> angle1s, angle2s;
-
     // Process each frame
     uint32_t const total_frames = reader.frameCount();
     for (uint32_t frame = 0; frame < total_frames; ++frame) {
-        reader.getAnglesForFrame(frame, angle1s, angle2s);
+        // Get full state data for position-based metrics
+        auto states = reader.getFrame(frame);
 
         collector.beginFrame(static_cast<int>(frame));
-        collector.updateFromAngles(angle1s, angle2s);
+        collector.updateFromStates(states);
         collector.endFrame();
 
         detector.update(collector, frame_duration);
@@ -204,6 +203,22 @@ int computePhysicsMetrics(Options const& opts,
         metrics::MetricNames::SpreadRatio,
         metrics::MetricNames::AngularRange,
         metrics::MetricNames::AngularCausticness,
+        // New caustic metrics
+        metrics::MetricNames::R1,
+        metrics::MetricNames::R2,
+        metrics::MetricNames::JointConcentration,
+        metrics::MetricNames::TipCausticness,
+        metrics::MetricNames::SpatialConcentration,
+        // Alternative caustic metrics
+        metrics::MetricNames::CVCausticness,
+        metrics::MetricNames::OrganizationCausticness,
+        metrics::MetricNames::FoldCausticness,
+        // New paradigm metrics
+        metrics::MetricNames::TrajectorySmoothness,
+        metrics::MetricNames::Curvature,
+        metrics::MetricNames::TrueFolds,
+        metrics::MetricNames::LocalCoherence,
+        // GPU and energy metrics
         metrics::MetricNames::Brightness,
         metrics::MetricNames::Coverage,
         metrics::MetricNames::TotalEnergy
@@ -250,14 +265,11 @@ int computeGPUMetrics(Options const& opts,
 
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    std::vector<double> angle1s, angle2s;
-
     // Process each frame
     uint32_t const total_frames = reader.frameCount();
     for (uint32_t frame = 0; frame < total_frames; ++frame) {
-        // Get frame data
+        // Get full state data for position-based metrics
         auto states = reader.getFrame(frame);
-        reader.getAnglesForFrame(frame, angle1s, angle2s);
 
         // Clear and render
         renderer.clear();
@@ -294,7 +306,7 @@ int computeGPUMetrics(Options const& opts,
 
         // Collect metrics
         collector.beginFrame(static_cast<int>(frame));
-        collector.updateFromAngles(angle1s, angle2s);
+        collector.updateFromStates(states);
 
         metrics::GPUMetricsBundle gpu_metrics;
         gpu_metrics.max_value = renderer.lastMax();
@@ -360,6 +372,22 @@ int computeGPUMetrics(Options const& opts,
         metrics::MetricNames::SpreadRatio,
         metrics::MetricNames::AngularRange,
         metrics::MetricNames::AngularCausticness,
+        // New caustic metrics
+        metrics::MetricNames::R1,
+        metrics::MetricNames::R2,
+        metrics::MetricNames::JointConcentration,
+        metrics::MetricNames::TipCausticness,
+        metrics::MetricNames::SpatialConcentration,
+        // Alternative caustic metrics
+        metrics::MetricNames::CVCausticness,
+        metrics::MetricNames::OrganizationCausticness,
+        metrics::MetricNames::FoldCausticness,
+        // New paradigm metrics
+        metrics::MetricNames::TrajectorySmoothness,
+        metrics::MetricNames::Curvature,
+        metrics::MetricNames::TrueFolds,
+        metrics::MetricNames::LocalCoherence,
+        // GPU and energy metrics
         metrics::MetricNames::Brightness,
         metrics::MetricNames::Coverage,
         metrics::MetricNames::TotalEnergy
