@@ -65,7 +65,6 @@ The unified metrics system in `include/metrics/` replaces the legacy variance/an
 | `event_detector.h` | Configurable event detection (chaos only; boom uses causticness) |
 | `boom_detection.h` | Utility for finding boom frame from max causticness |
 | `analyzer.h` | Base class for pluggable quality analyzers |
-| `boom_analyzer.h` | Boom quality scoring (sharpness, type) |
 | `causticness_analyzer.h` | Causticness/peak clarity scoring |
 | `probe_filter.h` | Pass/fail decision logic for filtering |
 | `probe_pipeline.h` | Multi-phase probe system |
