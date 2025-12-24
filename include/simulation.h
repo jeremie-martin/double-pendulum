@@ -31,9 +31,9 @@ struct TimingStats {
 struct SimulationResults {
     int frames_completed = 0;
     std::optional<int> boom_frame;
-    double boom_variance = 0.0;
-    std::optional<int> chaos_frame;  // Renamed from white_frame
-    double chaos_variance = 0.0;     // Renamed from white_variance
+    double boom_causticness = 0.0;   // Peak causticness at boom frame
+    std::optional<int> chaos_frame;
+    double chaos_variance = 0.0;
     double final_uniformity = 0.0;   // Distribution uniformity (0=concentrated, 1=uniform on disk)
     TimingStats timing;
     std::vector<double> variance_history;

@@ -146,11 +146,11 @@ void Simulation::saveMetadata(SimulationResults const& results) {
     if (results.boom_frame) {
         out << "    \"boom_frame\": " << *results.boom_frame << ",\n";
         out << "    \"boom_seconds\": " << boom_seconds << ",\n";
-        out << "    \"boom_variance\": " << results.boom_variance << ",\n";
+        out << "    \"boom_causticness\": " << results.boom_causticness << ",\n";
     } else {
         out << "    \"boom_frame\": null,\n";
         out << "    \"boom_seconds\": null,\n";
-        out << "    \"boom_variance\": null,\n";
+        out << "    \"boom_causticness\": null,\n";
     }
     if (results.chaos_frame) {
         out << "    \"chaos_frame\": " << *results.chaos_frame << ",\n";
@@ -473,7 +473,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     if (auto boom_event = event_detector_.getEvent(metrics::EventNames::Boom)) {
         if (boom_event->detected()) {
             results.boom_frame = boom_event->frame;
-            results.boom_variance = boom_event->value;
+            results.boom_causticness = boom_event->value;
         }
     }
     if (auto chaos_event = event_detector_.getEvent(metrics::EventNames::Chaos)) {
@@ -487,7 +487,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     auto boom = metrics::findBoomFrame(metrics_collector_, frame_duration);
     if (boom.frame >= 0) {
         results.boom_frame = boom.frame;
-        results.boom_variance = boom.causticness;  // Store causticness value
+        results.boom_causticness = boom.causticness;
 
         // Force boom event for analyzers (like BoomAnalyzer) to use
         double variance_at_boom = 0.0;
@@ -578,8 +578,8 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     if (results.boom_frame) {
         double boom_seconds = *results.boom_frame * frame_duration;
         std::cout << "Boom:        " << std::setprecision(2) << boom_seconds << "s (frame "
-                  << *results.boom_frame << ", var=" << std::setprecision(4)
-                  << results.boom_variance << ")\n";
+                  << *results.boom_frame << ", causticness=" << std::setprecision(4)
+                  << results.boom_causticness << ")\n";
     }
     if (results.chaos_frame) {
         double chaos_seconds = *results.chaos_frame * frame_duration;

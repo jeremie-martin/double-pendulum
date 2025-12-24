@@ -156,8 +156,8 @@ struct AppState {
 
     // Detection results
     std::optional<int> boom_frame;
-    double boom_variance = 0.0;
-    std::optional<int> chaos_frame;  // Renamed from white_frame
+    double boom_causticness = 0.0;
+    std::optional<int> chaos_frame;
     double chaos_variance = 0.0;
 
     // Timing
@@ -316,13 +316,13 @@ bool loadSimulationData(AppState& state, GLRenderer& renderer, std::string const
     auto boom = metrics::findBoomFrame(state.metrics_collector, state.frame_duration);
     if (boom.frame >= 0) {
         state.boom_frame = boom.frame;
+        state.boom_causticness = boom.causticness;
         double variance_at_boom = 0.0;
         if (auto const* var_series = state.metrics_collector.getMetric(metrics::MetricNames::Variance)) {
             if (boom.frame < static_cast<int>(var_series->size())) {
                 variance_at_boom = var_series->at(boom.frame);
             }
         }
-        state.boom_variance = variance_at_boom;
         metrics::forceBoomEvent(state.event_detector, boom, variance_at_boom);
     } else {
         state.boom_frame.reset();
@@ -540,7 +540,7 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     auto boom = metrics::findBoomFrame(state.metrics_collector, state.frame_duration);
     if (boom.frame >= 0) {
         state.boom_frame = boom.frame;
-        state.boom_variance = boom.causticness;
+        state.boom_causticness = boom.causticness;
 
         // Force boom event for analyzers
         double variance_at_boom = 0.0;
