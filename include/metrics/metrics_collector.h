@@ -13,6 +13,7 @@
 // Forward declarations for pendulum types
 class Pendulum;
 struct PendulumState;
+namespace simulation_data { struct PackedState; }
 
 namespace metrics {
 
@@ -91,6 +92,9 @@ public:
     // Update from full pendulum states (enables position-based metrics)
     void updateFromStates(std::vector<PendulumState> const& states);
 
+    // Update from packed states (zero-copy from simulation_data::Reader)
+    void updateFromPackedStates(simulation_data::PackedState const* states, size_t count);
+
     // Reset all state
     void reset();
 
@@ -143,6 +147,12 @@ private:
     int current_frame_ = -1;
     SpreadMetrics current_spread_;
     std::vector<SpreadMetrics> spread_history_;
+
+    // Reusable buffers to avoid allocations in hot path
+    mutable std::vector<double> angle1_buf_;
+    mutable std::vector<double> angle2_buf_;
+    mutable std::vector<double> x2_buf_;
+    mutable std::vector<double> y2_buf_;
 
     // Maximum spread_history size (0 = unlimited)
     // For long-running GUI, keeps memory bounded (~40 bytes per entry)

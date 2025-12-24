@@ -1,5 +1,6 @@
 #include "metrics/metrics_collector.h"
 #include "pendulum.h"
+#include "simulation_data.h"
 
 #include <algorithm>
 #include <array>
@@ -539,6 +540,65 @@ void MetricsCollector::updateFromStates(std::vector<PendulumState> const& states
     setMetric(MetricNames::TrueFolds, true_folds);
 
     double local_coherence = computeLocalCoherence(x2s, y2s);
+    setMetric(MetricNames::LocalCoherence, local_coherence);
+}
+
+void MetricsCollector::updateFromPackedStates(
+    simulation_data::PackedState const* states, size_t count) {
+    if (!states || count == 0) return;
+
+    // Reuse internal buffers to avoid allocation
+    angle1_buf_.resize(count);
+    angle2_buf_.resize(count);
+    x2_buf_.resize(count);
+    y2_buf_.resize(count);
+
+    // Extract data from packed states (float -> double)
+    for (size_t i = 0; i < count; ++i) {
+        angle1_buf_[i] = static_cast<double>(states[i].th1);
+        angle2_buf_[i] = static_cast<double>(states[i].th2);
+        x2_buf_[i] = static_cast<double>(states[i].x2);
+        y2_buf_[i] = static_cast<double>(states[i].y2);
+    }
+
+    // Call existing angle-based computations (variance, spread, angular_causticness)
+    updateFromAngles(angle1_buf_, angle2_buf_);
+
+    // Compute new caustic metrics - Tier 1: angle-based
+    double r1 = computeCausticnessFromAngles(angle1_buf_);
+    double r2 = computeCausticnessFromAngles(angle2_buf_);
+    setMetric(MetricNames::R1, r1);
+    setMetric(MetricNames::R2, r2);
+    setMetric(MetricNames::JointConcentration, r1 * r2);
+
+    // Compute new caustic metrics - Tier 2: position-based
+    double tip_causticness = computeTipCausticness(x2_buf_, y2_buf_);
+    setMetric(MetricNames::TipCausticness, tip_causticness);
+
+    double spatial_concentration = computeSpatialConcentration(x2_buf_, y2_buf_);
+    setMetric(MetricNames::SpatialConcentration, spatial_concentration);
+
+    // Alternative caustic metrics (experimental)
+    double cv_causticness = computeCVCausticness(angle1_buf_, angle2_buf_);
+    setMetric(MetricNames::CVCausticness, cv_causticness);
+
+    double organization = computeOrganizationCausticness(angle1_buf_, angle2_buf_);
+    setMetric(MetricNames::OrganizationCausticness, organization);
+
+    double fold_causticness = computeFoldCausticness(x2_buf_, y2_buf_);
+    setMetric(MetricNames::FoldCausticness, fold_causticness);
+
+    // New paradigm metrics (local coherence based)
+    double smoothness = computeTrajectorySmoothness(x2_buf_, y2_buf_);
+    setMetric(MetricNames::TrajectorySmoothness, smoothness);
+
+    double curvature = computeCurvature(x2_buf_, y2_buf_);
+    setMetric(MetricNames::Curvature, curvature);
+
+    double true_folds = computeTrueFolds(x2_buf_, y2_buf_);
+    setMetric(MetricNames::TrueFolds, true_folds);
+
+    double local_coherence = computeLocalCoherence(x2_buf_, y2_buf_);
     setMetric(MetricNames::LocalCoherence, local_coherence);
 }
 

@@ -165,14 +165,14 @@ metrics::BoomDetection evaluateSimulation(
     collector.setMetricParams(metric_params);
     collector.registerStandardMetrics();
 
-    // Process all frames
+    // Process all frames using zero-copy packed state access
     for (int frame = 0; frame < frame_count; ++frame) {
-        auto states = reader.getFrame(frame);
-        if (states.empty()) {
+        auto const* packed = reader.getFramePacked(frame);
+        if (!packed) {
             break;
         }
         collector.beginFrame(frame);
-        collector.updateFromStates(states);
+        collector.updateFromPackedStates(packed, header.pendulum_count);
         collector.endFrame();
     }
 
