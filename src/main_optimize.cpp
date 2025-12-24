@@ -31,6 +31,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <map>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -57,7 +58,8 @@ struct ParameterSet {
     MetricParams metrics;
     BoomDetectionParams boom;
 
-    std::string describe() const {
+    // Short description for tables (boom detection only)
+    std::string describeShort() const {
         std::ostringstream oss;
         // Shorten metric name for display
         std::string metric_short = boom.metric_name;
@@ -71,7 +73,7 @@ struct ParameterSet {
         oss << metric_short << " ";
         switch (boom.method) {
         case BoomDetectionMethod::MaxCausticness:
-            oss << "max off=" << boom.offset_seconds;
+            oss << "max off=" << std::fixed << std::setprecision(1) << boom.offset_seconds;
             break;
         case BoomDetectionMethod::FirstPeakPercent:
             oss << "first@" << (int)(boom.peak_percent_threshold * 100) << "%";
@@ -82,15 +84,31 @@ struct ParameterSet {
         }
         return oss.str();
     }
+
+    // Full description including metric params
+    std::string describeFull() const {
+        std::ostringstream oss;
+        oss << describeShort();
+        oss << " [sec=" << metrics.min_sectors << "-" << metrics.max_sectors
+            << " tgt=" << metrics.target_per_sector << "]";
+        return oss.str();
+    }
+
+    // Legacy alias
+    std::string describe() const { return describeShort(); }
 };
 
 // Evaluation results for a parameter set
 struct EvaluationResult {
     ParameterSet params;
     double boom_mae = 0.0;       // Mean absolute error for boom detection (frames)
+    double boom_stddev = 0.0;    // Standard deviation of errors
+    double boom_median = 0.0;    // Median absolute error
+    double boom_max = 0.0;       // Maximum absolute error
     double peak_mae = 0.0;       // Mean absolute error for peak detection (frames)
     double combined_score = 0.0; // Combined score (lower is better)
     int samples_evaluated = 0;
+    std::vector<int> per_sim_errors; // Error for each simulation (for analysis)
 };
 
 // Simple JSON value extraction helpers
@@ -274,9 +292,9 @@ std::vector<MetricConfig> generateMetricConfigs() {
     std::vector<MetricConfig> configs;
 
     // Sector variations
-    std::vector<int> min_sectors_vals = {2, 3, 4, 5, 6, 7, 8, 9}; // Reduced for speed
-    std::vector<int> max_sectors_vals = {16, 32, 48, 64, 80, 96}; // Reduced for speed
-    std::vector<int> target_vals = {20, 30, 40, 50, 60, 70, 80};  // Reduced for speed
+    std::vector<int> min_sectors_vals = {2, 4, 6, 8}; // Reduced for speed
+    std::vector<int> max_sectors_vals = {32, 64, 96}; // Reduced for speed
+    std::vector<int> target_vals = {25, 50, 75};      // Reduced for speed
 
     for (int min_sec : min_sectors_vals) {
         for (int max_sec : max_sectors_vals) {
@@ -594,31 +612,69 @@ int main(int argc, char* argv[]) {
             workers.emplace_back([&]() {
                 while (true) {
                     size_t bi = boom_idx.fetch_add(1);
-                    if (bi >= boom_configs.size())
+                    if (bi >= boom_configs.size()) {
                         break;
+                    }
 
                     auto const& boom_cfg = boom_configs[bi];
                     auto boom_params = boom_cfg.toParams();
 
-                    double boom_error_sum = 0.0;
-                    int boom_samples = 0;
+                    std::vector<int> errors;
+                    errors.reserve(computed_for_config.size());
 
-                    // Evaluate against all simulations (very fast - just reads pre-computed data)
+                    // Evaluate against all simulations
                     for (auto const& computed : computed_for_config) {
                         auto boom = evaluateBoomDetection(computed, boom_params);
 
                         if (computed.boom_frame_truth >= 0 && boom.frame >= 0) {
-                            boom_error_sum += std::abs(boom.frame - computed.boom_frame_truth);
-                            boom_samples++;
+                            int error = std::abs(boom.frame - computed.boom_frame_truth);
+                            errors.push_back(error);
                         }
                     }
 
                     EvaluationResult result;
                     result.params.metrics = metric_cfg.params;
                     result.params.boom = boom_params;
-                    result.boom_mae = boom_samples > 0 ? boom_error_sum / boom_samples : 1e9;
-                    result.peak_mae = 1e9; // Not tracking peak for now
-                    result.samples_evaluated = boom_samples;
+                    result.samples_evaluated = static_cast<int>(errors.size());
+                    result.per_sim_errors = errors;
+
+                    if (!errors.empty()) {
+                        // Compute MAE
+                        double sum = 0.0;
+                        for (int e : errors) {
+                            sum += e;
+                        }
+                        result.boom_mae = sum / errors.size();
+
+                        // Compute stddev
+                        double sq_sum = 0.0;
+                        for (int e : errors) {
+                            double diff = e - result.boom_mae;
+                            sq_sum += diff * diff;
+                        }
+                        result.boom_stddev = std::sqrt(sq_sum / errors.size());
+
+                        // Compute median
+                        std::vector<int> sorted_errors = errors;
+                        std::sort(sorted_errors.begin(), sorted_errors.end());
+                        size_t mid = sorted_errors.size() / 2;
+                        if (sorted_errors.size() % 2 == 0) {
+                            result.boom_median =
+                                (sorted_errors[mid - 1] + sorted_errors[mid]) / 2.0;
+                        } else {
+                            result.boom_median = sorted_errors[mid];
+                        }
+
+                        // Max error
+                        result.boom_max = *std::max_element(errors.begin(), errors.end());
+                    } else {
+                        result.boom_mae = 1e9;
+                        result.boom_stddev = 0;
+                        result.boom_median = 1e9;
+                        result.boom_max = 1e9;
+                    }
+
+                    result.peak_mae = 1e9;
                     result.combined_score = result.boom_mae;
 
                     std::lock_guard<std::mutex> lock(results_mutex);
@@ -647,34 +703,198 @@ int main(int argc, char* argv[]) {
     std::sort(results.begin(), results.end(),
               [](auto const& a, auto const& b) { return a.combined_score < b.combined_score; });
 
-    // Display top 10 results
-    std::cout << "Top 10 parameter combinations:\n";
-    std::cout << std::string(90, '-') << "\n";
-    std::cout << std::setw(4) << "Rank" << std::setw(12) << "Boom MAE" << std::setw(12)
-              << "Peak MAE" << std::setw(10) << "Score"
-              << "  Parameters\n";
-    std::cout << std::string(90, '-') << "\n";
+    // ========================================
+    // RESULTS ANALYSIS
+    // ========================================
+    std::cout << std::string(100, '=') << "\n";
+    std::cout << "OPTIMIZATION RESULTS\n";
+    std::cout << std::string(100, '=') << "\n\n";
 
-    for (size_t i = 0; i < std::min(results.size(), size_t(10)); ++i) {
+    // ----------------------------------------
+    // Top 15 configurations (with full details)
+    // ----------------------------------------
+    std::cout << "TOP 15 CONFIGURATIONS (by Mean Absolute Error)\n";
+    std::cout << std::string(100, '-') << "\n";
+    std::cout << std::setw(4) << "Rank" << std::setw(8) << "MAE" << std::setw(8) << "Median"
+              << std::setw(8) << "StdDev" << std::setw(8) << "Max"
+              << "  Configuration\n";
+    std::cout << std::string(100, '-') << "\n";
+
+    for (size_t i = 0; i < std::min(results.size(), size_t(15)); ++i) {
         auto const& r = results[i];
-        std::cout << std::setw(4) << (i + 1) << std::setw(12) << std::fixed << std::setprecision(1)
-                  << r.boom_mae;
-        if (r.peak_mae < 1e6) {
-            std::cout << std::setw(12) << std::fixed << std::setprecision(1) << r.peak_mae;
-        } else {
-            std::cout << std::setw(12) << "N/A";
+        std::cout << std::setw(4) << (i + 1) << std::setw(8) << std::fixed << std::setprecision(1)
+                  << r.boom_mae << std::setw(8) << std::setprecision(1) << r.boom_median
+                  << std::setw(8) << std::setprecision(1) << r.boom_stddev << std::setw(8)
+                  << std::setprecision(0) << r.boom_max << "  " << r.params.describeFull() << "\n";
+    }
+    std::cout << std::string(100, '-') << "\n\n";
+
+    // ----------------------------------------
+    // Best configuration per metric type
+    // ----------------------------------------
+    std::cout << "BEST CONFIGURATION PER METRIC TYPE\n";
+    std::cout << std::string(100, '-') << "\n";
+
+    std::vector<std::string> metric_types = {"angular_causticness",   "tip_causticness",
+                                             "spatial_concentration", "cv_causticness",
+                                             "fold_causticness",      "local_coherence"};
+
+    for (auto const& metric_type : metric_types) {
+        // Find best result for this metric
+        EvaluationResult const* best = nullptr;
+        for (auto const& r : results) {
+            if (r.params.boom.metric_name == metric_type) {
+                if (!best || r.boom_mae < best->boom_mae) {
+                    best = &r;
+                }
+            }
         }
-        std::cout << std::setw(10) << std::fixed << std::setprecision(1)
-                  << r.boom_mae // Use boom_mae as score when no peak
-                  << "  " << r.params.describe() << "\n";
+        if (best) {
+            // Shorten metric name
+            std::string short_name = metric_type;
+            if (short_name.length() > 20) {
+                short_name = short_name.substr(0, 17) + "...";
+            }
+            std::cout << "  " << std::left << std::setw(22) << short_name << std::right
+                      << " MAE=" << std::setw(6) << std::fixed << std::setprecision(1)
+                      << best->boom_mae << " | " << best->params.describeFull() << "\n";
+        }
+    }
+    std::cout << std::string(100, '-') << "\n\n";
+
+    // ----------------------------------------
+    // Best configuration per method type
+    // ----------------------------------------
+    std::cout << "BEST CONFIGURATION PER METHOD TYPE\n";
+    std::cout << std::string(100, '-') << "\n";
+
+    std::vector<std::pair<BoomDetectionMethod, std::string>> method_types = {
+        {BoomDetectionMethod::MaxCausticness, "MaxCausticness"},
+        {BoomDetectionMethod::FirstPeakPercent, "FirstPeakPercent"},
+        {BoomDetectionMethod::DerivativePeak, "DerivativePeak"}};
+
+    for (auto const& [method, method_name] : method_types) {
+        EvaluationResult const* best = nullptr;
+        for (auto const& r : results) {
+            if (r.params.boom.method == method) {
+                if (!best || r.boom_mae < best->boom_mae) {
+                    best = &r;
+                }
+            }
+        }
+        if (best) {
+            std::cout << "  " << std::left << std::setw(18) << method_name << std::right
+                      << " MAE=" << std::setw(6) << std::fixed << std::setprecision(1)
+                      << best->boom_mae << " | " << best->params.describeFull() << "\n";
+        }
+    }
+    std::cout << std::string(100, '-') << "\n\n";
+
+    // ----------------------------------------
+    // Best MetricParams (aggregated across all boom methods)
+    // ----------------------------------------
+    std::cout << "BEST METRIC PARAMETERS (aggregated across boom methods)\n";
+    std::cout << std::string(100, '-') << "\n";
+
+    // Group results by MetricConfig and find average MAE
+    std::map<std::tuple<int, int, int>, std::vector<double>> metric_config_maes;
+    for (auto const& r : results) {
+        auto key = std::make_tuple(r.params.metrics.min_sectors, r.params.metrics.max_sectors,
+                                   r.params.metrics.target_per_sector);
+        metric_config_maes[key].push_back(r.boom_mae);
     }
 
-    std::cout << std::string(90, '-') << "\n\n";
+    // Compute average MAE for each MetricConfig
+    std::vector<std::pair<std::tuple<int, int, int>, double>> metric_config_avg;
+    for (auto const& [key, maes] : metric_config_maes) {
+        double sum = 0;
+        for (double m : maes) {
+            sum += m;
+        }
+        metric_config_avg.push_back({key, sum / maes.size()});
+    }
 
-    // Save best parameters
+    // Sort by average MAE
+    std::sort(metric_config_avg.begin(), metric_config_avg.end(),
+              [](auto const& a, auto const& b) { return a.second < b.second; });
+
+    // Show top 5
+    std::cout << "  " << std::setw(20) << "MetricParams" << std::setw(12) << "Avg MAE"
+              << std::setw(12) << "Best MAE" << "\n";
+    for (size_t i = 0; i < std::min(metric_config_avg.size(), size_t(5)); ++i) {
+        auto const& [key, avg_mae] = metric_config_avg[i];
+        auto [min_sec, max_sec, target] = key;
+
+        // Find best MAE for this config
+        double best_mae = 1e9;
+        for (auto const& r : results) {
+            if (r.params.metrics.min_sectors == min_sec &&
+                r.params.metrics.max_sectors == max_sec &&
+                r.params.metrics.target_per_sector == target) {
+                best_mae = std::min(best_mae, r.boom_mae);
+            }
+        }
+
+        std::ostringstream cfg_str;
+        cfg_str << "sec=" << min_sec << "-" << max_sec << " tgt=" << target;
+        std::cout << "  " << std::setw(20) << cfg_str.str() << std::setw(12) << std::fixed
+                  << std::setprecision(1) << avg_mae << std::setw(12) << std::setprecision(1)
+                  << best_mae << "\n";
+    }
+    std::cout << std::string(100, '-') << "\n\n";
+
+    // ----------------------------------------
+    // Winner details
+    // ----------------------------------------
     if (!results.empty()) {
-        saveBestParams("best_params.toml", results[0]);
+        auto const& winner = results[0];
+        std::cout << "WINNER DETAILS\n";
+        std::cout << std::string(100, '-') << "\n";
+        std::cout << "  Metric:           " << winner.params.boom.metric_name << "\n";
+        std::cout << "  Method:           ";
+        switch (winner.params.boom.method) {
+        case BoomDetectionMethod::MaxCausticness:
+            std::cout << "MaxCausticness (offset=" << winner.params.boom.offset_seconds << "s)\n";
+            break;
+        case BoomDetectionMethod::FirstPeakPercent:
+            std::cout << "FirstPeakPercent (threshold="
+                      << (int)(winner.params.boom.peak_percent_threshold * 100) << "%)\n";
+            break;
+        case BoomDetectionMethod::DerivativePeak:
+            std::cout << "DerivativePeak (window=" << winner.params.boom.smoothing_window << ")\n";
+            break;
+        }
+        std::cout << "  MetricParams:     min_sectors=" << winner.params.metrics.min_sectors
+                  << ", max_sectors=" << winner.params.metrics.max_sectors
+                  << ", target=" << winner.params.metrics.target_per_sector << "\n";
+        std::cout << "\n";
+        std::cout << "  Statistics:\n";
+        std::cout << "    Mean Absolute Error:   " << std::fixed << std::setprecision(2)
+                  << winner.boom_mae << " frames\n";
+        std::cout << "    Median Absolute Error: " << std::setprecision(2) << winner.boom_median
+                  << " frames\n";
+        std::cout << "    Std Deviation:         " << std::setprecision(2) << winner.boom_stddev
+                  << " frames\n";
+        std::cout << "    Max Error:             " << std::setprecision(0) << winner.boom_max
+                  << " frames\n";
+        std::cout << "    Samples:               " << winner.samples_evaluated << "\n";
+
+        // Per-simulation breakdown if we have the data
+        if (!winner.per_sim_errors.empty() && winner.per_sim_errors.size() == simulations.size()) {
+            std::cout << "\n  Per-Simulation Errors:\n";
+            for (size_t i = 0; i < simulations.size(); ++i) {
+                std::cout << "    " << std::left << std::setw(30) << simulations[i].id << std::right
+                          << " error=" << std::setw(4) << winner.per_sim_errors[i] << " frames"
+                          << " (truth=" << simulations[i].boom_frame_truth << ")\n";
+            }
+        }
+        std::cout << std::string(100, '-') << "\n\n";
+
+        // Save best parameters
+        saveBestParams("best_params.toml", winner);
     }
+
+    std::cout << std::string(100, '=') << "\n";
 
     return 0;
 }
