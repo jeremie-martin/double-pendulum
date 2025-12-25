@@ -34,6 +34,7 @@ C++20 double pendulum physics simulation with GPU-accelerated rendering. Simulat
 | `src/main_gui.cpp` | GUI application with real-time preview and analysis |
 | `src/main_metrics.cpp` | Metric iteration tool for recomputing metrics |
 | `src/main_optimize.cpp` | Metric parameter optimization via grid search |
+| `src/main_stability.cpp` | Metric stability analysis across pendulum counts |
 | `src/simulation_data.cpp` | ZSTD-compressed simulation data I/O |
 | `src/gl_renderer.cpp` | GPU line rendering with GLSL shaders |
 | `src/headless_gl.cpp` | EGL context for headless GPU rendering |
@@ -340,6 +341,44 @@ Binary file with 144-byte header + ZSTD-compressed payload:
 | 1,000 | 100 | 2.4 MB | ~2 MB |
 | 100,000 | 660 | 1.6 GB | ~400 MB |
 | 1,000,000 | 3,000 | 72 GB | ~18 GB |
+
+## Metric Stability Analysis
+
+The stability analysis tool (`pendulum-stability`) tests whether metrics produce consistent results across different pendulum counts. This is critical for validating that low-N probes can predict full simulation results.
+
+### Usage
+
+```bash
+# Quick test with 5 pendulum counts
+./pendulum-stability --counts 500,1000,2000,5000,10000
+
+# Production analysis (higher counts)
+./pendulum-stability --counts 1000,5000,10000,50000,100000
+
+# Save detailed per-frame data
+./pendulum-stability --output stability_data.csv
+```
+
+### Stability Grades
+
+| Grade | CV Range | Meaning |
+|-------|----------|---------|
+| A+ | <1% | Excellent - use for absolute value comparisons |
+| A | <5% | Good - reliable for detection |
+| B | <10% | Acceptable - use with caution |
+| C-F | >10% | Poor/Unstable - relative features only |
+
+### Key Findings
+
+**Stable metrics (CV < 1%):** `variance`, `circular_spread`, `angular_range`, `spread_ratio`, `curvature`
+
+**Moderately stable (CV 1-5%):** `trajectory_smoothness`, `fold_causticness`, `local_coherence`, `true_folds`
+
+**Unstable absolute values (CV 20-50%):** All sector-based causticness metrics (`angular_causticness`, `organization_causticness`, `cv_causticness`, `tip_causticness`, etc.)
+
+**Critical insight:** Despite high CV in absolute values, **boom detection remains stable** (stddev <3 frames for N≥5000). Detection methods analyze curve shape (peaks, derivatives) rather than absolute values, making them robust to scaling variations.
+
+**Recommendation:** For probe filtering, use stable metrics (`uniformity`, `variance`) for absolute thresholds. Use causticness metrics only for relative detection (boom frame, quality ranking).
 
 ## GUI Application
 

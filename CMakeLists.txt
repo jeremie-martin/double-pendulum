@@ -99,6 +99,15 @@ target_compile_options(pendulum-optimize PRIVATE
     -Wall -Wextra -Wpedantic
 )
 
+# Metric stability analysis executable
+add_executable(pendulum-stability src/main_stability.cpp)
+
+target_link_libraries(pendulum-stability PRIVATE double-pendulum-core)
+
+target_compile_options(pendulum-stability PRIVATE
+    -Wall -Wextra -Wpedantic
+)
+
 # GUI executable (optional)
 option(BUILD_GUI "Build GUI application with ImGui" OFF)
 if(BUILD_GUI)
