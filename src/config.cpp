@@ -300,6 +300,44 @@ static void loadConfigFromTable(Config& config, toml::table const& tbl) {
         }
     }
 
+    // Multi-target configuration (new format: [targets.X])
+    if (auto targets_tbl = tbl["targets"].as_table()) {
+        for (auto const& [key, value] : *targets_tbl) {
+            if (auto target_tbl = value.as_table()) {
+                TargetConfig tc;
+                tc.name = std::string(key);
+                tc.type = get_string_or(*target_tbl, "type", "frame");
+                tc.metric = get_string_or(*target_tbl, "metric", "angular_causticness");
+                tc.method = get_string_or(*target_tbl, "method", "max_value");
+
+                // Frame detection parameters
+                tc.offset_seconds = get_or(*target_tbl, "offset_seconds", tc.offset_seconds);
+                tc.peak_percent_threshold = get_or(*target_tbl, "peak_percent_threshold", tc.peak_percent_threshold);
+                tc.min_peak_prominence = get_or(*target_tbl, "min_peak_prominence", tc.min_peak_prominence);
+                tc.smoothing_window = get_or(*target_tbl, "smoothing_window", tc.smoothing_window);
+                tc.crossing_threshold = get_or(*target_tbl, "crossing_threshold", tc.crossing_threshold);
+                tc.crossing_confirmation = get_or(*target_tbl, "crossing_confirmation", tc.crossing_confirmation);
+
+                // Score weights (for composite scoring)
+                if (auto weights_arr = target_tbl->get("weights")) {
+                    if (auto weights_array = weights_arr->as_array()) {
+                        for (auto const& w : *weights_array) {
+                            if (auto w_tbl = w.as_table()) {
+                                auto score_name = get_string_or(*w_tbl, "name", "");
+                                auto weight = get_or(*w_tbl, "weight", 1.0);
+                                if (!score_name.empty()) {
+                                    tc.weights.emplace_back(score_name, weight);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                config.targets.push_back(tc);
+            }
+        }
+    }
+
     // Detection thresholds
     if (auto detect = tbl["detection"].as_table()) {
         config.detection.boom_threshold = get_or(*detect, "boom_threshold", config.detection.boom_threshold);
@@ -949,6 +987,32 @@ void Config::save(std::string const& path) const {
     file << "[boom_detection]\n";
     file << "active_metric = \"" << boom_metric << "\"\n";
     file << "\n";
+
+    // Multi-target configuration
+    for (auto const& tc : targets) {
+        file << "[targets." << tc.name << "]\n";
+        file << "type = \"" << tc.type << "\"\n";
+        file << "metric = \"" << tc.metric << "\"\n";
+        file << "method = \"" << tc.method << "\"\n";
+
+        if (tc.type == "frame") {
+            file << "offset_seconds = " << tc.offset_seconds << "\n";
+            file << "peak_percent_threshold = " << tc.peak_percent_threshold << "\n";
+            file << "min_peak_prominence = " << tc.min_peak_prominence << "\n";
+            file << "smoothing_window = " << tc.smoothing_window << "\n";
+            file << "crossing_threshold = " << tc.crossing_threshold << "\n";
+            file << "crossing_confirmation = " << tc.crossing_confirmation << "\n";
+        }
+
+        if (!tc.weights.empty()) {
+            file << "weights = [\n";
+            for (auto const& [name, weight] : tc.weights) {
+                file << "  { name = \"" << name << "\", weight = " << weight << " },\n";
+            }
+            file << "]\n";
+        }
+        file << "\n";
+    }
 
     // Detection section
     // Note: boom_threshold and boom_confirmation are deprecated (boom uses max causticness)

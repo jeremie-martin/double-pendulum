@@ -218,4 +218,55 @@ inline std::vector<PredictionTarget> createDefaultTargets(
     };
 }
 
+// ============================================================================
+// CONFIG CONVERSION (requires config.h)
+// ============================================================================
+
+// Forward declaration - include config.h when using these functions
+struct TargetConfig;
+
+// Convert TargetConfig (from config.h) to PredictionTarget
+// This is defined here to avoid circular dependencies
+inline PredictionTarget targetConfigToPredictionTarget(
+    std::string const& name,
+    std::string const& type,
+    std::string const& metric,
+    std::string const& method,
+    double offset_seconds,
+    double peak_percent_threshold,
+    double min_peak_prominence,
+    int smoothing_window,
+    double crossing_threshold,
+    int crossing_confirmation,
+    std::vector<std::pair<std::string, double>> const& weights) {
+
+    PredictionTarget target;
+    target.name = name;
+
+    if (type == "score" || type == "quality") {
+        target.type = PredictionType::Score;
+
+        ScoreParams params;
+        params.metric_name = metric;
+        params.method = parseScoreMethod(method);
+        params.weights = weights;
+        target.params = params;
+    } else {
+        target.type = PredictionType::Frame;
+
+        FrameDetectionParams params;
+        params.metric_name = metric;
+        params.method = parseFrameDetectionMethod(method);
+        params.offset_seconds = offset_seconds;
+        params.peak_percent_threshold = peak_percent_threshold;
+        params.min_peak_prominence = min_peak_prominence;
+        params.smoothing_window = smoothing_window;
+        params.crossing_threshold = crossing_threshold;
+        params.crossing_confirmation = crossing_confirmation;
+        target.params = params;
+    }
+
+    return target;
+}
+
 }  // namespace optimize

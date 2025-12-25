@@ -5,6 +5,7 @@
 #include <string>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 
 // Conversion utilities
 inline double deg2rad(double degrees) {
@@ -353,6 +354,30 @@ struct DetectionParams {
     bool early_stop_after_chaos = false;
 };
 
+// ============================================================================
+// TARGET CONFIGURATION (for multi-target prediction system)
+// ============================================================================
+
+// Configuration for a single prediction target
+// Supports both frame predictions (boom, chaos) and score predictions (boom_quality)
+struct TargetConfig {
+    std::string name;              // e.g., "boom", "chaos", "boom_quality"
+    std::string type = "frame";    // "frame" or "score"
+    std::string metric;            // Metric to use for detection
+    std::string method;            // Detection/scoring method
+
+    // Frame detection parameters
+    double offset_seconds = 0.0;
+    double peak_percent_threshold = 0.6;
+    double min_peak_prominence = 0.05;
+    int smoothing_window = 5;
+    double crossing_threshold = 0.3;
+    int crossing_confirmation = 3;
+
+    // Score prediction weights (for composite scoring)
+    std::vector<std::pair<std::string, double>> weights;
+};
+
 enum class OutputFormat { PNG, Video };
 
 // Output directory mode (internal use only - not configurable via TOML)
@@ -393,6 +418,10 @@ struct Config {
 
     // Which metric to use for boom detection
     std::string boom_metric = "angular_causticness";
+
+    // Multi-target prediction configuration
+    // If empty, default targets are auto-generated from boom_metric and detection settings
+    std::vector<TargetConfig> targets;
 
     DetectionParams detection;
     OutputParams output;
