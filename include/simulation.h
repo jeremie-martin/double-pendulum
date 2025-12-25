@@ -8,6 +8,7 @@
 #include "metrics/event_detector.h"
 #include "metrics/metrics_collector.h"
 #include "metrics/probe_pipeline.h"
+#include "optimize/prediction_target.h"
 #include "pendulum.h"
 #include "video_writer.h"
 
@@ -40,6 +41,41 @@ struct SimulationResults {
     std::string output_directory; // Where video/frames were saved
     std::string video_path;       // Full path to video (if format is video)
     metrics::SimulationScore score;  // Quality scores from analyzers
+
+    // Multi-target predictions (new)
+    std::vector<optimize::PredictionResult> predictions;
+
+    // Convenience accessors for backward compatibility
+    std::optional<int> getBoomFrame() const {
+        // First check predictions
+        for (auto const& p : predictions) {
+            if (p.target_name == "boom" && p.isFrame() && p.valid()) {
+                return p.predicted_frame;
+            }
+        }
+        // Fall back to legacy field
+        return boom_frame;
+    }
+
+    std::optional<int> getChaosFrame() const {
+        // First check predictions
+        for (auto const& p : predictions) {
+            if (p.target_name == "chaos" && p.isFrame() && p.valid()) {
+                return p.predicted_frame;
+            }
+        }
+        // Fall back to legacy field
+        return chaos_frame;
+    }
+
+    std::optional<double> getBoomQuality() const {
+        for (auto const& p : predictions) {
+            if (p.target_name == "boom_quality" && p.isScore()) {
+                return p.predicted_score;
+            }
+        }
+        return std::nullopt;
+    }
 };
 
 class Simulation {

@@ -3,6 +3,9 @@
 #include "enum_strings.h"
 #include "metrics/boom_detection.h"
 #include "metrics/metrics_init.h"
+#include "optimize/frame_detector.h"
+#include "optimize/score_predictor.h"
+#include "optimize/target_evaluator.h"
 #include "simulation_data.h"
 
 #include <algorithm>
@@ -183,12 +186,32 @@ void Simulation::saveMetadata(SimulationResults const& results) {
             first = false;
         }
         out << "\n";
-        out << "  }\n";
-    } else {
-        out << "\n";
+        out << "  }";
     }
 
-    out << "}\n";
+    // Add predictions section if any predictions computed
+    if (!results.predictions.empty()) {
+        out << ",\n";
+        out << "  \"predictions\": {\n";
+        bool first = true;
+        for (auto const& p : results.predictions) {
+            if (!first)
+                out << ",\n";
+            out << "    \"" << p.target_name << "\": {\n";
+            out << "      \"type\": \"" << optimize::toString(p.type) << "\",\n";
+            if (p.isFrame()) {
+                out << "      \"frame\": " << p.predicted_frame << ",\n";
+                out << "      \"seconds\": " << p.predicted_seconds << ",\n";
+            }
+            out << "      \"score\": " << p.predicted_score << "\n";
+            out << "    }";
+            first = false;
+        }
+        out << "\n";
+        out << "  }";
+    }
+
+    out << "\n}\n";
 }
 
 void Simulation::saveMetricsCSV() {
@@ -552,6 +575,62 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
                           causticness_analyzer_.peakClarityScore());
         results.score.set(metrics::ScoreNames::PostBoomSustain,
                           causticness_analyzer_.postBoomAreaNormalized());
+    }
+
+    // Populate multi-target predictions
+    // If config has explicit targets, use those; otherwise use defaults
+    if (!config_.targets.empty()) {
+        for (auto const& tc : config_.targets) {
+            auto target = optimize::targetConfigToPredictionTarget(
+                tc.name, tc.type, tc.metric, tc.method,
+                tc.offset_seconds, tc.peak_percent_threshold,
+                tc.min_peak_prominence, tc.smoothing_window,
+                tc.crossing_threshold, tc.crossing_confirmation,
+                tc.weights);
+
+            if (target.isFrame()) {
+                optimize::FrameDetector detector(target.frameParams());
+                auto detection = detector.detect(metrics_collector_, frame_duration);
+                results.predictions.push_back(
+                    optimize::toPredictionResult(target.name, detection));
+            } else {
+                auto prediction = optimize::predictScore(causticness_analyzer_, target.scoreParams());
+                results.predictions.push_back(
+                    optimize::toPredictionResult(target.name, prediction));
+            }
+        }
+    } else {
+        // Use default targets based on boom_metric
+        // Add boom prediction (already computed above)
+        if (results.boom_frame) {
+            optimize::PredictionResult boom_pred;
+            boom_pred.target_name = "boom";
+            boom_pred.type = optimize::PredictionType::Frame;
+            boom_pred.predicted_frame = *results.boom_frame;
+            boom_pred.predicted_seconds = *results.boom_frame * frame_duration;
+            boom_pred.predicted_score = results.boom_causticness;
+            results.predictions.push_back(boom_pred);
+        }
+
+        // Add chaos prediction from event detector
+        if (results.chaos_frame) {
+            optimize::PredictionResult chaos_pred;
+            chaos_pred.target_name = "chaos";
+            chaos_pred.type = optimize::PredictionType::Frame;
+            chaos_pred.predicted_frame = *results.chaos_frame;
+            chaos_pred.predicted_seconds = *results.chaos_frame * frame_duration;
+            chaos_pred.predicted_score = results.chaos_variance;
+            results.predictions.push_back(chaos_pred);
+        }
+
+        // Add boom quality prediction from analyzer
+        if (causticness_analyzer_.hasResults()) {
+            optimize::PredictionResult quality_pred;
+            quality_pred.target_name = "boom_quality";
+            quality_pred.type = optimize::PredictionType::Score;
+            quality_pred.predicted_score = causticness_analyzer_.score();
+            results.predictions.push_back(quality_pred);
+        }
     }
 
     // Save metadata, config copy, and metrics
