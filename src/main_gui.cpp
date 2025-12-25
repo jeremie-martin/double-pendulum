@@ -16,6 +16,7 @@
 #include <GL/glew.h>
 #include <SDL2/SDL.h>
 #include <atomic>
+#include <map>
 #include <chrono>
 #include <cstdlib>
 #include <imgui.h>
@@ -150,6 +151,26 @@ struct PresetUIState {
     }
 };
 
+// Per-metric boom detection state (for multi-boom visualization)
+struct MetricBoomState {
+    bool enabled = false;       // Show this metric's boom line on graph
+    bool show_params = false;   // Show this metric's params in UI panel
+    int boom_frame = -1;        // Detected boom frame for this metric
+    double boom_value = 0.0;    // Causticness/metric value at boom
+};
+
+// List of all metrics that support boom detection
+inline std::vector<std::string> const& getAllBoomMetrics() {
+    static std::vector<std::string> const metrics = {
+        "angular_causticness", "tip_causticness", "cv_causticness",
+        "spatial_concentration", "fold_causticness", "organization_causticness",
+        "r1_concentration", "r2_concentration", "joint_concentration",
+        "trajectory_smoothness", "curvature", "true_folds",
+        "local_coherence", "variance"
+    };
+    return metrics;
+}
+
 // Application state
 struct AppState {
     Config config;
@@ -215,6 +236,20 @@ struct AppState {
     // Metric parameters window
     bool show_metric_params_window = false;
     bool needs_metric_recompute = false;
+
+    // Multi-metric boom detection state
+    std::map<std::string, MetricBoomState> boom_metrics;
+
+    // Initialize boom_metrics map with all metrics disabled
+    void initBoomMetrics() {
+        for (auto const& name : getAllBoomMetrics()) {
+            boom_metrics[name] = MetricBoomState{};
+        }
+        // Enable the primary metric by default
+        if (boom_metrics.count(config.boom_metric)) {
+            boom_metrics[config.boom_metric].enabled = true;
+        }
+    }
 };
 
 // Helper: Update boom detection using configured params and run analyzers
@@ -251,6 +286,35 @@ void updateChaosDetection(AppState& state) {
     } else {
         state.chaos_frame.reset();
     }
+}
+
+// Helper: Update boom detection for all enabled metrics
+// This runs boom detection independently for each metric's configured params
+void updateAllBoomDetections(AppState& state) {
+    for (auto& [metric_name, boom_state] : state.boom_metrics) {
+        if (!boom_state.enabled) {
+            boom_state.boom_frame = -1;
+            boom_state.boom_value = 0.0;
+            continue;
+        }
+
+        // Get this metric's boom params from config
+        BoomDetectionParams params;
+        if (auto const* mc = state.config.getMetricConfig(metric_name)) {
+            params = mc->getBoomParams();
+        } else {
+            // Fallback: use default params with metric name set
+            params.metric_name = metric_name;
+        }
+
+        auto boom = metrics::findBoomFrame(state.metrics_collector,
+                                           state.frame_duration, params);
+        boom_state.boom_frame = boom.frame;
+        boom_state.boom_value = boom.causticness;
+    }
+
+    // Also update primary boom (for other GUI features that use state.boom_frame)
+    updateBoomDetection(state);
 }
 
 void initSimulation(AppState& state, GLRenderer& renderer) {
@@ -2387,6 +2451,7 @@ int main(int argc, char* argv[]) {
     // Load config and presets
     AppState state;
     state.config = Config::load(config_path);
+    state.initBoomMetrics();  // Initialize multi-metric boom state
     std::cout << "Loaded config from: " << config_path << "\n";
     state.presets = PresetLibrary::load("config/presets.toml");
 
