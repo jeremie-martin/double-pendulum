@@ -136,6 +136,20 @@ BatchConfig BatchConfig::load(std::string const& path) {
             if (auto min_sustain = filter->get("min_post_boom_sustain")) {
                 config.filter.min_post_boom_sustain = min_sustain->value<double>().value_or(0.0);
             }
+            // New chaos filter fields
+            if (auto min_chaos = filter->get("min_chaos_seconds")) {
+                config.filter.min_chaos_seconds = min_chaos->value<double>().value_or(0.0);
+            }
+            if (auto max_chaos = filter->get("max_chaos_seconds")) {
+                config.filter.max_chaos_seconds = max_chaos->value<double>().value_or(0.0);
+            }
+            if (auto req_chaos = filter->get("require_chaos")) {
+                config.filter.require_chaos = req_chaos->value<bool>().value_or(false);
+            }
+            // New quality filter field
+            if (auto min_quality = filter->get("min_boom_quality")) {
+                config.filter.min_boom_quality = min_quality->value<double>().value_or(0.0);
+            }
         }
 
         // Load preset library if specified

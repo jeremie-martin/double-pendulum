@@ -45,23 +45,37 @@
 //
 // =============================================================================
 struct FilterCriteria {
+    // Boom timing constraints
     double min_boom_seconds = 0.0;   // Minimum boom time (0 = no minimum)
     double max_boom_seconds = 0.0;   // Maximum boom time (0 = no maximum)
+    bool require_boom = true;        // Reject simulations with no detectable boom
+
+    // Chaos timing constraints (new)
+    double min_chaos_seconds = 0.0;  // Minimum chaos time (0 = no minimum)
+    double max_chaos_seconds = 0.0;  // Maximum chaos time (0 = no maximum)
+    bool require_chaos = false;      // Reject simulations with no detectable chaos
+
+    // Quality thresholds
     double min_uniformity = 0.0;     // Minimum uniformity (0 = no requirement, 0.9 recommended)
     double min_peak_clarity = 0.0;   // Minimum peak clarity (0 = no requirement, 0.75 recommended)
     double min_post_boom_sustain = 0.0;  // Minimum post-boom area (0 = no requirement)
-    bool require_boom = true;        // Reject simulations with no detectable boom
+    double min_boom_quality = 0.0;   // Minimum boom quality score (0 = no requirement, new)
+
+    // Music sync
     bool require_valid_music = true; // Fail if no music track has drop > boom time
 
     // Check if filtering is enabled (any non-default values)
     bool isEnabled() const {
         return min_boom_seconds > 0.0 || max_boom_seconds > 0.0 || min_uniformity > 0.0 ||
-               min_peak_clarity > 0.0 || min_post_boom_sustain > 0.0 || require_boom;
+               min_peak_clarity > 0.0 || min_post_boom_sustain > 0.0 || min_boom_quality > 0.0 ||
+               require_boom || require_chaos || min_chaos_seconds > 0.0 || max_chaos_seconds > 0.0;
     }
 
     // Convert to metrics::ProbeFilter
     metrics::ProbeFilter toProbeFilter() const {
         metrics::ProbeFilter filter;
+
+        // Boom constraints
         if (require_boom) {
             filter.addEventRequired(metrics::EventNames::Boom);
         }
@@ -70,6 +84,18 @@ struct FilterCriteria {
                                   min_boom_seconds > 0.0 ? min_boom_seconds : 0.0,
                                   max_boom_seconds > 0.0 ? max_boom_seconds : 1e9);
         }
+
+        // Chaos constraints
+        if (require_chaos) {
+            filter.addEventRequired(metrics::EventNames::Chaos);
+        }
+        if (min_chaos_seconds > 0.0 || max_chaos_seconds > 0.0) {
+            filter.addEventTiming(metrics::EventNames::Chaos,
+                                  min_chaos_seconds > 0.0 ? min_chaos_seconds : 0.0,
+                                  max_chaos_seconds > 0.0 ? max_chaos_seconds : 1e9);
+        }
+
+        // Quality thresholds
         if (min_uniformity > 0.0) {
             filter.addMetricThreshold(metrics::MetricNames::CircularSpread, min_uniformity);
         }
@@ -78,6 +104,9 @@ struct FilterCriteria {
         }
         if (min_post_boom_sustain > 0.0) {
             filter.addScoreThreshold(metrics::ScoreNames::PostBoomSustain, min_post_boom_sustain);
+        }
+        if (min_boom_quality > 0.0) {
+            filter.addScoreThreshold(metrics::ScoreNames::Causticness, min_boom_quality);
         }
         return filter;
     }
