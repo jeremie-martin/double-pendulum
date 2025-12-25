@@ -45,6 +45,10 @@ struct SimulationResults {
     // Multi-target predictions (new)
     std::vector<optimize::PredictionResult> predictions;
 
+    // Preset names for metadata (set by batch generator, empty for single-run)
+    std::string color_preset_name;
+    std::string post_process_preset_name;
+
     // Convenience accessors for backward compatibility
     std::optional<int> getBoomFrame() const {
         // First check predictions

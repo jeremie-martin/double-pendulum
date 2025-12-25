@@ -609,6 +609,7 @@ Config BatchGenerator::generateRandomConfig() {
         std::string const& name = config_.color_preset_names[dist(rng_)];
         if (auto preset = config_.presets.getColor(name)) {
             config.color = *preset;
+            config.selected_color_preset_name = name;  // Track preset name for metadata
         } else {
             std::cerr << "Warning: Color preset '" << name << "' not found in library\n";
         }
@@ -620,6 +621,7 @@ Config BatchGenerator::generateRandomConfig() {
         std::string const& name = config_.post_process_preset_names[dist(rng_)];
         if (auto preset = config_.presets.getPostProcess(name)) {
             config.post_process = *preset;
+            config.selected_post_process_preset_name = name;  // Track preset name for metadata
         } else {
             std::cerr << "Warning: Post-process preset '" << name << "' not found in library\n";
         }

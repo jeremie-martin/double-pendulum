@@ -215,21 +215,71 @@ void Simulation::saveMetadata(SimulationResults const& results) {
 
     out << std::fixed << std::setprecision(6);
     out << "{\n";
-    out << "  \"version\": \"1.0\",\n";
+    out << "  \"version\": \"1.1\",\n";
     out << "  \"created_at\": \"" << time_str.str() << "\",\n";
-    out << "  \"config\": {\n";
+
+    // Physics parameters (full)
+    out << "  \"physics\": {\n";
+    out << "    \"gravity\": " << config_.physics.gravity << ",\n";
+    out << "    \"length1\": " << config_.physics.length1 << ",\n";
+    out << "    \"length2\": " << config_.physics.length2 << ",\n";
+    out << "    \"mass1\": " << config_.physics.mass1 << ",\n";
+    out << "    \"mass2\": " << config_.physics.mass2 << ",\n";
+    out << "    \"initial_angle1_deg\": " << (config_.physics.initial_angle1 * 180.0 / M_PI) << ",\n";
+    out << "    \"initial_angle2_deg\": " << (config_.physics.initial_angle2 * 180.0 / M_PI) << ",\n";
+    out << "    \"initial_velocity1\": " << config_.physics.initial_velocity1 << ",\n";
+    out << "    \"initial_velocity2\": " << config_.physics.initial_velocity2 << "\n";
+    out << "  },\n";
+
+    // Simulation parameters
+    out << "  \"simulation\": {\n";
+    out << "    \"pendulum_count\": " << config_.simulation.pendulum_count << ",\n";
+    out << "    \"angle_variation_deg\": " << (config_.simulation.angle_variation * 180.0 / M_PI) << ",\n";
     out << "    \"duration_seconds\": " << config_.simulation.duration_seconds << ",\n";
     out << "    \"total_frames\": " << config_.simulation.total_frames << ",\n";
-    out << "    \"video_fps\": " << config_.output.video_fps << ",\n";
-    out << "    \"video_duration\": " << video_duration << ",\n";
-    out << "    \"simulation_speed\": " << simulation_speed << ",\n";
-    out << "    \"pendulum_count\": " << config_.simulation.pendulum_count << ",\n";
-    out << "    \"width\": " << config_.render.width << ",\n";
-    out << "    \"height\": " << config_.render.height << ",\n";
     out << "    \"physics_quality\": \"" << toString(config_.simulation.physics_quality) << "\",\n";
     out << "    \"max_dt\": " << config_.simulation.max_dt << ",\n";
     out << "    \"substeps\": " << config_.simulation.substeps() << ",\n";
     out << "    \"dt\": " << config_.simulation.dt() << "\n";
+    out << "  },\n";
+
+    // Render parameters
+    out << "  \"render\": {\n";
+    out << "    \"width\": " << config_.render.width << ",\n";
+    out << "    \"height\": " << config_.render.height << ",\n";
+    out << "    \"thread_count\": " << config_.render.thread_count << "\n";
+    out << "  },\n";
+
+    // Color parameters
+    out << "  \"color\": {\n";
+    out << "    \"scheme\": \"" << toString(config_.color.scheme) << "\",\n";
+    out << "    \"start\": " << config_.color.start << ",\n";
+    out << "    \"end\": " << config_.color.end;
+    if (!results.color_preset_name.empty()) {
+        out << ",\n    \"preset_name\": \"" << results.color_preset_name << "\"";
+    }
+    out << "\n  },\n";
+
+    // Post-process parameters
+    out << "  \"post_process\": {\n";
+    out << "    \"tone_map\": \"" << toString(config_.post_process.tone_map) << "\",\n";
+    out << "    \"exposure\": " << config_.post_process.exposure << ",\n";
+    out << "    \"contrast\": " << config_.post_process.contrast << ",\n";
+    out << "    \"gamma\": " << config_.post_process.gamma << ",\n";
+    out << "    \"normalization\": \"" << toString(config_.post_process.normalization) << "\",\n";
+    out << "    \"reinhard_white_point\": " << config_.post_process.reinhard_white_point;
+    if (!results.post_process_preset_name.empty()) {
+        out << ",\n    \"preset_name\": \"" << results.post_process_preset_name << "\"";
+    }
+    out << "\n  },\n";
+
+    // Video output parameters
+    out << "  \"output\": {\n";
+    out << "    \"video_fps\": " << config_.output.video_fps << ",\n";
+    out << "    \"video_duration\": " << video_duration << ",\n";
+    out << "    \"simulation_speed\": " << simulation_speed << ",\n";
+    out << "    \"video_codec\": \"" << config_.output.video_codec << "\",\n";
+    out << "    \"video_crf\": " << config_.output.video_crf << "\n";
     out << "  },\n";
     out << "  \"results\": {\n";
     out << "    \"frames_completed\": " << results.frames_completed << ",\n";
@@ -512,6 +562,10 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     float scale = static_cast<float>(width) / 5.0f;
 
     SimulationResults results;
+
+    // Copy preset names from config (set by batch generator for metadata)
+    results.color_preset_name = config_.selected_color_preset_name;
+    results.post_process_preset_name = config_.selected_post_process_preset_name;
 
     // Frame duration for event timing
     double const frame_duration = config_.simulation.frameDuration();

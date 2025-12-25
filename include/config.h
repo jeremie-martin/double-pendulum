@@ -348,6 +348,11 @@ struct Config {
     OutputParams output;
     AnalysisParams analysis;
 
+    // Preset names (set by batch generator when random preset selected)
+    // These are for metadata output only - not saved to config.toml
+    std::string selected_color_preset_name;
+    std::string selected_post_process_preset_name;
+
     // Get config for a specific metric (returns nullptr if not configured)
     MetricConfig const* getMetricConfig(std::string const& name) const {
         auto it = metric_configs.find(name);

@@ -35,6 +35,10 @@ constexpr const char* toString(ColorScheme cs) {
     case ColorScheme::Heat: return "heat";
     case ColorScheme::Cool: return "cool";
     case ColorScheme::Monochrome: return "monochrome";
+    case ColorScheme::Plasma: return "plasma";
+    case ColorScheme::Viridis: return "viridis";
+    case ColorScheme::Inferno: return "inferno";
+    case ColorScheme::Sunset: return "sunset";
     }
     return "unknown";
 }
