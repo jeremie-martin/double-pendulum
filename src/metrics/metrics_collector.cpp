@@ -703,47 +703,46 @@ double MetricsCollector::computeSpatialConcentration(
 
     int N = static_cast<int>(x2s.size());
 
-    // Adaptive grid size: target ~40 pendulums per cell for statistical stability
-    // This makes the metric N-independent
-    int grid_size = std::max(params.min_grid, std::min(params.max_grid,
-        static_cast<int>(std::sqrt(static_cast<double>(N) / params.target_per_cell))));
+    // FIXED PHYSICAL GRID for N-independence
+    // The pendulum tip can reach anywhere within [-max_reach, max_reach] for both x and y
+    // where max_reach = L1 + L2 (typically 2.0 for unit lengths)
+    // Using a fixed grid over this physical space makes the metric truly N-independent
+    constexpr double MAX_REACH = 2.1;  // L1 + L2 + small margin
+    constexpr double GRID_MIN = -MAX_REACH;
+    constexpr double GRID_MAX = MAX_REACH;
+    constexpr double GRID_RANGE = GRID_MAX - GRID_MIN;
 
-    // Find bounds
-    double min_x = *std::min_element(x2s.begin(), x2s.end());
-    double max_x = *std::max_element(x2s.begin(), x2s.end());
-    double min_y = *std::min_element(y2s.begin(), y2s.end());
-    double max_y = *std::max_element(y2s.begin(), y2s.end());
+    // Use fixed grid size from params (not adaptive to N)
+    // A 20x20 grid gives 400 cells over the 4.2x4.2 physical space
+    int grid_size = params.max_grid;  // Use max_grid as fixed size
+    double cell_size = GRID_RANGE / grid_size;
 
-    // Add small margin to avoid edge cases
-    double range_x = max_x - min_x;
-    double range_y = max_y - min_y;
-    if (range_x < 1e-10) range_x = 1.0;
-    if (range_y < 1e-10) range_y = 1.0;
-
-    double cell_width = range_x / grid_size;
-    double cell_height = range_y / grid_size;
-
-    // Build 2D histogram - O(N) operation
+    // Build 2D histogram over fixed physical grid
     int num_cells = grid_size * grid_size;
     std::vector<int> histogram(num_cells, 0);
 
     for (size_t i = 0; i < x2s.size(); ++i) {
-        int xi = std::min(grid_size - 1,
-            static_cast<int>((x2s[i] - min_x) / cell_width));
-        int yi = std::min(grid_size - 1,
-            static_cast<int>((y2s[i] - min_y) / cell_height));
+        // Map to grid coordinates (clamp to grid bounds)
+        int xi = static_cast<int>((x2s[i] - GRID_MIN) / cell_size);
+        int yi = static_cast<int>((y2s[i] - GRID_MIN) / cell_size);
+        xi = std::max(0, std::min(grid_size - 1, xi));
+        yi = std::max(0, std::min(grid_size - 1, yi));
         histogram[yi * grid_size + xi]++;
     }
 
-    // Compute coverage (fraction of cells with at least one pendulum)
-    int occupied_cells = 0;
-    for (int count : histogram) {
-        if (count > 0) occupied_cells++;
-    }
-    double coverage = static_cast<double>(occupied_cells) / num_cells;
+    // Instead of raw coverage (which follows birthday-problem statistics),
+    // use spatial extent which is inherently N-independent
+    // Compute bounding box of tips as fraction of max possible area
+    double min_x = *std::min_element(x2s.begin(), x2s.end());
+    double max_x = *std::max_element(x2s.begin(), x2s.end());
+    double min_y = *std::min_element(y2s.begin(), y2s.end());
+    double max_y = *std::max_element(y2s.begin(), y2s.end());
+    double extent_x = (max_x - min_x) / GRID_RANGE;
+    double extent_y = (max_y - min_y) / GRID_RANGE;
+    double spatial_extent = std::sqrt(extent_x * extent_y);  // Geometric mean
 
-    // Compute Gini coefficient on histogram (more stable than peak/mean)
-    // Gini = 0: perfectly uniform, Gini = 1: maximally concentrated
+    // Compute Gini coefficient on histogram (inherently N-independent)
+    // Gini measures concentration: 0 = uniform, 1 = all in one cell
     std::sort(histogram.begin(), histogram.end());
 
     double gini_sum = 0.0;
@@ -752,11 +751,11 @@ double MetricsCollector::computeSpatialConcentration(
     }
     double gini = gini_sum / (num_cells * static_cast<double>(N));
 
-    // Return coverage × gini for consistent behavior with other caustic metrics
-    // - Early phase: low coverage × high gini = LOW (all clustered)
-    // - Interesting phase: medium coverage × medium gini = HIGH (structured spread)
-    // - Chaos: high coverage × low gini = LOW (uniform spread)
-    return coverage * gini;
+    // Combine spatial extent (N-independent) with Gini (N-independent)
+    // - Early: small extent × high gini = LOW
+    // - Caustic: medium extent × medium gini = HIGH (structured spread)
+    // - Chaos: large extent × low gini = LOW (uniform spread)
+    return spatial_extent * gini;
 }
 
 double MetricsCollector::computeCVCausticness(
