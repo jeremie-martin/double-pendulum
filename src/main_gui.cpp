@@ -217,6 +217,42 @@ struct AppState {
     bool needs_metric_recompute = false;
 };
 
+// Helper: Update boom detection using configured params and run analyzers
+// Consolidates duplicate boom detection logic from multiple places
+void updateBoomDetection(AppState& state, bool run_analyzer = true) {
+    auto boom = metrics::findBoomFrame(state.metrics_collector,
+                                       state.frame_duration,
+                                       state.config.getBoomParams());
+    if (boom.frame >= 0) {
+        state.boom_frame = boom.frame;
+        state.boom_causticness = boom.causticness;
+
+        double variance_at_boom = 0.0;
+        if (auto const* var = state.metrics_collector.getMetric(metrics::MetricNames::Variance)) {
+            if (boom.frame < static_cast<int>(var->size())) {
+                variance_at_boom = var->at(boom.frame);
+            }
+        }
+        metrics::forceBoomEvent(state.event_detector, boom, variance_at_boom);
+    } else {
+        state.boom_frame.reset();
+    }
+
+    if (run_analyzer && state.boom_frame) {
+        state.causticness_analyzer.analyze(state.metrics_collector, state.event_detector);
+    }
+}
+
+// Helper: Update chaos event detection
+void updateChaosDetection(AppState& state) {
+    if (auto chaos = state.event_detector.getEvent(metrics::EventNames::Chaos)) {
+        state.chaos_frame = chaos->frame;
+        state.chaos_variance = chaos->value;
+    } else {
+        state.chaos_frame.reset();
+    }
+}
+
 void initSimulation(AppState& state, GLRenderer& renderer) {
     int n = state.preview.pendulum_count;
 
@@ -342,32 +378,9 @@ bool loadSimulationData(AppState& state, GLRenderer& renderer, std::string const
         state.event_detector.update(state.metrics_collector, state.frame_duration);
     }
 
-    // Detect boom and run analyzers
-    auto boom = metrics::findBoomFrame(state.metrics_collector, state.frame_duration);
-    if (boom.frame >= 0) {
-        state.boom_frame = boom.frame;
-        state.boom_causticness = boom.causticness;
-        double variance_at_boom = 0.0;
-        if (auto const* var_series = state.metrics_collector.getMetric(metrics::MetricNames::Variance)) {
-            if (boom.frame < static_cast<int>(var_series->size())) {
-                variance_at_boom = var_series->at(boom.frame);
-            }
-        }
-        metrics::forceBoomEvent(state.event_detector, boom, variance_at_boom);
-    } else {
-        state.boom_frame.reset();
-    }
-
-    // Check for chaos event
-    if (auto chaos = state.event_detector.getEvent(metrics::EventNames::Chaos)) {
-        state.chaos_frame = chaos->frame;
-        state.chaos_variance = chaos->value;
-    } else {
-        state.chaos_frame.reset();
-    }
-
-    // Run analyzer
-    state.causticness_analyzer.analyze(state.metrics_collector, state.event_detector);
+    // Detect boom and chaos, run analyzers
+    updateBoomDetection(state);
+    updateChaosDetection(state);
 
     // Setup state for replay
     state.loaded_data = std::move(reader);
@@ -551,7 +564,7 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     // Update event detection (needs complete frame data)
     state.event_detector.update(state.metrics_collector, state.frame_duration);
 
-    // Extract chaos event
+    // Extract chaos event (only set once when first detected)
     if (auto chaos_event = state.event_detector.getEvent(metrics::EventNames::Chaos)) {
         if (chaos_event->detected() && !state.chaos_frame) {
             state.chaos_frame = chaos_event->frame;
@@ -559,26 +572,9 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
         }
     }
 
-    // Boom detection: track max angular_causticness frame (with 0.3s offset)
-    auto boom = metrics::findBoomFrame(state.metrics_collector, state.frame_duration);
-    if (boom.frame >= 0) {
-        state.boom_frame = boom.frame;
-        state.boom_causticness = boom.causticness;
-
-        // Force boom event for analyzers
-        double variance_at_boom = 0.0;
-        if (auto const* var_series = state.metrics_collector.getMetric(metrics::MetricNames::Variance)) {
-            if (boom.frame < static_cast<int>(var_series->size())) {
-                variance_at_boom = var_series->at(boom.frame);
-            }
-        }
-        metrics::forceBoomEvent(state.event_detector, boom, variance_at_boom);
-    }
-
-    // Run analyzer periodically after boom (every 30 frames)
-    if (state.boom_frame && (state.current_frame % 30 == 0)) {
-        state.causticness_analyzer.analyze(state.metrics_collector, state.event_detector);
-    }
+    // Boom detection using configured params (run analyzer every 30 frames)
+    bool run_analyzer = state.boom_frame && (state.current_frame % 30 == 0);
+    updateBoomDetection(state, run_analyzer);
 
     state.current_frame++;
     state.display_frame = state.current_frame;
@@ -663,11 +659,9 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
             } else {
                 ImPlot::PlotLine("Variance", frames.data(), variance_values.data(), data_size);
 
-                // Draw threshold lines (only in non-normalized modes)
-                double boom_line = state.config.detection.boom_threshold;
+                // Draw chaos threshold line (only in non-normalized modes)
+                // Note: boom_threshold removed - boom is now detected via max causticness
                 double chaos_line = state.config.detection.chaos_threshold;
-                ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 0.5f), 1.0f);
-                ImPlot::PlotInfLines("##boom_thresh", &boom_line, 1, ImPlotInfLinesFlags_Horizontal);
                 ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 0.5f), 1.0f);
                 ImPlot::PlotInfLines("##chaos_thresh", &chaos_line, 1, ImPlotInfLinesFlags_Horizontal);
             }

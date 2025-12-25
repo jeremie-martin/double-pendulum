@@ -80,6 +80,7 @@ public:
     // Configure event detection (boom uses max causticness, not threshold)
     void setChaosThreshold(double threshold);
     void setChaosConfirmation(int frames);
+    void setBoomParams(BoomDetectionParams const& params);
 
     // Configure analyzers
     void enableCausticnessAnalyzer(bool enable = true);
@@ -139,6 +140,7 @@ private:
     // Detection parameters (boom uses max causticness, not threshold)
     double chaos_threshold_ = 700.0;
     int chaos_confirmation_ = 10;
+    BoomDetectionParams boom_params_;  // Per-metric boom detection config
 
     // Internal state
     MetricsCollector collector_;

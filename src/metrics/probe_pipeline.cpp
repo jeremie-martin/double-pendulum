@@ -47,6 +47,10 @@ void ProbePipeline::setChaosConfirmation(int frames) {
     chaos_confirmation_ = frames;
 }
 
+void ProbePipeline::setBoomParams(BoomDetectionParams const& params) {
+    boom_params_ = params;
+}
+
 void ProbePipeline::enableCausticnessAnalyzer(bool enable) {
     causticness_analyzer_enabled_ = enable;
 }
@@ -150,9 +154,9 @@ SimulationScore ProbePipeline::getScores() const {
 }
 
 ProbePhaseResults ProbePipeline::finalizePhase() {
-    // Detect boom using max causticness (required before running analyzers)
+    // Detect boom using configured params (required before running analyzers)
     if (frame_duration_ > 0.0) {
-        auto boom = findBoomFrame(collector_, frame_duration_);
+        auto boom = findBoomFrame(collector_, frame_duration_, boom_params_);
         if (boom.frame >= 0) {
             // Get variance at boom for the event
             double variance_at_boom = 0.0;
