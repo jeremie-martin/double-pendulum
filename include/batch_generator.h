@@ -164,6 +164,9 @@ struct RunResult {
     bool success = false;
     std::optional<int> boom_frame;
     double boom_seconds = 0.0;
+    std::optional<int> chaos_frame;   // Frame when chaos detected
+    double chaos_seconds = 0.0;       // Time when chaos detected
+    double boom_quality = 0.0;        // Quality score (0-1)
     double duration_seconds = 0.0;
     double final_uniformity = 0.0;    // Uniformity at end of simulation (0=concentrated, 1=uniform)
     int probe_retries = 0;            // Number of probe retries before success

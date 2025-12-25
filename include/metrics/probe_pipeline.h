@@ -6,6 +6,7 @@
 #include "metrics/event_detector.h"
 #include "metrics/metrics_collector.h"
 #include "metrics/probe_filter.h"
+#include "optimize/prediction_target.h"
 
 #include <functional>
 #include <memory>
@@ -55,9 +56,20 @@ struct ProbePhaseResults {
     // Scores from analyzers (matches SimulationResults.score naming)
     SimulationScore score;
 
+    // Multi-target predictions (new)
+    std::vector<optimize::PredictionResult> predictions;
+
     // Helpers
     bool hasBoom() const { return boom_frame.has_value(); }
     bool hasChaos() const { return chaos_frame.has_value(); }
+
+    // Get prediction by target name
+    std::optional<optimize::PredictionResult> getPrediction(std::string const& name) const {
+        for (auto const& p : predictions) {
+            if (p.target_name == name) return p;
+        }
+        return std::nullopt;
+    }
 };
 
 // Multi-phase probe pipeline
@@ -81,6 +93,15 @@ public:
     void setChaosThreshold(double threshold);
     void setChaosConfirmation(int frames);
     void setBoomParams(BoomDetectionParams const& params);
+
+    // Multi-target prediction configuration (new)
+    // If targets are set, these override the boom_params for predictions
+    void setTargets(std::vector<optimize::PredictionTarget> const& targets) {
+        prediction_targets_ = targets;
+    }
+    std::vector<optimize::PredictionTarget> const& getTargets() const {
+        return prediction_targets_;
+    }
 
     // Configure analyzers
     void enableCausticnessAnalyzer(bool enable = true);
@@ -140,7 +161,10 @@ private:
     // Detection parameters (boom uses max causticness, not threshold)
     double chaos_threshold_ = 700.0;
     int chaos_confirmation_ = 10;
-    BoomDetectionParams boom_params_;  // Per-metric boom detection config
+    BoomDetectionParams boom_params_;  // Per-metric boom detection config (legacy)
+
+    // Multi-target predictions (new)
+    std::vector<optimize::PredictionTarget> prediction_targets_;
 
     // Internal state
     MetricsCollector collector_;

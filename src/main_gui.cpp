@@ -6,6 +6,8 @@
 #include "metrics/event_detector.h"
 #include "metrics/metrics_collector.h"
 #include "metrics/metrics_init.h"
+#include "optimize/prediction_target.h"
+#include "optimize/target_evaluator.h"
 #include "pendulum.h"
 #include "preset_library.h"
 #include "simulation.h"
@@ -2139,6 +2141,157 @@ void drawMetricParametersWindow(AppState& state) {
             std::visit([&boom_params](auto& p) {
                 p.boom = boom_params;
             }, editing_config.params);
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // ========== SECTION: Prediction Targets Configuration ==========
+    if (ImGui::CollapsingHeader("Prediction Targets")) {
+        ImGui::TextDisabled("Configure multi-target predictions (boom, chaos, quality)");
+        ImGui::Spacing();
+
+        // Show currently configured targets
+        if (state.config.targets.empty()) {
+            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f),
+                "No explicit targets configured.");
+            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
+                "Using defaults: boom, chaos, boom_quality");
+            ImGui::Spacing();
+
+            // Button to add default targets to config
+            if (ImGui::Button("Add Default Targets")) {
+                // Add boom target
+                TargetConfig boom;
+                boom.name = "boom";
+                boom.type = "frame";
+                boom.metric = state.config.boom_metric;
+                boom.method = "max_value";
+                state.config.targets.push_back(boom);
+
+                // Add chaos target
+                TargetConfig chaos;
+                chaos.name = "chaos";
+                chaos.type = "frame";
+                chaos.metric = "variance";
+                chaos.method = "threshold_crossing";
+                chaos.crossing_threshold = 0.8;
+                chaos.crossing_confirmation = 10;
+                state.config.targets.push_back(chaos);
+
+                // Add boom_quality target
+                TargetConfig quality;
+                quality.name = "boom_quality";
+                quality.type = "score";
+                quality.metric = state.config.boom_metric;
+                quality.method = "composite";
+                state.config.targets.push_back(quality);
+            }
+        } else {
+            // Show each configured target
+            int target_to_remove = -1;
+            for (size_t i = 0; i < state.config.targets.size(); ++i) {
+                auto& tc = state.config.targets[i];
+                ImGui::PushID(static_cast<int>(i));
+
+                // Target header with type indicator
+                ImVec4 type_color = (tc.type == "score")
+                    ? ImVec4(0.4f, 0.8f, 0.4f, 1.0f)   // Green for score
+                    : ImVec4(0.8f, 0.6f, 0.2f, 1.0f);  // Orange for frame
+                ImGui::TextColored(type_color, "[%s]", tc.type.c_str());
+                ImGui::SameLine();
+                ImGui::Text("%s", tc.name.c_str());
+                ImGui::SameLine(ImGui::GetWindowWidth() - 60);
+                if (ImGui::SmallButton("Remove")) {
+                    target_to_remove = static_cast<int>(i);
+                }
+
+                ImGui::Indent();
+
+                // Metric selection
+                if (ImGui::BeginCombo("Metric", tc.metric.c_str())) {
+                    for (auto const& m : all_metrics) {
+                        if (ImGui::Selectable(m.c_str(), m == tc.metric)) {
+                            tc.metric = m;
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+
+                // Method selection (different for frame vs score)
+                if (tc.type == "frame") {
+                    const char* frame_methods[] = {"max_value", "first_peak_percent",
+                        "derivative_peak", "threshold_crossing", "second_derivative_peak"};
+                    int method_idx = 0;
+                    for (int j = 0; j < 5; ++j) {
+                        if (tc.method == frame_methods[j]) { method_idx = j; break; }
+                    }
+                    if (ImGui::Combo("Method", &method_idx, frame_methods, 5)) {
+                        tc.method = frame_methods[method_idx];
+                    }
+
+                    // Method-specific parameters
+                    float offset = static_cast<float>(tc.offset_seconds);
+                    if (ImGui::SliderFloat("Offset", &offset, -0.5f, 1.0f, "%.2fs")) {
+                        tc.offset_seconds = offset;
+                    }
+
+                    if (tc.method == "threshold_crossing") {
+                        float thresh = static_cast<float>(tc.crossing_threshold);
+                        if (ImGui::SliderFloat("Threshold", &thresh, 0.1f, 0.9f)) {
+                            tc.crossing_threshold = thresh;
+                        }
+                        if (ImGui::SliderInt("Confirm", &tc.crossing_confirmation, 1, 20)) {}
+                    }
+                } else {
+                    // Score methods
+                    const char* score_methods[] = {"peak_clarity", "post_boom_sustain", "composite"};
+                    int method_idx = 0;
+                    for (int j = 0; j < 3; ++j) {
+                        if (tc.method == score_methods[j]) { method_idx = j; break; }
+                    }
+                    if (ImGui::Combo("Method", &method_idx, score_methods, 3)) {
+                        tc.method = score_methods[method_idx];
+                    }
+                }
+
+                ImGui::Unindent();
+                ImGui::Spacing();
+                ImGui::PopID();
+            }
+
+            // Remove target if requested
+            if (target_to_remove >= 0) {
+                state.config.targets.erase(
+                    state.config.targets.begin() + target_to_remove);
+            }
+
+            ImGui::Spacing();
+
+            // Add new target buttons
+            if (ImGui::Button("+ Frame Target")) {
+                TargetConfig tc;
+                tc.name = "custom_frame";
+                tc.type = "frame";
+                tc.metric = state.config.boom_metric;
+                tc.method = "max_value";
+                state.config.targets.push_back(tc);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("+ Score Target")) {
+                TargetConfig tc;
+                tc.name = "custom_score";
+                tc.type = "score";
+                tc.metric = state.config.boom_metric;
+                tc.method = "composite";
+                state.config.targets.push_back(tc);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Clear All")) {
+                state.config.targets.clear();
+            }
         }
     }
 

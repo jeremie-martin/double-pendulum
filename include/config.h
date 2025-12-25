@@ -116,6 +116,8 @@ struct ColorParams {
 };
 
 // Boom detection method
+// DEPRECATED: Prefer optimize::FrameDetectionMethod for new code.
+// This enum is kept for backward compatibility with existing configs and code.
 enum class BoomDetectionMethod {
     MaxCausticness,       // Find frame with max causticness (peak visual richness)
     FirstPeakPercent,     // Find first peak >= X% of max (boom onset)
@@ -125,6 +127,8 @@ enum class BoomDetectionMethod {
 };
 
 // Boom detection parameters - controls how boom frame is identified
+// DEPRECATED: Prefer optimize::FrameDetectionParams for new code.
+// This struct is kept for backward compatibility with existing configs.
 struct BoomDetectionParams {
     BoomDetectionMethod method = BoomDetectionMethod::MaxCausticness;
 

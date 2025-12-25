@@ -1,4 +1,7 @@
 #include "metrics/probe_pipeline.h"
+#include "optimize/frame_detector.h"
+#include "optimize/score_predictor.h"
+#include "optimize/target_evaluator.h"
 
 namespace metrics {
 
@@ -213,6 +216,56 @@ ProbePhaseResults ProbePipeline::buildResults(ProbeFilter const& filter) {
         filter.evaluate(collector_, event_detector_, results.score);
     results.passed_filter = filter_result.passed;
     results.rejection_reason = filter_result.reason;
+
+    // Populate predictions
+    if (!prediction_targets_.empty() && causticness_analyzer_) {
+        // Use explicit targets
+        optimize::TargetEvaluator evaluator;
+        for (auto const& target : prediction_targets_) {
+            evaluator.addTarget(target);
+        }
+        results.predictions = evaluator.evaluate(
+            collector_, event_detector_, *causticness_analyzer_, frame_duration_);
+    } else {
+        // Default predictions based on events and scores
+        // Boom prediction from event
+        if (results.boom_frame.has_value()) {
+            optimize::PredictionResult boom_pred;
+            boom_pred.target_name = "boom";
+            boom_pred.type = optimize::PredictionType::Frame;
+            boom_pred.predicted_frame = *results.boom_frame;
+            boom_pred.predicted_seconds = results.boom_seconds;
+            // Get causticness at boom frame if available
+            if (auto* caustic = collector_.getMetric(MetricNames::AngularCausticness)) {
+                if (*results.boom_frame < static_cast<int>(caustic->size())) {
+                    boom_pred.predicted_score = caustic->at(*results.boom_frame);
+                }
+            }
+            results.predictions.push_back(boom_pred);
+        }
+
+        // Chaos prediction from event
+        if (results.chaos_frame.has_value()) {
+            optimize::PredictionResult chaos_pred;
+            chaos_pred.target_name = "chaos";
+            chaos_pred.type = optimize::PredictionType::Frame;
+            chaos_pred.predicted_frame = *results.chaos_frame;
+            chaos_pred.predicted_seconds = results.chaos_seconds;
+            if (variance_series && *results.chaos_frame < static_cast<int>(variance_series->size())) {
+                chaos_pred.predicted_score = variance_series->at(*results.chaos_frame);
+            }
+            results.predictions.push_back(chaos_pred);
+        }
+
+        // Boom quality prediction from causticness score
+        if (results.score.has(ScoreNames::Causticness)) {
+            optimize::PredictionResult quality_pred;
+            quality_pred.target_name = "boom_quality";
+            quality_pred.type = optimize::PredictionType::Score;
+            quality_pred.predicted_score = results.score.get(ScoreNames::Causticness);
+            results.predictions.push_back(quality_pred);
+        }
+    }
 
     return results;
 }

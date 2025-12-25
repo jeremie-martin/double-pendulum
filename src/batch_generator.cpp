@@ -396,9 +396,9 @@ bool BatchGenerator::generateOne(int index) {
                 auto end_time = std::chrono::steady_clock::now();
                 double duration = std::chrono::duration<double>(end_time - start_time).count();
 
-                RunResult result{video_name, "",       false, std::nullopt,
-                                 0.0,        duration, 0.0,   config_.max_probe_retries + 1,
-                                 1.0};
+                RunResult result{video_name, "", false, std::nullopt, 0.0,
+                                 std::nullopt, 0.0, 0.0,
+                                 duration, 0.0, config_.max_probe_retries + 1, 1.0};
                 progress_.results.push_back(result);
                 progress_.failed_ids.push_back(video_name);
                 return false;
@@ -497,9 +497,18 @@ bool BatchGenerator::generateOne(int index) {
 
         // Track result and create symlink
         // Use actual simulation uniformity (more accurate than probe uniformity)
+        // Extract chaos and quality from predictions
+        double chaos_seconds = 0.0;
+        std::optional<int> chaos_frame = results.getChaosFrame();
+        if (chaos_frame) {
+            chaos_seconds = *chaos_frame * config.simulation.frameDuration();
+        }
+        double boom_quality = results.getBoomQuality().value_or(0.0);
+
         RunResult result{
-            video_name, final_video_path,           true,          results.boom_frame, boom_seconds,
-            duration,   results.final_uniformity, probe_retries, simulation_speed};
+            video_name, final_video_path, true, results.boom_frame, boom_seconds,
+            chaos_frame, chaos_seconds, boom_quality,
+            duration, results.final_uniformity, probe_retries, simulation_speed};
         progress_.results.push_back(result);
         progress_.completed_ids.push_back(video_name);
 
@@ -514,7 +523,9 @@ bool BatchGenerator::generateOne(int index) {
         auto end_time = std::chrono::steady_clock::now();
         double duration = std::chrono::duration<double>(end_time - start_time).count();
 
-        RunResult result{video_name, "", false, std::nullopt, 0.0, duration, 0.0, 0, 1.0};
+        RunResult result{video_name, "", false, std::nullopt, 0.0,
+                         std::nullopt, 0.0, 0.0,
+                         duration, 0.0, 0, 1.0};
         progress_.results.push_back(result);
         progress_.failed_ids.push_back(video_name);
         return false;
