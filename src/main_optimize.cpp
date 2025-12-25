@@ -232,7 +232,12 @@ std::vector<MetricSchema> buildMetricSchemas() {
             return cfg;
         }});
 
-    // Curvature: max_radius × min_spread × log_ratio_normalization
+    // NOTE: The following 3-4 parameter metrics are disabled for now because they
+    // create too many configurations (8^3=512 or 8^4=4096 per metric).
+    // Uncomment when doing thorough optimization with more time/compute.
+
+#if 0
+    // Curvature: max_radius × min_spread × log_ratio_normalization (8^3 = 512 configs)
     schemas.push_back({"curvature",
         {{"max_radius", 1.0, 2.5, 1, false},
          {"min_spread", 0.01, 0.1, 1, false},
@@ -248,7 +253,7 @@ std::vector<MetricSchema> buildMetricSchemas() {
             return cfg;
         }});
 
-    // True folds: max_radius × min_spread × gini_baseline × gini_divisor
+    // True folds: max_radius × min_spread × gini_baseline × gini_divisor (8^4 = 4096 configs)
     schemas.push_back({"true_folds",
         {{"max_radius", 1.0, 2.5, 1, false},
          {"min_spread", 0.01, 0.1, 1, false},
@@ -266,7 +271,7 @@ std::vector<MetricSchema> buildMetricSchemas() {
             return cfg;
         }});
 
-    // Local coherence: max_radius × min_spread × log_baseline × log_divisor
+    // Local coherence: max_radius × min_spread × log_baseline × log_divisor (8^4 = 4096 configs)
     schemas.push_back({"local_coherence",
         {{"max_radius", 1.0, 2.5, 1, false},
          {"min_spread", 0.01, 0.1, 1, false},
@@ -283,6 +288,7 @@ std::vector<MetricSchema> buildMetricSchemas() {
             cfg.params = params;
             return cfg;
         }});
+#endif
 
     return schemas;
 }
