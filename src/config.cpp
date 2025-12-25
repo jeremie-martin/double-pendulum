@@ -779,6 +779,7 @@ void Config::save(std::string const& path) const {
     file << "[render]\n";
     file << "width = " << render.width << "\n";
     file << "height = " << render.height << "\n";
+    file << "thread_count = " << render.thread_count << "\n";
     file << "\n";
 
     // Post-process section
@@ -788,6 +789,7 @@ void Config::save(std::string const& path) const {
     file << "contrast = " << post_process.contrast << "\n";
     file << "gamma = " << post_process.gamma << "\n";
     file << "normalization = \"" << normalizationToString(post_process.normalization) << "\"\n";
+    file << "reinhard_white_point = " << post_process.reinhard_white_point << "\n";
     file << "\n";
 
     // Color section
@@ -912,4 +914,9 @@ void Config::save(std::string const& path) const {
     file << "video_fps = " << output.video_fps << "\n";
     file << "save_simulation_data = " << (output.save_simulation_data ? "true" : "false")
          << "\n";
+    file << "\n";
+
+    // Analysis section
+    file << "[analysis]\n";
+    file << "enabled = " << (analysis.enabled ? "true" : "false") << "\n";
 }

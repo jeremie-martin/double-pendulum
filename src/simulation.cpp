@@ -182,12 +182,10 @@ std::string Simulation::createRunDirectory() {
     return path;
 }
 
-void Simulation::saveConfigCopy(std::string const& original_path) {
-    // Copy the original config file if it exists
-    if (std::filesystem::exists(original_path)) {
-        std::filesystem::copy_file(original_path, run_directory_ + "/config.toml",
-                                   std::filesystem::copy_options::overwrite_existing);
-    }
+void Simulation::saveConfigCopy(std::string const& /* original_path */) {
+    // Save the resolved config (includes expanded, all values explicit)
+    // This makes the output directory self-contained and reproducible
+    config_.save(run_directory_ + "/config.toml");
 }
 
 void Simulation::saveMetadata(SimulationResults const& results) {
