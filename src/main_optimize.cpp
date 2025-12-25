@@ -56,41 +56,6 @@
 #include <vector>
 
 // ============================================================================
-// PARAM CONVERSION HELPERS
-// ============================================================================
-
-// Convert BoomDetectionMethod to FrameDetectionMethod
-optimize::FrameDetectionMethod toFrameDetectionMethod(BoomDetectionMethod m) {
-    switch (m) {
-    case BoomDetectionMethod::MaxCausticness:
-        return optimize::FrameDetectionMethod::MaxValue;
-    case BoomDetectionMethod::FirstPeakPercent:
-        return optimize::FrameDetectionMethod::FirstPeakPercent;
-    case BoomDetectionMethod::DerivativePeak:
-        return optimize::FrameDetectionMethod::DerivativePeak;
-    case BoomDetectionMethod::ThresholdCrossing:
-        return optimize::FrameDetectionMethod::ThresholdCrossing;
-    case BoomDetectionMethod::SecondDerivativePeak:
-        return optimize::FrameDetectionMethod::SecondDerivativePeak;
-    }
-    return optimize::FrameDetectionMethod::MaxValue;
-}
-
-// Convert BoomDetectionParams to FrameDetectionParams
-optimize::FrameDetectionParams toFrameDetectionParams(BoomDetectionParams const& bp) {
-    optimize::FrameDetectionParams fp;
-    fp.method = toFrameDetectionMethod(bp.method);
-    fp.metric_name = bp.metric_name;
-    fp.offset_seconds = bp.offset_seconds;
-    fp.peak_percent_threshold = bp.peak_percent_threshold;
-    fp.min_peak_prominence = bp.min_peak_prominence;
-    fp.smoothing_window = bp.smoothing_window;
-    fp.crossing_threshold = bp.crossing_threshold;
-    fp.crossing_confirmation = bp.crossing_confirmation;
-    return fp;
-}
-
-// ============================================================================
 // GRID SEARCH PARAMETER SYSTEM
 // ============================================================================
 
@@ -621,7 +586,7 @@ struct LoadedSimulation {
 
 struct ParameterSet {
     ::MetricConfig metric_config;
-    BoomDetectionParams boom;
+    optimize::FrameDetectionParams boom;
     int effective_sectors = 0;
 
     std::string describeShort() const {
@@ -636,21 +601,21 @@ struct ParameterSet {
         }
         oss << metric_short << " ";
         switch (boom.method) {
-        case BoomDetectionMethod::MaxCausticness:
+        case optimize::FrameDetectionMethod::MaxValue:
             oss << "max";
             break;
-        case BoomDetectionMethod::FirstPeakPercent:
+        case optimize::FrameDetectionMethod::FirstPeakPercent:
             oss << "first@" << static_cast<int>(boom.peak_percent_threshold * 100) << "%"
                 << " prom=" << std::fixed << std::setprecision(2) << boom.min_peak_prominence;
             break;
-        case BoomDetectionMethod::DerivativePeak:
+        case optimize::FrameDetectionMethod::DerivativePeak:
             oss << "deriv w=" << boom.smoothing_window;
             break;
-        case BoomDetectionMethod::ThresholdCrossing:
+        case optimize::FrameDetectionMethod::ThresholdCrossing:
             oss << "cross@" << static_cast<int>(boom.crossing_threshold * 100) << "% x"
                 << boom.crossing_confirmation;
             break;
-        case BoomDetectionMethod::SecondDerivativePeak:
+        case optimize::FrameDetectionMethod::SecondDerivativePeak:
             oss << "accel w=" << boom.smoothing_window;
             break;
         }
@@ -807,8 +772,8 @@ void computeMetricsForSim(
 EvaluationResult evaluateBoomMethod(
     ParameterizedMetric const& pm,
     ComputedMetricsForConfig const& computed,
-    BoomDetectionParams const& boom_params,
-    int N) {
+    optimize::FrameDetectionParams const& boom_params,
+    int /* N */) {
 
     std::vector<int> errors;
     errors.reserve(computed.collectors.size());
@@ -921,30 +886,45 @@ void writeMetricParams(std::ofstream& file, MetricParamsVariant const& params) {
     }, params);
 }
 
-void writeBoomParams(std::ofstream& file, BoomDetectionParams const& boom) {
-    switch (boom.method) {
-    case BoomDetectionMethod::MaxCausticness:
-        file << "method = \"max_causticness\"\n";
+std::string frameDetectionMethodToString(optimize::FrameDetectionMethod method) {
+    switch (method) {
+    case optimize::FrameDetectionMethod::MaxValue: return "max_value";
+    case optimize::FrameDetectionMethod::FirstPeakPercent: return "first_peak_percent";
+    case optimize::FrameDetectionMethod::DerivativePeak: return "derivative_peak";
+    case optimize::FrameDetectionMethod::ThresholdCrossing: return "threshold_crossing";
+    case optimize::FrameDetectionMethod::SecondDerivativePeak: return "second_derivative_peak";
+    }
+    return "max_value";
+}
+
+void writeTargetParams(std::ofstream& file, std::string const& target_name,
+                       optimize::FrameDetectionParams const& params) {
+    file << "[targets." << target_name << "]\n";
+    file << "type = \"frame\"\n";
+    file << "metric = \"" << params.metric_name << "\"\n";
+    file << "method = \"" << frameDetectionMethodToString(params.method) << "\"\n";
+
+    // offset_seconds is used by all methods
+    file << "offset_seconds = " << std::fixed << std::setprecision(2) << params.offset_seconds << "\n";
+
+    // Only write method-specific params
+    switch (params.method) {
+    case optimize::FrameDetectionMethod::MaxValue:
+        // No additional params
         break;
-    case BoomDetectionMethod::FirstPeakPercent:
-        file << "method = \"first_peak_percent\"\n";
+    case optimize::FrameDetectionMethod::FirstPeakPercent:
+        file << "peak_percent_threshold = " << std::fixed << std::setprecision(2) << params.peak_percent_threshold << "\n";
+        file << "min_peak_prominence = " << std::fixed << std::setprecision(2) << params.min_peak_prominence << "\n";
         break;
-    case BoomDetectionMethod::DerivativePeak:
-        file << "method = \"derivative_peak\"\n";
+    case optimize::FrameDetectionMethod::DerivativePeak:
+    case optimize::FrameDetectionMethod::SecondDerivativePeak:
+        file << "smoothing_window = " << params.smoothing_window << "\n";
         break;
-    case BoomDetectionMethod::ThresholdCrossing:
-        file << "method = \"threshold_crossing\"\n";
-        break;
-    case BoomDetectionMethod::SecondDerivativePeak:
-        file << "method = \"second_derivative_peak\"\n";
+    case optimize::FrameDetectionMethod::ThresholdCrossing:
+        file << "crossing_threshold = " << std::fixed << std::setprecision(2) << params.crossing_threshold << "\n";
+        file << "crossing_confirmation = " << params.crossing_confirmation << "\n";
         break;
     }
-    file << "offset_seconds = " << std::fixed << std::setprecision(2) << boom.offset_seconds << "\n";
-    file << "peak_percent_threshold = " << std::fixed << std::setprecision(2) << boom.peak_percent_threshold << "\n";
-    file << "min_peak_prominence = " << std::fixed << std::setprecision(2) << boom.min_peak_prominence << "\n";
-    file << "smoothing_window = " << boom.smoothing_window << "\n";
-    file << "crossing_threshold = " << std::fixed << std::setprecision(2) << boom.crossing_threshold << "\n";
-    file << "crossing_confirmation = " << boom.crossing_confirmation << "\n";
 }
 
 void saveAllBestParams(std::string const& path, std::vector<EvaluationResult> const& results,
@@ -977,20 +957,23 @@ void saveAllBestParams(std::string const& path, std::vector<EvaluationResult> co
     std::sort(sorted_metrics.begin(), sorted_metrics.end(),
               [](auto const& a, auto const& b) { return a.second->boom_mae < b.second->boom_mae; });
 
+    // Write metric computation params (without boom detection params)
     for (auto const& [metric_name, best] : sorted_metrics) {
         file << "# " << metric_name << ": MAE=" << std::fixed << std::setprecision(2)
              << best->boom_mae << " frames\n";
         file << "[metrics." << metric_name << "]\n";
         writeMetricParams(file, best->params.metric_config.params);
-        file << "\n[metrics." << metric_name << ".boom]\n";
-        writeBoomParams(file, best->params.boom);
         file << "\n";
     }
 
-    file << "[boom_detection]\n";
-    file << "active_metric = \"" << global_best.params.boom.metric_name << "\"\n";
+    // Write the best boom target configuration
+    file << "# Best boom detection target (using " << global_best.params.boom.metric_name << ")\n";
+    writeTargetParams(file, "boom", global_best.params.boom);
 
     std::cout << "Best parameters for " << best_per_metric.size() << " metrics saved to: " << path << "\n";
+    std::cout << "Best boom target: metric=" << global_best.params.boom.metric_name
+              << ", method=" << frameDetectionMethodToString(global_best.params.boom.method)
+              << ", MAE=" << std::fixed << std::setprecision(2) << global_best.boom_mae << " frames\n";
 }
 
 // ============================================================================
@@ -1175,16 +1158,16 @@ int main(int argc, char* argv[]) {
         auto const& computed = config_states[config_idx];
         std::vector<EvaluationResult> local_results;
 
-        auto evaluateMethod = [&](BoomDetectionParams const& bp) {
+        auto evaluateMethod = [&](optimize::FrameDetectionParams const& bp) {
             auto result = evaluateBoomMethod(pm, computed, bp, N);
             local_results.push_back(result);
         };
 
-        // MaxCausticness
+        // MaxValue
         for (double offset : boom_grid.offset_vals) {
-            BoomDetectionParams bp;
+            optimize::FrameDetectionParams bp;
             bp.metric_name = pm.metric_name;
-            bp.method = BoomDetectionMethod::MaxCausticness;
+            bp.method = optimize::FrameDetectionMethod::MaxValue;
             bp.offset_seconds = offset;
             evaluateMethod(bp);
         }
@@ -1193,9 +1176,9 @@ int main(int argc, char* argv[]) {
         for (double pct : boom_grid.peak_pct_vals) {
             for (double offset : boom_grid.offset_vals) {
                 for (double prom : boom_grid.prominence_vals) {
-                    BoomDetectionParams bp;
+                    optimize::FrameDetectionParams bp;
                     bp.metric_name = pm.metric_name;
-                    bp.method = BoomDetectionMethod::FirstPeakPercent;
+                    bp.method = optimize::FrameDetectionMethod::FirstPeakPercent;
                     bp.peak_percent_threshold = pct;
                     bp.offset_seconds = offset;
                     bp.min_peak_prominence = prom;
@@ -1207,9 +1190,9 @@ int main(int argc, char* argv[]) {
         // DerivativePeak
         for (int smooth : boom_grid.smooth_vals) {
             for (double offset : boom_grid.offset_vals) {
-                BoomDetectionParams bp;
+                optimize::FrameDetectionParams bp;
                 bp.metric_name = pm.metric_name;
-                bp.method = BoomDetectionMethod::DerivativePeak;
+                bp.method = optimize::FrameDetectionMethod::DerivativePeak;
                 bp.smoothing_window = smooth;
                 bp.offset_seconds = offset;
                 evaluateMethod(bp);
@@ -1220,9 +1203,9 @@ int main(int argc, char* argv[]) {
         for (double thresh : boom_grid.crossing_thresh_vals) {
             for (int confirm : boom_grid.crossing_confirm_vals) {
                 for (double offset : boom_grid.offset_vals) {
-                    BoomDetectionParams bp;
+                    optimize::FrameDetectionParams bp;
                     bp.metric_name = pm.metric_name;
-                    bp.method = BoomDetectionMethod::ThresholdCrossing;
+                    bp.method = optimize::FrameDetectionMethod::ThresholdCrossing;
                     bp.crossing_threshold = thresh;
                     bp.crossing_confirmation = confirm;
                     bp.offset_seconds = offset;
@@ -1234,9 +1217,9 @@ int main(int argc, char* argv[]) {
         // SecondDerivativePeak
         for (int smooth : boom_grid.smooth_vals) {
             for (double offset : boom_grid.offset_vals) {
-                BoomDetectionParams bp;
+                optimize::FrameDetectionParams bp;
                 bp.metric_name = pm.metric_name;
-                bp.method = BoomDetectionMethod::SecondDerivativePeak;
+                bp.method = optimize::FrameDetectionMethod::SecondDerivativePeak;
                 bp.smoothing_window = smooth;
                 bp.offset_seconds = offset;
                 evaluateMethod(bp);

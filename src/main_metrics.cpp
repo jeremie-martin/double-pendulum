@@ -8,6 +8,7 @@
 #include "metrics/boom_detection.h"
 #include "metrics/causticness_analyzer.h"
 #include "metrics/metrics_init.h"
+#include "optimize/target_evaluator.h"
 
 #include <chrono>
 #include <cmath>
@@ -17,6 +18,22 @@
 #include <string>
 
 namespace fs = std::filesystem;
+
+// Helper: Extract boom params from config targets
+optimize::FrameDetectionParams getBoomParamsFromConfig(Config const& config) {
+    for (auto const& tc : config.targets) {
+        if (tc.name == "boom" && tc.type == "frame") {
+            auto target = optimize::targetConfigToPredictionTarget(
+                tc.name, tc.type, tc.metric, tc.method,
+                tc.offset_seconds, tc.peak_percent_threshold,
+                tc.min_peak_prominence, tc.smoothing_window,
+                tc.crossing_threshold, tc.crossing_confirmation,
+                tc.weights);
+            return target.frameParams();
+        }
+    }
+    return optimize::FrameDetectionParams{};  // defaults
+}
 
 void printUsage(char const* program) {
     std::cout << "Double Pendulum Metric Iteration Tool\n\n"
@@ -139,8 +156,9 @@ int computePhysicsMetrics(Options const& opts,
     std::cout << "  Processing time: " << duration_ms << " ms\n";
 
     // Run post-simulation analysis (boom detection + analyzers)
+    auto boom_params = getBoomParamsFromConfig(config);
     auto boom = metrics::runPostSimulationAnalysis(
-        collector, detector, causticness_analyzer, frame_duration, config.getBoomParams());
+        collector, detector, causticness_analyzer, frame_duration, boom_params);
 
     // Print results
     std::cout << "\nResults:\n";
@@ -149,7 +167,8 @@ int computePhysicsMetrics(Options const& opts,
     if (boom.frame >= 0) {
         std::cout << "  Boom: frame " << boom.frame << " ("
                   << std::fixed << std::setprecision(2) << boom.seconds << "s)"
-                  << ", causticness=" << std::setprecision(4) << boom.causticness << "\n";
+                  << ", metric=" << boom_params.metric_name
+                  << ", value=" << std::setprecision(4) << boom.metric_value << "\n";
     }
 
     if (auto chaos = detector.getEvent(metrics::EventNames::Chaos)) {
@@ -344,8 +363,9 @@ int computeGPUMetrics(Options const& opts,
               << (static_cast<double>(total_frames) / duration_s) << "\n";
 
     // Run post-simulation analysis (boom detection + analyzers)
+    auto boom_params = getBoomParamsFromConfig(config);
     auto boom = metrics::runPostSimulationAnalysis(
-        collector, detector, causticness_analyzer, frame_duration, config.getBoomParams());
+        collector, detector, causticness_analyzer, frame_duration, boom_params);
 
     // Print results
     std::cout << "\nResults:\n";
@@ -354,7 +374,8 @@ int computeGPUMetrics(Options const& opts,
     if (boom.frame >= 0) {
         std::cout << "  Boom: frame " << boom.frame << " ("
                   << std::fixed << std::setprecision(2) << boom.seconds << "s)"
-                  << ", causticness=" << std::setprecision(4) << boom.causticness << "\n";
+                  << ", metric=" << boom_params.metric_name
+                  << ", value=" << std::setprecision(4) << boom.metric_value << "\n";
     }
 
     if (causticness_analyzer.hasResults()) {

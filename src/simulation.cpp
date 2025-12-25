@@ -26,6 +26,93 @@ using Duration = std::chrono::duration<double>;
 
 namespace {
 
+// Convert config targets to PredictionTargets and evaluate using TargetEvaluator
+std::vector<optimize::PredictionResult> evaluateTargets(
+    std::vector<TargetConfig> const& targets,
+    metrics::MetricsCollector const& collector,
+    metrics::EventDetector const& events,
+    metrics::CausticnessAnalyzer const& analyzer,
+    double frame_duration) {
+
+    if (targets.empty()) {
+        return {};
+    }
+
+    optimize::TargetEvaluator evaluator;
+    for (auto const& tc : targets) {
+        auto target = optimize::targetConfigToPredictionTarget(
+            tc.name, tc.type, tc.metric, tc.method,
+            tc.offset_seconds, tc.peak_percent_threshold,
+            tc.min_peak_prominence, tc.smoothing_window,
+            tc.crossing_threshold, tc.crossing_confirmation,
+            tc.weights);
+        evaluator.addTarget(target);
+    }
+
+    return evaluator.evaluate(collector, events, analyzer, frame_duration);
+}
+
+// Get boom params from targets, or return empty params for defaults
+optimize::FrameDetectionParams getBoomParamsFromTargets(
+    std::vector<TargetConfig> const& targets) {
+
+    for (auto const& tc : targets) {
+        if (tc.name == "boom" && tc.type == "frame") {
+            auto target = optimize::targetConfigToPredictionTarget(
+                tc.name, tc.type, tc.metric, tc.method,
+                tc.offset_seconds, tc.peak_percent_threshold,
+                tc.min_peak_prominence, tc.smoothing_window,
+                tc.crossing_threshold, tc.crossing_confirmation,
+                tc.weights);
+            return target.frameParams();
+        }
+    }
+    return optimize::FrameDetectionParams{};
+}
+
+// Create default predictions when no targets configured (backward compat)
+std::vector<optimize::PredictionResult> createDefaultPredictions(
+    std::optional<int> boom_frame,
+    double boom_seconds,
+    double boom_value,
+    std::optional<int> chaos_frame,
+    double chaos_seconds,
+    double chaos_variance,
+    metrics::CausticnessAnalyzer const& analyzer) {
+
+    std::vector<optimize::PredictionResult> predictions;
+
+    if (boom_frame && *boom_frame >= 0) {
+        optimize::PredictionResult boom_pred;
+        boom_pred.target_name = "boom";
+        boom_pred.type = optimize::PredictionType::Frame;
+        boom_pred.predicted_frame = *boom_frame;
+        boom_pred.predicted_seconds = boom_seconds;
+        boom_pred.predicted_score = boom_value;
+        predictions.push_back(boom_pred);
+    }
+
+    if (chaos_frame && *chaos_frame >= 0) {
+        optimize::PredictionResult chaos_pred;
+        chaos_pred.target_name = "chaos";
+        chaos_pred.type = optimize::PredictionType::Frame;
+        chaos_pred.predicted_frame = *chaos_frame;
+        chaos_pred.predicted_seconds = chaos_seconds;
+        chaos_pred.predicted_score = chaos_variance;
+        predictions.push_back(chaos_pred);
+    }
+
+    if (analyzer.hasResults()) {
+        optimize::PredictionResult quality_pred;
+        quality_pred.target_name = "boom_quality";
+        quality_pred.type = optimize::PredictionType::Score;
+        quality_pred.predicted_score = analyzer.score();
+        predictions.push_back(quality_pred);
+    }
+
+    return predictions;
+}
+
 void savePNGFile(char const* path, uint8_t const* data, int width, int height) {
     FILE* fp = fopen(path, "wb");
     if (!fp)
@@ -172,6 +259,42 @@ void Simulation::saveMetadata(SimulationResults const& results) {
     out << "    \"physics_seconds\": " << results.timing.physics_seconds << ",\n";
     out << "    \"render_seconds\": " << results.timing.render_seconds << ",\n";
     out << "    \"io_seconds\": " << results.timing.io_seconds << "\n";
+    out << "  },\n";
+
+    // Add detection parameters section
+    out << "  \"detection\": {\n";
+    out << "    \"chaos\": {\n";
+    out << "      \"threshold\": " << config_.detection.chaos_threshold << ",\n";
+    out << "      \"confirmation\": " << config_.detection.chaos_confirmation << ",\n";
+    out << "      \"early_stop\": " << (config_.detection.early_stop_after_chaos ? "true" : "false") << "\n";
+    out << "    },\n";
+    out << "    \"targets\": [\n";
+    bool first_target = true;
+    for (auto const& tc : config_.targets) {
+        if (!first_target)
+            out << ",\n";
+        out << "      {\n";
+        out << "        \"name\": \"" << tc.name << "\",\n";
+        out << "        \"type\": \"" << tc.type << "\",\n";
+        out << "        \"metric\": \"" << tc.metric << "\",\n";
+        out << "        \"method\": \"" << tc.method << "\"";
+        if (tc.type == "frame") {
+            out << ",\n        \"offset_seconds\": " << tc.offset_seconds;
+            // Write method-specific params
+            if (tc.method == "first_peak_percent") {
+                out << ",\n        \"peak_percent_threshold\": " << tc.peak_percent_threshold;
+                out << ",\n        \"min_peak_prominence\": " << tc.min_peak_prominence;
+            } else if (tc.method == "derivative_peak" || tc.method == "second_derivative_peak") {
+                out << ",\n        \"smoothing_window\": " << tc.smoothing_window;
+            } else if (tc.method == "threshold_crossing") {
+                out << ",\n        \"crossing_threshold\": " << tc.crossing_threshold;
+                out << ",\n        \"crossing_confirmation\": " << tc.crossing_confirmation;
+            }
+        }
+        out << "\n      }";
+        first_target = false;
+    }
+    out << "\n    ]\n";
     out << "  }";
 
     // Add scores section if any scores computed
@@ -324,6 +447,21 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     // Create run directory with timestamp
     run_directory_ = createRunDirectory();
     std::cout << "Output directory: " << run_directory_ << "\n";
+
+    // Print prediction target configuration
+    if (!config_.targets.empty()) {
+        std::cout << "Prediction targets:\n";
+        for (auto const& tc : config_.targets) {
+            std::cout << "  " << tc.name << ": metric=" << tc.metric
+                      << ", method=" << tc.method;
+            if (tc.type == "frame") {
+                std::cout << ", offset=" << tc.offset_seconds << "s";
+            }
+            std::cout << "\n";
+        }
+    } else {
+        std::cout << "Prediction targets: (defaults)\n";
+    }
 
     // Timing accumulators
     Duration physics_time{0};
@@ -541,11 +679,17 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         }
     }
 
-    // Detect boom using configured method and metric
-    auto boom = metrics::findBoomFrame(metrics_collector_, frame_duration, config_.getBoomParams());
+    // Detect boom using configured target or defaults
+    auto boom_params = getBoomParamsFromTargets(config_.targets);
+    bool has_boom_target = !boom_params.metric_name.empty();
+
+    auto boom = has_boom_target
+        ? metrics::findBoomFrame(metrics_collector_, frame_duration, boom_params)
+        : metrics::findBoomFrame(metrics_collector_, frame_duration);
+
     if (boom.frame >= 0) {
         results.boom_frame = boom.frame;
-        results.boom_causticness = boom.causticness;
+        results.boom_causticness = boom.metric_value;
 
         // Force boom event for analyzers (e.g., CausticnessAnalyzer) to use
         double variance_at_boom = 0.0;
@@ -565,7 +709,6 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     results.final_uniformity = metrics_collector_.getUniformity();
 
     // Run analyzers to compute quality scores
-    // (frame_duration already set in constructor via initializeMetricsSystem)
     causticness_analyzer_.analyze(metrics_collector_, event_detector_);
 
     // Aggregate scores
@@ -577,60 +720,19 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
                           causticness_analyzer_.postBoomAreaNormalized());
     }
 
-    // Populate multi-target predictions
-    // If config has explicit targets, use those; otherwise use defaults
+    // Populate multi-target predictions using TargetEvaluator
     if (!config_.targets.empty()) {
-        for (auto const& tc : config_.targets) {
-            auto target = optimize::targetConfigToPredictionTarget(
-                tc.name, tc.type, tc.metric, tc.method,
-                tc.offset_seconds, tc.peak_percent_threshold,
-                tc.min_peak_prominence, tc.smoothing_window,
-                tc.crossing_threshold, tc.crossing_confirmation,
-                tc.weights);
-
-            if (target.isFrame()) {
-                optimize::FrameDetector detector(target.frameParams());
-                auto detection = detector.detect(metrics_collector_, frame_duration);
-                results.predictions.push_back(
-                    optimize::toPredictionResult(target.name, detection));
-            } else {
-                auto prediction = optimize::predictScore(causticness_analyzer_, target.scoreParams());
-                results.predictions.push_back(
-                    optimize::toPredictionResult(target.name, prediction));
-            }
-        }
+        results.predictions = evaluateTargets(
+            config_.targets, metrics_collector_, event_detector_,
+            causticness_analyzer_, frame_duration);
     } else {
-        // Use default targets based on boom_metric
-        // Add boom prediction (already computed above)
-        if (results.boom_frame) {
-            optimize::PredictionResult boom_pred;
-            boom_pred.target_name = "boom";
-            boom_pred.type = optimize::PredictionType::Frame;
-            boom_pred.predicted_frame = *results.boom_frame;
-            boom_pred.predicted_seconds = *results.boom_frame * frame_duration;
-            boom_pred.predicted_score = results.boom_causticness;
-            results.predictions.push_back(boom_pred);
-        }
-
-        // Add chaos prediction from event detector
-        if (results.chaos_frame) {
-            optimize::PredictionResult chaos_pred;
-            chaos_pred.target_name = "chaos";
-            chaos_pred.type = optimize::PredictionType::Frame;
-            chaos_pred.predicted_frame = *results.chaos_frame;
-            chaos_pred.predicted_seconds = *results.chaos_frame * frame_duration;
-            chaos_pred.predicted_score = results.chaos_variance;
-            results.predictions.push_back(chaos_pred);
-        }
-
-        // Add boom quality prediction from analyzer
-        if (causticness_analyzer_.hasResults()) {
-            optimize::PredictionResult quality_pred;
-            quality_pred.target_name = "boom_quality";
-            quality_pred.type = optimize::PredictionType::Score;
-            quality_pred.predicted_score = causticness_analyzer_.score();
-            results.predictions.push_back(quality_pred);
-        }
+        // Use default predictions (backward compat)
+        double boom_seconds = results.boom_frame ? *results.boom_frame * frame_duration : 0.0;
+        double chaos_seconds = results.chaos_frame ? *results.chaos_frame * frame_duration : 0.0;
+        results.predictions = createDefaultPredictions(
+            results.boom_frame, boom_seconds, results.boom_causticness,
+            results.chaos_frame, chaos_seconds, results.chaos_variance,
+            causticness_analyzer_);
     }
 
     // Save metadata, config copy, and metrics
@@ -789,9 +891,16 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
         }
     }
 
-    // Run post-simulation analysis (boom detection + analyzers)
-    auto boom = metrics::runPostSimulationAnalysis(
-        metrics_collector_, event_detector_, causticness_analyzer_, frame_duration, config_.getBoomParams());
+    // Get boom params from config.targets (consistent with run())
+    auto boom_params = getBoomParamsFromTargets(config_.targets);
+    bool has_boom_target = !boom_params.metric_name.empty();
+
+    // Run post-simulation analysis with configured boom params
+    auto boom = has_boom_target
+        ? metrics::runPostSimulationAnalysis(
+              metrics_collector_, event_detector_, causticness_analyzer_, frame_duration, boom_params)
+        : metrics::runPostSimulationAnalysis(
+              metrics_collector_, event_detector_, causticness_analyzer_, frame_duration);
 
     if (boom.frame >= 0) {
         results.boom_frame = boom.frame;
@@ -813,6 +922,23 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
                           causticness_analyzer_.peakClarityScore());
         results.score.set(metrics::ScoreNames::PostBoomSustain,
                           causticness_analyzer_.postBoomAreaNormalized());
+    }
+
+    // Populate predictions using TargetEvaluator (consistent with run())
+    if (!config_.targets.empty()) {
+        results.predictions = evaluateTargets(
+            config_.targets, metrics_collector_, event_detector_,
+            causticness_analyzer_, frame_duration);
+    } else {
+        // Use default predictions (backward compat)
+        results.predictions = createDefaultPredictions(
+            results.boom_frame >= 0 ? std::optional<int>(results.boom_frame) : std::nullopt,
+            results.boom_seconds,
+            0.0, // boom_value not tracked in probe
+            results.chaos_frame >= 0 ? std::optional<int>(results.chaos_frame) : std::nullopt,
+            results.chaos_seconds,
+            0.0, // chaos_variance not tracked in probe
+            causticness_analyzer_);
     }
 
     results.completed = true;

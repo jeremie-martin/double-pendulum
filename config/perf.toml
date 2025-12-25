@@ -1,3 +1,6 @@
+include = ["best_params.toml"]
+
+
 # Quick test config with fewer pendulums and frames
 [physics]
 gravity = 9.81

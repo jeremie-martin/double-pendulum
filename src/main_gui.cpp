@@ -258,12 +258,31 @@ struct AppState {
 // Helper: Update boom detection using configured params and run analyzers
 // Consolidates duplicate boom detection logic from multiple places
 void updateBoomDetection(AppState& state, bool run_analyzer = true) {
-    auto boom = metrics::findBoomFrame(state.metrics_collector,
-                                       state.frame_duration,
-                                       state.config.getBoomParams());
+    // Look for a "boom" target in config.targets
+    optimize::FrameDetectionParams boom_params;
+    bool has_boom_target = false;
+    for (auto const& tc : state.config.targets) {
+        if (tc.name == "boom" && tc.type == "frame") {
+            auto target = optimize::targetConfigToPredictionTarget(
+                tc.name, tc.type, tc.metric, tc.method,
+                tc.offset_seconds, tc.peak_percent_threshold,
+                tc.min_peak_prominence, tc.smoothing_window,
+                tc.crossing_threshold, tc.crossing_confirmation,
+                tc.weights);
+            boom_params = target.frameParams();
+            has_boom_target = true;
+            break;
+        }
+    }
+
+    // Use configured boom target params or defaults
+    auto boom = has_boom_target
+        ? metrics::findBoomFrame(state.metrics_collector, state.frame_duration, boom_params)
+        : metrics::findBoomFrame(state.metrics_collector, state.frame_duration);
+
     if (boom.frame >= 0) {
         state.boom_frame = boom.frame;
-        state.boom_causticness = boom.causticness;
+        state.boom_causticness = boom.metric_value;
 
         double variance_at_boom = 0.0;
         if (auto const* var = state.metrics_collector.getMetric(metrics::MetricNames::Variance)) {
@@ -301,19 +320,16 @@ void updateAllBoomDetections(AppState& state) {
             continue;
         }
 
-        // Get this metric's boom params from config
-        BoomDetectionParams params;
-        if (auto const* mc = state.config.getMetricConfig(metric_name)) {
-            params = mc->getBoomParams();
-        } else {
-            // Fallback: use default params with metric name set
-            params.metric_name = metric_name;
-        }
+        // Use default detection params with this metric
+        optimize::FrameDetectionParams params;
+        params.metric_name = metric_name;
+        params.method = optimize::FrameDetectionMethod::MaxValue;
+        params.offset_seconds = 0.3;
 
         auto boom = metrics::findBoomFrame(state.metrics_collector,
                                            state.frame_duration, params);
         boom_state.boom_frame = boom.frame;
-        boom_state.boom_value = boom.causticness;
+        boom_state.boom_value = boom.metric_value;
     }
 
     // Also update primary boom (for other GUI features that use state.boom_frame)
@@ -1931,13 +1947,12 @@ void recomputeMetrics(AppState& state) {
         state.metrics_collector.endFrame();
     }
 
-    // Re-detect boom with new params
+    // Re-detect boom with default params
     auto boom = metrics::findBoomFrame(state.metrics_collector,
-                                       state.frame_duration,
-                                       state.config.getBoomParams());
+                                       state.frame_duration);
     if (boom.frame >= 0) {
         state.boom_frame = boom.frame;
-        state.boom_causticness = boom.causticness;
+        state.boom_causticness = boom.metric_value;
 
         // Update event detector for analyzers
         double variance = state.metrics_collector.getVariance();
@@ -2008,68 +2023,10 @@ void drawMetricParametersWindow(AppState& state) {
 
         // Get config for the metric being edited
         auto& editing_config = getOrCreateMetricConfig(state.config, state.editing_metric);
-        BoomDetectionParams boom_params = std::visit([](auto const& p) -> BoomDetectionParams {
-            return p.boom;
-        }, editing_config.params);
 
         bool params_changed = false;
 
-        // Boom detection parameters
-        ImGui::Text("Boom Detection:");
-        ImGui::Indent();
-
-        const char* method_names[] = {"Max Value", "First Peak %%", "Derivative Peak",
-                                       "Threshold Crossing", "2nd Derivative Peak"};
-        int method = static_cast<int>(boom_params.method);
-        if (ImGui::Combo("Method", &method, method_names, 5)) {
-            boom_params.method = static_cast<BoomDetectionMethod>(method);
-            params_changed = true;
-        }
-
-        float offset = static_cast<float>(boom_params.offset_seconds);
-        if (ImGui::SliderFloat("Offset (s)", &offset, -0.5f, 1.0f, "%.2f")) {
-            boom_params.offset_seconds = offset;
-            params_changed = true;
-        }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Time offset for visual alignment");
-
-        // Method-specific parameters
-        if (boom_params.method == BoomDetectionMethod::FirstPeakPercent) {
-            float peak_pct = static_cast<float>(boom_params.peak_percent_threshold) * 100.0f;
-            if (ImGui::SliderFloat("Peak %%", &peak_pct, 30.0f, 90.0f, "%.0f%%%%")) {
-                boom_params.peak_percent_threshold = peak_pct / 100.0;
-                params_changed = true;
-            }
-        }
-
-        if (boom_params.method == BoomDetectionMethod::DerivativePeak ||
-            boom_params.method == BoomDetectionMethod::SecondDerivativePeak) {
-            if (ImGui::SliderInt("Smoothing", &boom_params.smoothing_window, 1, 40)) {
-                params_changed = true;
-            }
-        }
-
-        if (boom_params.method == BoomDetectionMethod::ThresholdCrossing) {
-            float crossing = static_cast<float>(boom_params.crossing_threshold);
-            if (ImGui::SliderFloat("Threshold", &crossing, 0.1f, 0.8f, "%.2f")) {
-                boom_params.crossing_threshold = crossing;
-                params_changed = true;
-            }
-            if (ImGui::SliderInt("Confirm", &boom_params.crossing_confirmation, 1, 15)) {
-                params_changed = true;
-            }
-        }
-
-        float prominence = static_cast<float>(boom_params.min_peak_prominence);
-        if (ImGui::SliderFloat("Min Prominence", &prominence, 0.01f, 0.3f, "%.3f")) {
-            boom_params.min_peak_prominence = prominence;
-            params_changed = true;
-        }
-
-        ImGui::Unindent();
-
         // Metric-specific parameters
-        ImGui::Spacing();
         ImGui::Text("Metric Parameters:");
         ImGui::Indent();
 
@@ -2136,12 +2093,9 @@ void drawMetricParametersWindow(AppState& state) {
 
         ImGui::Unindent();
 
-        // Apply boom params changes back to config
-        if (params_changed) {
-            std::visit([&boom_params](auto& p) {
-                p.boom = boom_params;
-            }, editing_config.params);
-        }
+        // Note: params_changed is set by metric-specific parameter edits above
+        // The changes are applied directly to editing_config.params via std::visit
+        (void)params_changed;  // Suppress unused variable warning
     }
 
     ImGui::Spacing();

@@ -1,28 +1,82 @@
 # Best parameters found by pendulum-optimize
-# Boom MAE: 21.23 frames
-# Peak MAE: 1000000000.00 frames
+# Global best: cv_causticness with MAE=28.27 frames
 # Samples evaluated: 30
+# This file contains best parameters for ALL metrics.
+# The [boom_detection] section at the end specifies which metric to use.
 
-[metrics]
+# cv_causticness: MAE=28.27 frames
+[metrics.cv_causticness]
 min_sectors = 8
 max_sectors = 8
 target_per_sector = 468
-min_grid = 4
-max_grid = 32
-target_per_cell = 40
-max_radius = 2.00
-cv_normalization = 1.50
-log_ratio_normalization = 2.00
-min_spread_threshold = 0.05
-gini_chaos_baseline = 0.35
-gini_baseline_divisor = 0.65
-log_inverse_baseline = 1.00
-log_inverse_divisor = 2.50
+cv_normalization = 0.50
 
-[boom_detection]
-metric_name = "organization_causticness"
-method = "derivative_peak"
-offset_seconds = -0.25
+# organization_causticness: MAE=31.63 frames
+[metrics.organization_causticness]
+min_sectors = 8
+max_sectors = 8
+target_per_sector = 468
+
+# r1_concentration: MAE=34.43 frames
+[metrics.r1_concentration]
+min_sectors = 8
+max_sectors = 8
+target_per_sector = 468
+
+# joint_concentration: MAE=34.90 frames
+[metrics.joint_concentration]
+min_sectors = 8
+max_sectors = 8
+target_per_sector = 468
+
+# spatial_concentration: MAE=36.30 frames
+[metrics.spatial_concentration]
+min_grid = 4
+max_grid = 4
+target_per_cell = 234
+
+# r2_concentration: MAE=42.70 frames
+[metrics.r2_concentration]
+min_sectors = 8
+max_sectors = 8
+target_per_sector = 468
+
+# tip_causticness: MAE=44.93 frames
+[metrics.tip_causticness]
+min_sectors = 8
+max_sectors = 8
+target_per_sector = 468
+
+# trajectory_smoothness: MAE=45.23 frames
+[metrics.trajectory_smoothness]
+max_radius = 1.00
+min_spread_threshold = 0.010
+
+# angular_causticness: MAE=50.83 frames
+[metrics.angular_causticness]
+min_sectors = 8
+max_sectors = 8
+target_per_sector = 468
+
+# fold_causticness: MAE=101.13 frames
+[metrics.fold_causticness]
+max_radius = 1.00
+cv_normalization = 0.50
+
+# variance: MAE=140.00 frames
+[metrics.variance]
+min_sectors = 8
+max_sectors = 72
+target_per_sector = 40
+
+# Best boom detection target (using cv_causticness)
+[targets.boom]
+type = "frame"
+metric = "cv_causticness"
+method = "threshold_crossing"
+offset_seconds = -0.50
 peak_percent_threshold = 0.60
 min_peak_prominence = 0.05
-smoothing_window = 1
+smoothing_window = 5
+crossing_threshold = 0.80
+crossing_confirmation = 1

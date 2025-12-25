@@ -4,8 +4,34 @@
 #include "metrics/causticness_analyzer.h"
 #include "metrics/event_detector.h"
 #include "metrics/metrics_collector.h"
+#include "optimize/prediction_target.h"
 
 namespace metrics {
+
+// ============================================================================
+// CHAOS DETECTION: Two Separate Systems
+// ============================================================================
+//
+// There are TWO chaos detection mechanisms that serve different purposes:
+//
+// 1. EventDetector (real-time, during simulation):
+//    - Configured via [detection] section: chaos_threshold, chaos_confirmation
+//    - Uses ABSOLUTE variance threshold (e.g., 700.0 radians²)
+//    - Triggers during simulation loop
+//    - Can enable early_stop_after_chaos feature
+//    - Result stored in results.chaos_frame, results.chaos_variance
+//
+// 2. FrameDetector (post-hoc, via [targets.chaos]):
+//    - Configured via [targets.chaos] section with method/params
+//    - Uses RELATIVE threshold (e.g., 0.8 = 80% of max value)
+//    - Runs after simulation completes
+//    - More flexible detection methods available
+//    - Result stored in results.predictions[]
+//
+// These systems may detect chaos at DIFFERENT frames due to different
+// threshold semantics (absolute vs relative).
+//
+// ============================================================================
 
 // Common initialization for the metrics system.
 // This helper ensures consistent setup across all executables.
@@ -16,15 +42,16 @@ namespace metrics {
 //
 // Parameters:
 //   collector: MetricsCollector to register metrics on
-//   detector: EventDetector to configure chaos detection
+//   detector: EventDetector to configure chaos detection (real-time)
 //   causticness_analyzer: CausticnessAnalyzer to set frame duration
-//   chaos_threshold: Variance threshold for chaos detection (e.g., 700.0)
+//   chaos_threshold: ABSOLUTE variance threshold for chaos detection (e.g., 700.0)
 //   chaos_confirmation: Frames above threshold to confirm chaos (e.g., 10)
 //   frame_duration: Seconds per frame (simulation.duration / total_frames)
 //   with_gpu: If true, also register GPU metrics (for rendering modes)
 //
-// Note: Boom detection uses max causticness (via findBoomFrame/forceBoomEvent)
-// rather than threshold crossing. Chaos detection still uses threshold.
+// Note: This configures EventDetector for real-time chaos detection.
+// Post-hoc chaos prediction via [targets.chaos] is handled separately
+// using FrameDetector with relative thresholds.
 inline void initializeMetricsSystem(MetricsCollector& collector,
                                     EventDetector& detector,
                                     CausticnessAnalyzer& causticness_analyzer,
@@ -69,7 +96,7 @@ inline BoomDetection runPostSimulationAnalysis(MetricsCollector const& collector
                                                EventDetector& detector,
                                                CausticnessAnalyzer& causticness_analyzer,
                                                double frame_duration,
-                                               BoomDetectionParams const& boom_params = {}) {
+                                               optimize::FrameDetectionParams const& boom_params = {}) {
     // Detect boom using configured method and metric
     auto boom = findBoomFrame(collector, frame_duration, boom_params);
 

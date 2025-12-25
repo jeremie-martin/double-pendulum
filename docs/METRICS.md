@@ -287,8 +287,9 @@ Each loaded simulation requires:
 | File | Purpose |
 |------|---------|
 | `include/metrics/metrics_collector.h` | MetricsCollector class, metric computation |
-| `include/metrics/boom_detection.h` | BoomDetector, findBoomFrame() |
-| `include/config.h` | MetricParams, BoomDetectionParams structs |
+| `include/metrics/boom_detection.h` | findBoomFrame() utility |
+| `include/config.h` | MetricParams, TargetConfig structs |
+| `include/optimize/prediction_target.h` | FrameDetectionParams, PredictionTarget |
 | `src/config.cpp` | TOML parsing for metrics config |
 | `src/main_optimize.cpp` | Parameter optimization tool |
 | `config/best_params.toml` | Current best parameters |

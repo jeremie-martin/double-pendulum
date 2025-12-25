@@ -77,21 +77,6 @@ PhysicsQuality parsePhysicsQuality(std::string const& str) {
     return PhysicsQuality::High;
 }
 
-BoomDetectionMethod parseBoomDetectionMethod(std::string const& str) {
-    if (str == "max_causticness")
-        return BoomDetectionMethod::MaxCausticness;
-    if (str == "first_peak_percent")
-        return BoomDetectionMethod::FirstPeakPercent;
-    if (str == "derivative_peak")
-        return BoomDetectionMethod::DerivativePeak;
-    if (str == "threshold_crossing")
-        return BoomDetectionMethod::ThresholdCrossing;
-    if (str == "second_derivative_peak")
-        return BoomDetectionMethod::SecondDerivativePeak;
-    std::cerr << "Unknown boom detection method: " << str << ", using max_causticness\n";
-    return BoomDetectionMethod::MaxCausticness;
-}
-
 // Safe value extraction helpers
 template <typename T> T get_or(toml::table const& tbl, std::string_view key, T default_val) {
     if (auto node = tbl.get(key)) {
@@ -202,25 +187,6 @@ static void loadConfigFromTable(Config& config, toml::table const& tbl) {
             if (auto metric_tbl = value.as_table()) {
                 std::string metric_name(key);
                 MetricConfig mc = createDefaultMetricConfig(metric_name);
-
-                // Parse boom detection subsection if present
-                if (auto boom_sub = metric_tbl->get("boom")) {
-                    if (auto boom_tbl = boom_sub->as_table()) {
-                        BoomDetectionParams bp = mc.getBoomParams();
-                        bp.metric_name = metric_name;  // Ensure metric_name matches
-                        auto method_str = get_string_or(*boom_tbl, "method", "");
-                        if (!method_str.empty()) {
-                            bp.method = parseBoomDetectionMethod(method_str);
-                        }
-                        bp.offset_seconds = get_or(*boom_tbl, "offset_seconds", bp.offset_seconds);
-                        bp.peak_percent_threshold = get_or(*boom_tbl, "peak_percent_threshold", bp.peak_percent_threshold);
-                        bp.min_peak_prominence = get_or(*boom_tbl, "min_peak_prominence", bp.min_peak_prominence);
-                        bp.smoothing_window = get_or(*boom_tbl, "smoothing_window", bp.smoothing_window);
-                        bp.crossing_threshold = get_or(*boom_tbl, "crossing_threshold", bp.crossing_threshold);
-                        bp.crossing_confirmation = get_or(*boom_tbl, "crossing_confirmation", bp.crossing_confirmation);
-                        mc.setBoomParams(bp);
-                    }
-                }
 
                 // Parse metric-specific params based on type
                 MetricType type = getMetricType(metric_name);
@@ -665,33 +631,9 @@ bool Config::applyOverride(std::string const& key, std::string const& value) {
             MetricConfig& mc = getOrCreateMetricConfig(metric_name);
             MetricType type = getMetricType(metric_name);
 
-            // Check if this is a boom parameter
-            if (rest.substr(0, 5) == "boom.") {
-                std::string boom_param = rest.substr(5);
-                BoomDetectionParams bp = mc.getBoomParams();
-
-                if (boom_param == "method") {
-                    bp.method = parseBoomDetectionMethod(value);
-                } else if (boom_param == "offset_seconds") {
-                    bp.offset_seconds = std::stod(value);
-                } else if (boom_param == "peak_percent_threshold") {
-                    bp.peak_percent_threshold = std::stod(value);
-                } else if (boom_param == "min_peak_prominence") {
-                    bp.min_peak_prominence = std::stod(value);
-                } else if (boom_param == "smoothing_window") {
-                    bp.smoothing_window = std::stoi(value);
-                } else if (boom_param == "crossing_threshold") {
-                    bp.crossing_threshold = std::stod(value);
-                } else if (boom_param == "crossing_confirmation") {
-                    bp.crossing_confirmation = std::stoi(value);
-                } else {
-                    std::cerr << "Unknown boom parameter: " << boom_param << "\n";
-                    return false;
-                }
-                mc.setBoomParams(bp);
-            } else {
-                // Metric-specific parameter
-                bool handled = false;
+            // Metric-specific parameter
+            bool handled = false;
+            {
                 switch (type) {
                 case MetricType::Sector: {
                     auto& p = std::get<SectorMetricParams>(mc.params);
@@ -834,17 +776,6 @@ std::string physicsQualityToString(PhysicsQuality quality) {
     }
     return "high";
 }
-
-std::string boomDetectionMethodToString(BoomDetectionMethod method) {
-    switch (method) {
-    case BoomDetectionMethod::MaxCausticness: return "max_causticness";
-    case BoomDetectionMethod::FirstPeakPercent: return "first_peak_percent";
-    case BoomDetectionMethod::DerivativePeak: return "derivative_peak";
-    case BoomDetectionMethod::ThresholdCrossing: return "threshold_crossing";
-    case BoomDetectionMethod::SecondDerivativePeak: return "second_derivative_peak";
-    }
-    return "max_causticness";
-}
 } // namespace
 
 void Config::save(std::string const& path) const {
@@ -969,24 +900,8 @@ void Config::save(std::string const& path) const {
             // No parameters to write for parameter-less metrics
             break;
         }
-
-        // Write boom params subsection
-        auto const& bp = mc.getBoomParams();
-        file << "\n[metrics." << name << ".boom]\n";
-        file << "method = \"" << boomDetectionMethodToString(bp.method) << "\"\n";
-        file << "offset_seconds = " << bp.offset_seconds << "\n";
-        file << "peak_percent_threshold = " << bp.peak_percent_threshold << "\n";
-        file << "min_peak_prominence = " << bp.min_peak_prominence << "\n";
-        file << "smoothing_window = " << bp.smoothing_window << "\n";
-        file << "crossing_threshold = " << bp.crossing_threshold << "\n";
-        file << "crossing_confirmation = " << bp.crossing_confirmation << "\n";
         file << "\n";
     }
-
-    // Boom detection - which metric is active
-    file << "[boom_detection]\n";
-    file << "active_metric = \"" << boom_metric << "\"\n";
-    file << "\n";
 
     // Multi-target configuration
     for (auto const& tc : targets) {
@@ -996,12 +911,20 @@ void Config::save(std::string const& path) const {
         file << "method = \"" << tc.method << "\"\n";
 
         if (tc.type == "frame") {
+            // offset_seconds is used by all frame methods
             file << "offset_seconds = " << tc.offset_seconds << "\n";
-            file << "peak_percent_threshold = " << tc.peak_percent_threshold << "\n";
-            file << "min_peak_prominence = " << tc.min_peak_prominence << "\n";
-            file << "smoothing_window = " << tc.smoothing_window << "\n";
-            file << "crossing_threshold = " << tc.crossing_threshold << "\n";
-            file << "crossing_confirmation = " << tc.crossing_confirmation << "\n";
+
+            // Only write method-specific params
+            if (tc.method == "first_peak_percent") {
+                file << "peak_percent_threshold = " << tc.peak_percent_threshold << "\n";
+                file << "min_peak_prominence = " << tc.min_peak_prominence << "\n";
+            } else if (tc.method == "derivative_peak" || tc.method == "second_derivative_peak") {
+                file << "smoothing_window = " << tc.smoothing_window << "\n";
+            } else if (tc.method == "threshold_crossing") {
+                file << "crossing_threshold = " << tc.crossing_threshold << "\n";
+                file << "crossing_confirmation = " << tc.crossing_confirmation << "\n";
+            }
+            // max_value has no additional params
         }
 
         if (!tc.weights.empty()) {

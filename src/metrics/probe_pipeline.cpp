@@ -50,7 +50,7 @@ void ProbePipeline::setChaosConfirmation(int frames) {
     chaos_confirmation_ = frames;
 }
 
-void ProbePipeline::setBoomParams(BoomDetectionParams const& params) {
+void ProbePipeline::setBoomParams(optimize::FrameDetectionParams const& params) {
     boom_params_ = params;
 }
 

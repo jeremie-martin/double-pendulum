@@ -1,6 +1,7 @@
 #pragma once
 
 #include "config.h"
+#include "optimize/prediction_target.h"
 
 // Centralized enum-to-string conversions
 // These replace duplicate lambdas scattered across main.cpp and simulation.cpp
@@ -58,6 +59,26 @@ constexpr const char* toString(OutputMode mode) {
     switch (mode) {
     case OutputMode::Timestamped: return "timestamped";
     case OutputMode::Direct: return "direct";
+    }
+    return "unknown";
+}
+
+constexpr const char* toString(optimize::FrameDetectionMethod method) {
+    switch (method) {
+    case optimize::FrameDetectionMethod::MaxValue: return "max_value";
+    case optimize::FrameDetectionMethod::FirstPeakPercent: return "first_peak_percent";
+    case optimize::FrameDetectionMethod::DerivativePeak: return "derivative_peak";
+    case optimize::FrameDetectionMethod::ThresholdCrossing: return "threshold_crossing";
+    case optimize::FrameDetectionMethod::SecondDerivativePeak: return "second_derivative_peak";
+    }
+    return "unknown";
+}
+
+constexpr const char* toString(optimize::ScoreMethod method) {
+    switch (method) {
+    case optimize::ScoreMethod::PeakClarity: return "peak_clarity";
+    case optimize::ScoreMethod::PostBoomSustain: return "post_boom_sustain";
+    case optimize::ScoreMethod::Composite: return "composite";
     }
     return "unknown";
 }

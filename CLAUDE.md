@@ -93,19 +93,20 @@ Boom detection finds the visually significant "explosion" moment in the simulati
 
 ```cpp
 #include "metrics/boom_detection.h"
+#include "optimize/prediction_target.h"
 
-// Using default MaxCausticness method:
+// Using default MaxValue method:
 auto boom = metrics::findBoomFrame(collector, frame_duration);
 
 // Or with custom params:
-BoomDetectionParams params;
-params.method = BoomDetectionMethod::ThresholdCrossing;
+optimize::FrameDetectionParams params;
+params.method = optimize::FrameDetectionMethod::ThresholdCrossing;
 params.crossing_threshold = 0.3;  // 30% of max
 params.crossing_confirmation = 5; // 5 consecutive frames
 auto boom = metrics::findBoomFrame(collector, frame_duration, params);
 
 if (boom.frame >= 0) {
-    // boom.frame, boom.seconds, boom.causticness are available
+    // boom.frame, boom.seconds, boom.metric_value are available
     // Force event for BoomAnalyzer compatibility:
     metrics::forceBoomEvent(event_detector, boom, variance_at_boom);
 }

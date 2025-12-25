@@ -1,155 +1,155 @@
 {
-  "version": 1,
+  "version": 2,
   "annotations": [
     {
       "id": "run_20251224_135549",
       "data_path": "output/eval/run_20251224_135549/simulation_data.bin",
-      "boom_frame": 513
+      "targets": { "boom_frame": 513 }
     },
     {
       "id": "run_20251224_135558",
       "data_path": "output/eval/run_20251224_135558/simulation_data.bin",
-      "boom_frame": 548
+      "targets": { "boom_frame": 548 }
     },
     {
       "id": "run_20251224_135608",
       "data_path": "output/eval/run_20251224_135608/simulation_data.bin",
-      "boom_frame": 385
+      "targets": { "boom_frame": 385 }
     },
     {
       "id": "run_20251224_135619",
       "data_path": "output/eval/run_20251224_135619/simulation_data.bin",
-      "boom_frame": 650
+      "targets": { "boom_frame": 650 }
     },
     {
       "id": "run_20251224_135628",
       "data_path": "output/eval/run_20251224_135628/simulation_data.bin",
-      "boom_frame": 430
+      "targets": { "boom_frame": 430 }
     },
     {
       "id": "run_20251224_135638",
       "data_path": "output/eval/run_20251224_135638/simulation_data.bin",
-      "boom_frame": 663
+      "targets": { "boom_frame": 663 }
     },
     {
       "id": "run_20251224_135647",
       "data_path": "output/eval/run_20251224_135647/simulation_data.bin",
-      "boom_frame": 714
+      "targets": { "boom_frame": 714 }
     },
     {
       "id": "run_20251224_135656",
       "data_path": "output/eval/run_20251224_135656/simulation_data.bin",
-      "boom_frame": 639
+      "targets": { "boom_frame": 639 }
     },
     {
       "id": "run_20251224_135705",
       "data_path": "output/eval/run_20251224_135705/simulation_data.bin",
-      "boom_frame": 369
+      "targets": { "boom_frame": 369 }
     },
     {
       "id": "run_20251224_135715",
       "data_path": "output/eval/run_20251224_135715/simulation_data.bin",
-      "boom_frame": 651
+      "targets": { "boom_frame": 651 }
     },
     {
       "id": "run_20251224_135724",
       "data_path": "output/eval/run_20251224_135724/simulation_data.bin",
-      "boom_frame": 765
+      "targets": { "boom_frame": 765 }
     },
     {
       "id": "run_20251224_135734",
       "data_path": "output/eval/run_20251224_135734/simulation_data.bin",
-      "boom_frame": 530
+      "targets": { "boom_frame": 530 }
     },
     {
       "id": "run_20251224_135744",
       "data_path": "output/eval/run_20251224_135744/simulation_data.bin",
-      "boom_frame": 613
+      "targets": { "boom_frame": 613 }
     },
     {
       "id": "run_20251224_135753",
       "data_path": "output/eval/run_20251224_135753/simulation_data.bin",
-      "boom_frame": 610
+      "targets": { "boom_frame": 610 }
     },
     {
       "id": "run_20251224_135803",
       "data_path": "output/eval/run_20251224_135803/simulation_data.bin",
-      "boom_frame": 488
+      "targets": { "boom_frame": 488 }
     },
     {
       "id": "run_20251224_135813",
       "data_path": "output/eval/run_20251224_135813/simulation_data.bin",
-      "boom_frame": 464
+      "targets": { "boom_frame": 464 }
     },
     {
       "id": "run_20251224_135823",
       "data_path": "output/eval/run_20251224_135823/simulation_data.bin",
-      "boom_frame": 377
+      "targets": { "boom_frame": 377 }
     },
     {
       "id": "run_20251224_135833",
       "data_path": "output/eval/run_20251224_135833/simulation_data.bin",
-      "boom_frame": 589
+      "targets": { "boom_frame": 589 }
     },
     {
       "id": "run_20251224_135843",
       "data_path": "output/eval/run_20251224_135843/simulation_data.bin",
-      "boom_frame": 464
+      "targets": { "boom_frame": 464 }
     },
     {
       "id": "run_20251224_135853",
       "data_path": "output/eval/run_20251224_135853/simulation_data.bin",
-      "boom_frame": 340
+      "targets": { "boom_frame": 340 }
     },
     {
       "id": "run_20251224_135904",
       "data_path": "output/eval/run_20251224_135904/simulation_data.bin",
-      "boom_frame": 548
+      "targets": { "boom_frame": 548 }
     },
     {
       "id": "run_20251224_135914",
       "data_path": "output/eval/run_20251224_135914/simulation_data.bin",
-      "boom_frame": 697
+      "targets": { "boom_frame": 697 }
     },
     {
       "id": "run_20251224_135923",
       "data_path": "output/eval/run_20251224_135923/simulation_data.bin",
-      "boom_frame": 477
+      "targets": { "boom_frame": 477 }
     },
     {
       "id": "run_20251224_135933",
       "data_path": "output/eval/run_20251224_135933/simulation_data.bin",
-      "boom_frame": 617
+      "targets": { "boom_frame": 617 }
     },
     {
       "id": "run_20251224_135942",
       "data_path": "output/eval/run_20251224_135942/simulation_data.bin",
-      "boom_frame": 780
+      "targets": { "boom_frame": 780 }
     },
     {
       "id": "run_20251224_135952",
       "data_path": "output/eval/run_20251224_135952/simulation_data.bin",
-      "boom_frame": 540
+      "targets": { "boom_frame": 540 }
     },
     {
       "id": "run_20251224_140002",
       "data_path": "output/eval/run_20251224_140002/simulation_data.bin",
-      "boom_frame": 515
+      "targets": { "boom_frame": 515 }
     },
     {
       "id": "run_20251224_140011",
       "data_path": "output/eval/run_20251224_140011/simulation_data.bin",
-      "boom_frame": 429
+      "targets": { "boom_frame": 429 }
     },
     {
       "id": "run_20251224_140022",
       "data_path": "output/eval/run_20251224_140022/simulation_data.bin",
-      "boom_frame": 552
+      "targets": { "boom_frame": 552 }
     },
     {
       "id": "run_20251224_140032",
       "data_path": "output/eval/run_20251224_140032/simulation_data.bin",
-      "boom_frame": 584
+      "targets": { "boom_frame": 584 }
     }
   ]
 }
