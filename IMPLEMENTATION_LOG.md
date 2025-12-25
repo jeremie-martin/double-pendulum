@@ -48,6 +48,13 @@ Creating new headers in `include/optimize/`:
 - Converted boom_detection.h to thin wrapper around FrameDetector
 - Single source of truth for detection algorithms
 
+### Phase 8: Full Integration ✅
+- Added Prediction Targets UI section to GUI metric parameters window
+- Updated probe pipeline to populate predictions in buildResults()
+- Added chaos_frame, chaos_seconds, boom_quality to RunResult struct
+- Added deprecation comments to BoomDetectionMethod/Params in config.h
+- Batch generator now extracts chaos and quality from predictions
+
 ---
 
 ## Commits
@@ -59,6 +66,7 @@ Creating new headers in `include/optimize/`:
 5. `Add chaos and quality filtering to batch generator (Phase 5)`
 6. `Update GUI chaos display with blue color coding (Phase 6)`
 7. `Convert boom_detection.h to thin wrapper around FrameDetector (Phase 7)`
+8. `Complete multi-target prediction integration (Phase 8)`
 
 ---
 
