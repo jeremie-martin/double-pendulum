@@ -30,6 +30,8 @@
 #include "metrics/boom_detection.h"
 #include "metrics/metrics_collector.h"
 #include "metrics/metrics_init.h"
+#include "optimize/frame_detector.h"
+#include "optimize/prediction_target.h"
 #include "pendulum.h"
 #include "simulation_data.h"
 
@@ -42,6 +44,7 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <json.hpp>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -51,6 +54,41 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+// ============================================================================
+// PARAM CONVERSION HELPERS
+// ============================================================================
+
+// Convert BoomDetectionMethod to FrameDetectionMethod
+optimize::FrameDetectionMethod toFrameDetectionMethod(BoomDetectionMethod m) {
+    switch (m) {
+    case BoomDetectionMethod::MaxCausticness:
+        return optimize::FrameDetectionMethod::MaxValue;
+    case BoomDetectionMethod::FirstPeakPercent:
+        return optimize::FrameDetectionMethod::FirstPeakPercent;
+    case BoomDetectionMethod::DerivativePeak:
+        return optimize::FrameDetectionMethod::DerivativePeak;
+    case BoomDetectionMethod::ThresholdCrossing:
+        return optimize::FrameDetectionMethod::ThresholdCrossing;
+    case BoomDetectionMethod::SecondDerivativePeak:
+        return optimize::FrameDetectionMethod::SecondDerivativePeak;
+    }
+    return optimize::FrameDetectionMethod::MaxValue;
+}
+
+// Convert BoomDetectionParams to FrameDetectionParams
+optimize::FrameDetectionParams toFrameDetectionParams(BoomDetectionParams const& bp) {
+    optimize::FrameDetectionParams fp;
+    fp.method = toFrameDetectionMethod(bp.method);
+    fp.metric_name = bp.metric_name;
+    fp.offset_seconds = bp.offset_seconds;
+    fp.peak_percent_threshold = bp.peak_percent_threshold;
+    fp.min_peak_prominence = bp.min_peak_prominence;
+    fp.smoothing_window = bp.smoothing_window;
+    fp.crossing_threshold = bp.crossing_threshold;
+    fp.crossing_confirmation = bp.crossing_confirmation;
+    return fp;
+}
 
 // ============================================================================
 // GRID SEARCH PARAMETER SYSTEM
@@ -429,6 +467,31 @@ struct Annotation {
     int boom_frame = -1;
     int peak_frame = -1;
     std::string notes;
+
+    // V2 format: multiple targets
+    std::map<std::string, double> targets;  // "boom_frame" -> 180, "chaos_frame" -> 450, "boom_quality" -> 0.85
+
+    // Get target value (returns -1 or 0.0 if not found)
+    int getTargetFrame(std::string const& name) const {
+        auto it = targets.find(name);
+        if (it != targets.end()) return static_cast<int>(it->second);
+        // Fallback to v1 fields
+        if (name == "boom_frame" || name == "boom") return boom_frame;
+        if (name == "peak_frame" || name == "peak") return peak_frame;
+        return -1;
+    }
+
+    double getTargetScore(std::string const& name) const {
+        auto it = targets.find(name);
+        return it != targets.end() ? it->second : 0.0;
+    }
+
+    bool hasTarget(std::string const& name) const {
+        if (targets.count(name)) return true;
+        if ((name == "boom_frame" || name == "boom") && boom_frame >= 0) return true;
+        if ((name == "peak_frame" || name == "peak") && peak_frame >= 0) return true;
+        return false;
+    }
 };
 
 // Simple JSON extraction helpers
@@ -460,27 +523,77 @@ std::vector<Annotation> loadAnnotations(std::string const& path) {
         return annotations;
     }
 
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    std::string content = buffer.str();
+    try {
+        nlohmann::json root = nlohmann::json::parse(file);
 
-    std::regex obj_pattern("\\{[^{}]*\"id\"[^{}]*\\}");
-    auto obj_begin = std::sregex_iterator(content.begin(), content.end(), obj_pattern);
-    auto obj_end = std::sregex_iterator();
+        // Check version (v2 supports targets map)
+        int version = root.value("version", 1);
 
-    for (auto it = obj_begin; it != obj_end; ++it) {
-        std::string obj = it->str();
-        Annotation ann;
-        ann.id = extractString(obj, "id");
-        ann.data_path = extractString(obj, "data_path");
-        ann.boom_frame = extractInt(obj, "boom_frame", -1);
-        ann.peak_frame = extractInt(obj, "peak_frame", -1);
-        ann.notes = extractString(obj, "notes");
+        auto const& arr = root["annotations"];
+        if (!arr.is_array()) {
+            std::cerr << "Error: annotations must be an array\n";
+            return annotations;
+        }
 
-        if (!ann.id.empty() || !ann.data_path.empty()) {
-            annotations.push_back(ann);
+        for (auto const& obj : arr) {
+            Annotation ann;
+            ann.id = obj.value("id", "");
+            ann.data_path = obj.value("data_path", "");
+            ann.notes = obj.value("notes", "");
+
+            // V1 format: boom_frame, peak_frame as direct fields
+            ann.boom_frame = obj.value("boom_frame", -1);
+            ann.peak_frame = obj.value("peak_frame", -1);
+
+            // V2 format: targets map
+            if (version >= 2 && obj.contains("targets")) {
+                auto const& targets_obj = obj["targets"];
+                if (targets_obj.is_object()) {
+                    for (auto it = targets_obj.begin(); it != targets_obj.end(); ++it) {
+                        ann.targets[it.key()] = it.value().get<double>();
+                    }
+                    // Populate v1 fields from targets for backward compat
+                    if (ann.boom_frame < 0 && ann.targets.count("boom_frame")) {
+                        ann.boom_frame = static_cast<int>(ann.targets["boom_frame"]);
+                    }
+                    if (ann.peak_frame < 0 && ann.targets.count("peak_frame")) {
+                        ann.peak_frame = static_cast<int>(ann.targets["peak_frame"]);
+                    }
+                }
+            }
+
+            if (!ann.id.empty() || !ann.data_path.empty()) {
+                annotations.push_back(ann);
+            }
+        }
+    } catch (nlohmann::json::exception const& e) {
+        std::cerr << "Error parsing annotations JSON: " << e.what() << "\n";
+        // Fall back to regex-based parsing for backward compat
+        file.clear();
+        file.seekg(0);
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        std::string content = buffer.str();
+
+        std::regex obj_pattern("\\{[^{}]*\"id\"[^{}]*\\}");
+        auto obj_begin = std::sregex_iterator(content.begin(), content.end(), obj_pattern);
+        auto obj_end = std::sregex_iterator();
+
+        for (auto it = obj_begin; it != obj_end; ++it) {
+            std::string obj_str = it->str();
+            Annotation ann;
+            ann.id = extractString(obj_str, "id");
+            ann.data_path = extractString(obj_str, "data_path");
+            ann.boom_frame = extractInt(obj_str, "boom_frame", -1);
+            ann.peak_frame = extractInt(obj_str, "peak_frame", -1);
+            ann.notes = extractString(obj_str, "notes");
+
+            if (!ann.id.empty() || !ann.data_path.empty()) {
+                annotations.push_back(ann);
+            }
         }
     }
+
     return annotations;
 }
 
