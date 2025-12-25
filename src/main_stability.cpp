@@ -232,6 +232,37 @@ SimulationRun runSimulation(
 // STABILITY ANALYSIS
 // ============================================================================
 
+// Time segment for analyzing stability at different phases
+struct TimeSegment {
+    std::string name;
+    int start_frame;
+    int end_frame;
+    double cv = 0.0;
+    std::string grade;
+
+    void computeGrade() {
+        if (cv < 0.01) grade = "A+";
+        else if (cv < 0.05) grade = "A";
+        else if (cv < 0.10) grade = "B";
+        else if (cv < 0.20) grade = "C";
+        else if (cv < 0.50) grade = "D";
+        else grade = "F";
+    }
+};
+
+// Absolute value analysis for a metric at a specific N
+struct AbsoluteValueStats {
+    int N = 0;
+    double mean_value = 0.0;      // Mean value across all frames
+    double value_at_boom = 0.0;   // Value at boom frame
+    double max_value = 0.0;       // Peak value
+    int max_frame = 0;            // Frame of peak value
+    double deviation_from_ref = 0.0;      // Absolute deviation from highest-N
+    double rel_deviation_from_ref = 0.0;  // Relative deviation (%)
+    double boom_deviation = 0.0;          // Boom-time absolute deviation
+    double boom_rel_deviation = 0.0;      // Boom-time relative deviation (%)
+};
+
 struct MetricStability {
     std::string name;
     double mean_cv = 0.0;      // Mean CV across all frames
@@ -239,6 +270,25 @@ struct MetricStability {
     double median_cv = 0.0;    // Median CV
     int unstable_frames = 0;   // Frames with CV > 10%
     std::string stability_grade;
+
+    // Time-segmented CV analysis
+    std::vector<TimeSegment> segments;
+    double cv_at_boom = 0.0;   // CV specifically at boom frame
+    std::string boom_grade;
+
+    // Per-frame CV data (for detailed analysis)
+    std::vector<double> frame_cvs;
+
+    // === NEW: Absolute value analysis ===
+    std::vector<AbsoluteValueStats> abs_stats;  // One per N value
+    double scale_correlation = 0.0;  // Correlation between N and mean value (-1 to 1)
+    double scale_sensitivity = 0.0;  // How much values change per doubling of N (%)
+    int convergence_N = 0;           // Smallest N where deviation < 5% from max-N
+
+    // Reference values (from highest N)
+    double ref_mean = 0.0;
+    double ref_boom_value = 0.0;
+    double ref_max_value = 0.0;
 
     void computeGrade() {
         if (mean_cv < 0.01) {
@@ -254,6 +304,14 @@ struct MetricStability {
         } else {
             stability_grade = "F  (unstable)";
         }
+
+        // Grade at boom
+        if (cv_at_boom < 0.01) boom_grade = "A+";
+        else if (cv_at_boom < 0.05) boom_grade = "A";
+        else if (cv_at_boom < 0.10) boom_grade = "B";
+        else if (cv_at_boom < 0.20) boom_grade = "C";
+        else if (cv_at_boom < 0.50) boom_grade = "D";
+        else boom_grade = "F";
     }
 };
 
@@ -270,6 +328,8 @@ struct StabilityReport {
     std::vector<TargetStability> targets;
     std::vector<int> pendulum_counts;
     int total_frames;
+    double duration_seconds;
+    int boom_frame = -1;  // Consensus boom frame (mode across runs)
 };
 
 StabilityReport analyzeStability(std::vector<SimulationRun> const& runs) {
@@ -281,6 +341,31 @@ StabilityReport analyzeStability(std::vector<SimulationRun> const& runs) {
         report.pendulum_counts.push_back(run.pendulum_count);
     }
     report.total_frames = runs[0].frame_count;
+    report.duration_seconds = runs[0].duration_seconds;
+
+    // Find consensus boom frame (most common among runs)
+    std::map<int, int> boom_counts;
+    for (auto const& run : runs) {
+        if (run.boom_frame >= 0) {
+            boom_counts[run.boom_frame]++;
+        }
+    }
+    int max_count = 0;
+    for (auto const& [frame, count] : boom_counts) {
+        if (count > max_count) {
+            max_count = count;
+            report.boom_frame = frame;
+        }
+    }
+
+    // Define time segments (as frame ranges)
+    // Segments: Early (0-30%), Middle (30-60%), Late (60-90%), Final (90-100%)
+    std::vector<std::pair<std::string, std::pair<int, int>>> segment_defs = {
+        {"early",  {0, report.total_frames * 30 / 100}},
+        {"middle", {report.total_frames * 30 / 100, report.total_frames * 60 / 100}},
+        {"late",   {report.total_frames * 60 / 100, report.total_frames * 90 / 100}},
+        {"final",  {report.total_frames * 90 / 100, report.total_frames}}
+    };
 
     // Collect all metric names from first run
     std::vector<std::string> metric_names;
@@ -293,8 +378,7 @@ StabilityReport analyzeStability(std::vector<SimulationRun> const& runs) {
     for (auto const& metric_name : metric_names) {
         MetricStability ms;
         ms.name = metric_name;
-
-        std::vector<double> frame_cvs;
+        ms.frame_cvs.resize(report.total_frames, 0.0);
 
         // For each frame, compute CV across different N values
         for (int frame = 0; frame < report.total_frames; ++frame) {
@@ -309,7 +393,7 @@ StabilityReport analyzeStability(std::vector<SimulationRun> const& runs) {
             if (values_at_frame.size() >= 2) {
                 Stats s = Stats::compute(values_at_frame);
                 if (std::isfinite(s.cv)) {
-                    frame_cvs.push_back(s.cv);
+                    ms.frame_cvs[frame] = s.cv;
                     if (s.cv > 0.10) {
                         ms.unstable_frames++;
                     }
@@ -317,15 +401,145 @@ StabilityReport analyzeStability(std::vector<SimulationRun> const& runs) {
             }
         }
 
-        if (!frame_cvs.empty()) {
-            Stats cv_stats = Stats::compute(frame_cvs);
+        // Compute overall statistics
+        std::vector<double> valid_cvs;
+        for (double cv : ms.frame_cvs) {
+            if (cv > 0 || ms.frame_cvs[0] == 0) {  // Include zeros only if first is zero
+                valid_cvs.push_back(cv);
+            }
+        }
+
+        if (!valid_cvs.empty()) {
+            Stats cv_stats = Stats::compute(valid_cvs);
             ms.mean_cv = cv_stats.mean;
             ms.max_cv = cv_stats.max;
 
-            // Compute median CV
-            std::vector<double> sorted_cvs = frame_cvs;
+            std::vector<double> sorted_cvs = valid_cvs;
             std::sort(sorted_cvs.begin(), sorted_cvs.end());
             ms.median_cv = sorted_cvs[sorted_cvs.size() / 2];
+        }
+
+        // Compute time-segmented CV
+        for (auto const& [seg_name, range] : segment_defs) {
+            TimeSegment seg;
+            seg.name = seg_name;
+            seg.start_frame = range.first;
+            seg.end_frame = range.second;
+
+            std::vector<double> seg_cvs;
+            for (int f = range.first; f < range.second && f < report.total_frames; ++f) {
+                if (f < static_cast<int>(ms.frame_cvs.size())) {
+                    seg_cvs.push_back(ms.frame_cvs[f]);
+                }
+            }
+
+            if (!seg_cvs.empty()) {
+                seg.cv = Stats::compute(seg_cvs).mean;
+            }
+            seg.computeGrade();
+            ms.segments.push_back(seg);
+        }
+
+        // CV at boom frame (and nearby frames for robustness)
+        if (report.boom_frame >= 0) {
+            int boom_start = std::max(0, report.boom_frame - 5);
+            int boom_end = std::min(report.total_frames, report.boom_frame + 5);
+            std::vector<double> boom_cvs;
+            for (int f = boom_start; f < boom_end; ++f) {
+                if (f < static_cast<int>(ms.frame_cvs.size())) {
+                    boom_cvs.push_back(ms.frame_cvs[f]);
+                }
+            }
+            if (!boom_cvs.empty()) {
+                ms.cv_at_boom = Stats::compute(boom_cvs).mean;
+            }
+        }
+
+        // === NEW: Absolute value analysis ===
+        // Compute per-N statistics
+        for (size_t run_idx = 0; run_idx < runs.size(); ++run_idx) {
+            auto const& run = runs[run_idx];
+            auto it = run.metrics.find(metric_name);
+            if (it == run.metrics.end()) continue;
+
+            AbsoluteValueStats abs;
+            abs.N = run.pendulum_count;
+
+            // Compute mean and find max
+            double sum = 0.0;
+            abs.max_value = -std::numeric_limits<double>::infinity();
+            for (size_t f = 0; f < it->second.size(); ++f) {
+                double v = it->second[f];
+                sum += v;
+                if (v > abs.max_value) {
+                    abs.max_value = v;
+                    abs.max_frame = static_cast<int>(f);
+                }
+            }
+            abs.mean_value = sum / it->second.size();
+
+            // Value at boom
+            if (report.boom_frame >= 0 && report.boom_frame < static_cast<int>(it->second.size())) {
+                abs.value_at_boom = it->second[report.boom_frame];
+            }
+
+            ms.abs_stats.push_back(abs);
+        }
+
+        // Compute reference values (from highest N, which is last in sorted runs)
+        if (!ms.abs_stats.empty()) {
+            auto const& ref = ms.abs_stats.back();
+            ms.ref_mean = ref.mean_value;
+            ms.ref_boom_value = ref.value_at_boom;
+            ms.ref_max_value = ref.max_value;
+
+            // Compute deviations from reference for each N
+            for (auto& abs : ms.abs_stats) {
+                abs.deviation_from_ref = abs.mean_value - ms.ref_mean;
+                if (std::abs(ms.ref_mean) > 1e-10) {
+                    abs.rel_deviation_from_ref = (abs.mean_value - ms.ref_mean) / std::abs(ms.ref_mean) * 100.0;
+                }
+                abs.boom_deviation = abs.value_at_boom - ms.ref_boom_value;
+                if (std::abs(ms.ref_boom_value) > 1e-10) {
+                    abs.boom_rel_deviation = (abs.value_at_boom - ms.ref_boom_value) / std::abs(ms.ref_boom_value) * 100.0;
+                }
+            }
+
+            // Compute scale correlation (Pearson correlation between log(N) and mean value)
+            // Positive = increases with N, Negative = decreases with N
+            if (ms.abs_stats.size() >= 3) {
+                double sum_x = 0, sum_y = 0, sum_xy = 0, sum_x2 = 0, sum_y2 = 0;
+                int n = static_cast<int>(ms.abs_stats.size());
+                for (auto const& abs : ms.abs_stats) {
+                    double x = std::log(static_cast<double>(abs.N));
+                    double y = abs.mean_value;
+                    sum_x += x;
+                    sum_y += y;
+                    sum_xy += x * y;
+                    sum_x2 += x * x;
+                    sum_y2 += y * y;
+                }
+                double denom = std::sqrt((n * sum_x2 - sum_x * sum_x) * (n * sum_y2 - sum_y * sum_y));
+                if (denom > 1e-10) {
+                    ms.scale_correlation = (n * sum_xy - sum_x * sum_y) / denom;
+                }
+
+                // Scale sensitivity: % change per doubling of N
+                // Using linear regression slope on log(N) vs value
+                double slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x * sum_x);
+                double mean_y = sum_y / n;
+                if (std::abs(mean_y) > 1e-10) {
+                    ms.scale_sensitivity = (slope * std::log(2.0)) / std::abs(mean_y) * 100.0;
+                }
+            }
+
+            // Find convergence N (smallest N where rel deviation < 5%)
+            for (auto const& abs : ms.abs_stats) {
+                if (std::abs(abs.rel_deviation_from_ref) < 5.0) {
+                    ms.convergence_N = abs.N;
+                    break;
+                }
+            }
         }
 
         ms.computeGrade();
@@ -377,9 +591,9 @@ StabilityReport analyzeStability(std::vector<SimulationRun> const& runs) {
 
 void printReport(StabilityReport const& report, std::vector<SimulationRun> const& runs) {
     std::cout << "\n";
-    std::cout << std::string(80, '=') << "\n";
+    std::cout << std::string(100, '=') << "\n";
     std::cout << "METRIC STABILITY ANALYSIS\n";
-    std::cout << std::string(80, '=') << "\n\n";
+    std::cout << std::string(100, '=') << "\n\n";
 
     // Configuration summary
     std::cout << "Configuration:\n";
@@ -390,9 +604,12 @@ void printReport(StabilityReport const& report, std::vector<SimulationRun> const
     }
     std::cout << "\n";
     std::cout << "  Frames analyzed: " << report.total_frames << "\n";
-    if (!runs.empty()) {
-        std::cout << "  Duration: " << std::fixed << std::setprecision(1)
-                  << runs[0].duration_seconds << "s\n";
+    std::cout << "  Duration: " << std::fixed << std::setprecision(1)
+              << report.duration_seconds << "s\n";
+    if (report.boom_frame >= 0) {
+        double boom_sec = report.boom_frame * report.duration_seconds / report.total_frames;
+        std::cout << "  Boom frame: " << report.boom_frame
+                  << " (" << std::setprecision(2) << boom_sec << "s)\n";
     }
     std::cout << "\n";
 
@@ -404,29 +621,101 @@ void printReport(StabilityReport const& report, std::vector<SimulationRun> const
     std::sort(sorted_metrics.begin(), sorted_metrics.end(),
               [](auto* a, auto* b) { return a->mean_cv < b->mean_cv; });
 
-    // Metric stability table
-    std::cout << "METRIC STABILITY (sorted by mean CV, lower is better)\n";
-    std::cout << std::string(80, '-') << "\n";
-    std::cout << std::left << std::setw(30) << "Metric"
-              << std::right << std::setw(10) << "Mean CV"
-              << std::setw(10) << "Max CV"
-              << std::setw(12) << "Unstable %"
+    // Metric stability table with time segments
+    std::cout << "METRIC STABILITY BY TIME SEGMENT (CV%, lower is better)\n";
+    std::cout << std::string(100, '-') << "\n";
+    std::cout << std::left << std::setw(28) << "Metric"
+              << std::right
+              << std::setw(10) << "Early"
+              << std::setw(10) << "Middle"
+              << std::setw(10) << "Late"
+              << std::setw(10) << "Final"
+              << std::setw(10) << "@Boom"
+              << std::setw(10) << "Overall"
               << "  Grade\n";
-    std::cout << std::string(80, '-') << "\n";
+    std::cout << std::left << std::setw(28) << ""
+              << std::right
+              << std::setw(10) << "(0-30%)"
+              << std::setw(10) << "(30-60%)"
+              << std::setw(10) << "(60-90%)"
+              << std::setw(10) << "(90-100%)"
+              << std::setw(10) << "(±5frm)"
+              << std::setw(10) << ""
+              << "\n";
+    std::cout << std::string(100, '-') << "\n";
 
     for (auto const* m : sorted_metrics) {
-        double unstable_pct = report.total_frames > 0
-            ? 100.0 * m->unstable_frames / report.total_frames
-            : 0.0;
+        std::cout << std::left << std::setw(28) << m->name << std::right << std::fixed;
 
-        std::cout << std::left << std::setw(30) << m->name
-                  << std::right << std::fixed
-                  << std::setw(9) << std::setprecision(2) << (m->mean_cv * 100) << "%"
-                  << std::setw(9) << std::setprecision(2) << (m->max_cv * 100) << "%"
-                  << std::setw(11) << std::setprecision(1) << unstable_pct << "%"
+        // Time segment CVs
+        for (auto const& seg : m->segments) {
+            std::cout << std::setw(8) << std::setprecision(1) << (seg.cv * 100) << "%"
+                      << seg.grade[0];  // First char of grade (A/B/C/D/F)
+        }
+
+        // CV at boom
+        if (report.boom_frame >= 0) {
+            std::cout << std::setw(8) << std::setprecision(1) << (m->cv_at_boom * 100) << "%"
+                      << m->boom_grade[0];
+        } else {
+            std::cout << std::setw(10) << "N/A";
+        }
+
+        // Overall
+        std::cout << std::setw(8) << std::setprecision(1) << (m->mean_cv * 100) << "%"
                   << "  " << m->stability_grade << "\n";
     }
-    std::cout << std::string(80, '-') << "\n\n";
+    std::cout << std::string(100, '-') << "\n\n";
+
+    // === NEW: Absolute Value Analysis Table ===
+    std::cout << "ABSOLUTE VALUE ANALYSIS (deviation from N=" << report.pendulum_counts.back() << " reference)\n";
+    std::cout << std::string(120, '-') << "\n";
+    std::cout << std::left << std::setw(24) << "Metric"
+              << std::right
+              << std::setw(12) << "Ref@Boom"
+              << std::setw(10) << "ScaleCorr"
+              << std::setw(10) << "Sens/2x";
+
+    // Show deviation for each N (except reference)
+    for (size_t i = 0; i + 1 < report.pendulum_counts.size(); ++i) {
+        std::ostringstream oss;
+        oss << "N" << report.pendulum_counts[i];
+        std::cout << std::setw(10) << oss.str();
+    }
+    std::cout << std::setw(12) << "Converge@\n";
+    std::cout << std::string(120, '-') << "\n";
+
+    for (auto const* m : sorted_metrics) {
+        if (m->abs_stats.empty()) continue;
+
+        std::cout << std::left << std::setw(24) << m->name << std::right << std::fixed;
+
+        // Reference boom value
+        std::cout << std::setw(12) << std::setprecision(4) << m->ref_boom_value;
+
+        // Scale correlation and sensitivity
+        std::cout << std::setw(10) << std::setprecision(2) << m->scale_correlation;
+        std::cout << std::setw(9) << std::setprecision(1) << m->scale_sensitivity << "%";
+
+        // Deviation for each N (relative %)
+        for (size_t i = 0; i + 1 < m->abs_stats.size(); ++i) {
+            double dev = m->abs_stats[i].boom_rel_deviation;
+            std::cout << std::setw(9) << std::setprecision(1) << dev << "%";
+        }
+
+        // Convergence N
+        if (m->convergence_N > 0) {
+            std::cout << std::setw(12) << m->convergence_N;
+        } else {
+            std::cout << std::setw(12) << ">max";
+        }
+        std::cout << "\n";
+    }
+    std::cout << std::string(120, '-') << "\n";
+    std::cout << "  ScaleCorr: Pearson correlation between log(N) and value (-1 to +1)\n";
+    std::cout << "  Sens/2x: % change in value per doubling of N\n";
+    std::cout << "  N columns: relative deviation (%) from reference at boom time\n";
+    std::cout << "  Converge@: Smallest N where deviation < 5%\n\n";
 
     // Target detection stability
     std::cout << "TARGET DETECTION STABILITY\n";
@@ -510,11 +799,27 @@ void printReport(StabilityReport const& report, std::vector<SimulationRun> const
 
     // Summary
     int excellent = 0, good = 0, acceptable = 0, poor = 0;
+    std::vector<std::string> needs_work;
+    std::vector<std::string> boom_stable;
+    std::vector<std::string> boom_unstable;
+
     for (auto const* m : sorted_metrics) {
         if (m->mean_cv < 0.01) excellent++;
         else if (m->mean_cv < 0.05) good++;
         else if (m->mean_cv < 0.10) acceptable++;
-        else poor++;
+        else {
+            poor++;
+            needs_work.push_back(m->name);
+        }
+
+        // Check boom stability specifically
+        if (report.boom_frame >= 0) {
+            if (m->cv_at_boom < 0.05) {
+                boom_stable.push_back(m->name);
+            } else if (m->cv_at_boom >= 0.10) {
+                boom_unstable.push_back(m->name);
+            }
+        }
     }
 
     std::cout << "SUMMARY\n";
@@ -524,7 +829,72 @@ void printReport(StabilityReport const& report, std::vector<SimulationRun> const
     std::cout << "  Good (<5% CV): " << good << "\n";
     std::cout << "  Acceptable (<10% CV): " << acceptable << "\n";
     std::cout << "  Poor (>=10% CV): " << poor << "\n";
+
+    // Actionable feedback for iterative improvement
+    if (!needs_work.empty()) {
+        std::cout << "\n";
+        std::cout << "FOCUS AREAS (metrics with >=10% CV):\n";
+        for (auto const& name : needs_work) {
+            // Find the metric and show segment-specific advice
+            for (auto const* m : sorted_metrics) {
+                if (m->name == name) {
+                    std::cout << "  • " << name << ": overall "
+                              << std::fixed << std::setprecision(1) << (m->mean_cv * 100) << "%";
+
+                    // Find worst segment
+                    double worst_cv = 0;
+                    std::string worst_seg;
+                    for (auto const& seg : m->segments) {
+                        if (seg.cv > worst_cv) {
+                            worst_cv = seg.cv;
+                            worst_seg = seg.name;
+                        }
+                    }
+                    if (!worst_seg.empty()) {
+                        std::cout << ", worst in " << worst_seg
+                                  << " (" << std::setprecision(0) << (worst_cv * 100) << "%)";
+                    }
+
+                    // Show boom stability
+                    if (report.boom_frame >= 0) {
+                        std::cout << ", @boom: " << m->boom_grade;
+                    }
+                    std::cout << "\n";
+                    break;
+                }
+            }
+        }
+    }
+
+    // Quick boom-specific summary for optimization use
+    if (report.boom_frame >= 0) {
+        std::cout << "\n";
+        std::cout << "BOOM-TIME STABILITY (most important for optimization):\n";
+        std::cout << "  Stable @boom (<5% CV): " << boom_stable.size() << " metrics\n";
+        if (!boom_unstable.empty()) {
+            std::cout << "  Unstable @boom (>=10% CV): ";
+            for (size_t i = 0; i < boom_unstable.size() && i < 5; ++i) {
+                if (i > 0) std::cout << ", ";
+                std::cout << boom_unstable[i];
+            }
+            if (boom_unstable.size() > 5) {
+                std::cout << " (+" << (boom_unstable.size() - 5) << " more)";
+            }
+            std::cout << "\n";
+        } else {
+            std::cout << "  All metrics stable at boom time!\n";
+        }
+    }
+
     std::cout << std::string(80, '=') << "\n";
+
+    // One-liner for quick iteration (can be grepped/parsed)
+    int total = static_cast<int>(report.metrics.size());
+    int stable = excellent + good;
+    std::cout << "\n[STABILITY] " << stable << "/" << total << " stable"
+              << " | " << poor << " need work"
+              << " | boom detection: " << (report.targets[0].frame_stats.stddev < 3 ? "stable" : "variable")
+              << "\n";
 }
 
 void saveDetailedCSV(std::string const& path,
@@ -543,6 +913,10 @@ void saveDetailedCSV(std::string const& path,
             file << "," << m.name << "_N" << n;
         }
         file << "," << m.name << "_mean," << m.name << "_cv";
+        // Add deviation columns (relative to max N)
+        for (size_t i = 0; i + 1 < report.pendulum_counts.size(); ++i) {
+            file << "," << m.name << "_dev_N" << report.pendulum_counts[i];
+        }
     }
     file << "\n";
 
@@ -572,11 +946,73 @@ void saveDetailedCSV(std::string const& path,
             } else {
                 file << ",,";
             }
+
+            // Deviation from max N (relative %)
+            if (values.size() >= 2) {
+                double ref_value = values.back();  // Max N is last
+                for (size_t i = 0; i + 1 < values.size(); ++i) {
+                    if (std::abs(ref_value) > 1e-10) {
+                        double dev = (values[i] - ref_value) / std::abs(ref_value) * 100.0;
+                        file << "," << std::setprecision(2) << dev;
+                    } else {
+                        file << ",0";
+                    }
+                }
+            } else {
+                for (size_t i = 0; i + 1 < report.pendulum_counts.size(); ++i) {
+                    file << ",";
+                }
+            }
         }
         file << "\n";
     }
 
     std::cout << "Detailed CSV saved to: " << path << "\n";
+
+    // Also save a summary CSV with the absolute value analysis
+    std::string summary_path = path;
+    auto pos = summary_path.rfind(".csv");
+    if (pos != std::string::npos) {
+        summary_path = summary_path.substr(0, pos) + "_summary.csv";
+    } else {
+        summary_path += "_summary";
+    }
+
+    std::ofstream summary_file(summary_path);
+    if (summary_file.is_open()) {
+        summary_file << "metric,mean_cv,cv_at_boom,ref_boom_value,ref_mean,ref_max,"
+                     << "scale_correlation,scale_sensitivity,convergence_N";
+        for (size_t i = 0; i < report.pendulum_counts.size(); ++i) {
+            summary_file << ",boom_N" << report.pendulum_counts[i];
+        }
+        for (size_t i = 0; i + 1 < report.pendulum_counts.size(); ++i) {
+            summary_file << ",boom_dev_N" << report.pendulum_counts[i];
+        }
+        summary_file << "\n";
+
+        for (auto const& m : report.metrics) {
+            summary_file << m.name
+                         << "," << std::fixed << std::setprecision(6) << m.mean_cv
+                         << "," << m.cv_at_boom
+                         << "," << m.ref_boom_value
+                         << "," << m.ref_mean
+                         << "," << m.ref_max_value
+                         << "," << std::setprecision(4) << m.scale_correlation
+                         << "," << std::setprecision(2) << m.scale_sensitivity
+                         << "," << m.convergence_N;
+
+            // Boom values at each N
+            for (auto const& abs : m.abs_stats) {
+                summary_file << "," << std::setprecision(6) << abs.value_at_boom;
+            }
+            // Boom deviations
+            for (size_t i = 0; i + 1 < m.abs_stats.size(); ++i) {
+                summary_file << "," << std::setprecision(2) << m.abs_stats[i].boom_rel_deviation;
+            }
+            summary_file << "\n";
+        }
+        std::cout << "Summary CSV saved to: " << summary_path << "\n";
+    }
 }
 
 // ============================================================================
