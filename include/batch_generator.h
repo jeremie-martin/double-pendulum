@@ -4,6 +4,7 @@
 #include "metrics/probe_filter.h"
 #include "metrics/probe_pipeline.h"
 #include "music_manager.h"
+#include "optimize/prediction_target.h"
 #include "preset_library.h"
 
 #include <filesystem>
@@ -11,6 +12,38 @@
 #include <random>
 #include <string>
 #include <vector>
+
+// =============================================================================
+// Target-Based Filter Constraints
+// =============================================================================
+//
+// Constraints for prediction targets defined in [targets.X] sections.
+// These link filter criteria to specific targets by name.
+//
+// Example TOML:
+//   [filter.targets.boom]
+//   min_seconds = 7.0
+//   max_seconds = 14.0
+//   required = true
+//
+//   [filter.targets.boom_quality]
+//   min_score = 0.6
+//
+// =============================================================================
+struct TargetConstraint {
+    std::string target_name;  // Links to [targets.X] by name
+
+    // For frame targets (boom, chaos)
+    std::optional<double> min_seconds;
+    std::optional<double> max_seconds;
+
+    // For score targets (boom_quality)
+    std::optional<double> min_score;
+    std::optional<double> max_score;
+
+    // Common
+    bool required = false;  // If true, target must produce a valid result
+};
 
 // =============================================================================
 // Filter Criteria for Batch Probe Validation
@@ -22,92 +55,55 @@
 // HOW IT WORKS:
 // 1. User specifies criteria in batch config TOML:
 //      [filter]
-//      min_boom_seconds = 8.0
-//      max_boom_seconds = 15.0
 //      min_uniformity = 0.9
-//      min_peak_clarity = 0.75
+//      require_valid_music = true
+//
+//      [filter.targets.boom]
+//      min_seconds = 7.0
+//      max_seconds = 14.0
+//      required = true
 //
 // 2. BatchConfig::load() parses these into a FilterCriteria struct
 //
 // 3. FilterCriteria::toProbeFilter() converts to metrics::ProbeFilter
 //
-// 4. During probe phase, filter.evaluate() determines pass/fail
+// 4. During probe phase, filter.evaluate() with predictions determines pass/fail
 //
-// CRITERIA MAPPING:
-//   Config Field          → ProbeFilter Method           → What It Checks
-//   ─────────────────────────────────────────────────────────────────────
-//   require_boom          → addEventRequired("boom")     → Boom event exists
-//   min/max_boom_seconds  → addEventTiming("boom",...)   → Boom timing range
-//   min_uniformity        → addMetricThreshold(spread)   → Final uniformity value
-//   min_peak_clarity      → addScoreThreshold(...)       → Analyzer score
-//   min_post_boom_sustain → addScoreThreshold(...)       → Analyzer score
-//   require_valid_music   → (checked separately)         → Music drop > boom
+// CRITERIA TYPES:
+//   [filter.targets.X]   → Target constraint (references [targets.X])
+//   min_uniformity       → Metric threshold (final uniformity value)
+//   require_valid_music  → Music sync check (handled separately)
 //
 // =============================================================================
 struct FilterCriteria {
-    // Boom timing constraints
-    double min_boom_seconds = 0.0;   // Minimum boom time (0 = no minimum)
-    double max_boom_seconds = 0.0;   // Maximum boom time (0 = no maximum)
-    bool require_boom = true;        // Reject simulations with no detectable boom
+    // Target-based constraints (new system)
+    std::vector<TargetConstraint> target_constraints;
 
-    // Chaos timing constraints (new)
-    double min_chaos_seconds = 0.0;  // Minimum chaos time (0 = no minimum)
-    double max_chaos_seconds = 0.0;  // Maximum chaos time (0 = no maximum)
-    bool require_chaos = false;      // Reject simulations with no detectable chaos
-
-    // Quality thresholds
+    // General constraints (not target-based)
     double min_uniformity = 0.0;     // Minimum uniformity (0 = no requirement, 0.9 recommended)
-    double min_peak_clarity = 0.0;   // Minimum peak clarity (0 = no requirement, 0.75 recommended)
-    double min_post_boom_sustain = 0.0;  // Minimum post-boom area (0 = no requirement)
-    double min_boom_quality = 0.0;   // Minimum boom quality score (0 = no requirement, new)
-
-    // Music sync
-    bool require_valid_music = true; // Fail if no music track has drop > boom time
+    bool require_valid_music = false; // Fail if no music track has drop > boom time
 
     // Check if filtering is enabled (any non-default values)
     bool isEnabled() const {
-        return min_boom_seconds > 0.0 || max_boom_seconds > 0.0 || min_uniformity > 0.0 ||
-               min_peak_clarity > 0.0 || min_post_boom_sustain > 0.0 || min_boom_quality > 0.0 ||
-               require_boom || require_chaos || min_chaos_seconds > 0.0 || max_chaos_seconds > 0.0;
+        return !target_constraints.empty() || min_uniformity > 0.0;
     }
 
     // Convert to metrics::ProbeFilter
     metrics::ProbeFilter toProbeFilter() const {
         metrics::ProbeFilter filter;
 
-        // Boom constraints
-        if (require_boom) {
-            filter.addEventRequired(metrics::EventNames::Boom);
-        }
-        if (min_boom_seconds > 0.0 || max_boom_seconds > 0.0) {
-            filter.addEventTiming(metrics::EventNames::Boom,
-                                  min_boom_seconds > 0.0 ? min_boom_seconds : 0.0,
-                                  max_boom_seconds > 0.0 ? max_boom_seconds : 1e9);
-        }
-
-        // Chaos constraints
-        if (require_chaos) {
-            filter.addEventRequired(metrics::EventNames::Chaos);
-        }
-        if (min_chaos_seconds > 0.0 || max_chaos_seconds > 0.0) {
-            filter.addEventTiming(metrics::EventNames::Chaos,
-                                  min_chaos_seconds > 0.0 ? min_chaos_seconds : 0.0,
-                                  max_chaos_seconds > 0.0 ? max_chaos_seconds : 1e9);
-        }
-
-        // Quality thresholds
+        // General constraints
         if (min_uniformity > 0.0) {
             filter.addMetricThreshold(metrics::MetricNames::CircularSpread, min_uniformity);
         }
-        if (min_peak_clarity > 0.0) {
-            filter.addScoreThreshold(metrics::ScoreNames::PeakClarity, min_peak_clarity);
+
+        // Target constraints
+        for (auto const& tc : target_constraints) {
+            filter.addTargetConstraint(tc.target_name, tc.required,
+                                        tc.min_seconds, tc.max_seconds,
+                                        tc.min_score, tc.max_score);
         }
-        if (min_post_boom_sustain > 0.0) {
-            filter.addScoreThreshold(metrics::ScoreNames::PostBoomSustain, min_post_boom_sustain);
-        }
-        if (min_boom_quality > 0.0) {
-            filter.addScoreThreshold(metrics::ScoreNames::Causticness, min_boom_quality);
-        }
+
         return filter;
     }
 };

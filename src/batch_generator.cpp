@@ -106,49 +106,48 @@ BatchConfig BatchConfig::load(std::string const& path) {
             }
         }
 
-        // Filter criteria
+        // Filter criteria (new target-based system)
         if (auto filter = tbl["filter"].as_table()) {
-            if (auto min_boom = filter->get("min_boom_seconds")) {
-                config.filter.min_boom_seconds = min_boom->value<double>().value_or(0.0);
-            }
-            if (auto max_boom = filter->get("max_boom_seconds")) {
-                config.filter.max_boom_seconds = max_boom->value<double>().value_or(0.0);
-            }
-            // Support both new (min_uniformity) and legacy (min_spread_ratio) names
+            // General constraints (non-target)
             if (auto min_unif = filter->get("min_uniformity")) {
                 config.filter.min_uniformity = min_unif->value<double>().value_or(0.0);
-            } else if (auto min_spread = filter->get("min_spread_ratio")) {
-                // Legacy support - warn that this metric is deprecated
-                std::cerr << "WARNING: 'min_spread_ratio' is deprecated, use 'min_uniformity' instead.\n"
-                          << "  Note: spread_ratio (fraction above horizontal) != uniformity (circular spread).\n"
-                          << "  Recommended: min_uniformity = 0.9 for good distribution.\n";
-                config.filter.min_uniformity = min_spread->value<double>().value_or(0.0);
-            }
-            if (auto req_boom = filter->get("require_boom")) {
-                config.filter.require_boom = req_boom->value<bool>().value_or(true);
             }
             if (auto req_music = filter->get("require_valid_music")) {
-                config.filter.require_valid_music = req_music->value<bool>().value_or(true);
+                config.filter.require_valid_music = req_music->value<bool>().value_or(false);
             }
-            if (auto min_clarity = filter->get("min_peak_clarity")) {
-                config.filter.min_peak_clarity = min_clarity->value<double>().value_or(0.0);
-            }
-            if (auto min_sustain = filter->get("min_post_boom_sustain")) {
-                config.filter.min_post_boom_sustain = min_sustain->value<double>().value_or(0.0);
-            }
-            // New chaos filter fields
-            if (auto min_chaos = filter->get("min_chaos_seconds")) {
-                config.filter.min_chaos_seconds = min_chaos->value<double>().value_or(0.0);
-            }
-            if (auto max_chaos = filter->get("max_chaos_seconds")) {
-                config.filter.max_chaos_seconds = max_chaos->value<double>().value_or(0.0);
-            }
-            if (auto req_chaos = filter->get("require_chaos")) {
-                config.filter.require_chaos = req_chaos->value<bool>().value_or(false);
-            }
-            // New quality filter field
-            if (auto min_quality = filter->get("min_boom_quality")) {
-                config.filter.min_boom_quality = min_quality->value<double>().value_or(0.0);
+
+            // Target-based constraints: [filter.targets.X]
+            if (auto targets = filter->get("targets")) {
+                if (auto targets_tbl = targets->as_table()) {
+                    for (auto const& [name, constraint_node] : *targets_tbl) {
+                        if (auto constraint = constraint_node.as_table()) {
+                            TargetConstraint tc;
+                            tc.target_name = name;
+
+                            if (auto req = constraint->get("required")) {
+                                tc.required = req->value<bool>().value_or(false);
+                            }
+
+                            // Frame target constraints
+                            if (auto min_s = constraint->get("min_seconds")) {
+                                tc.min_seconds = min_s->value<double>();
+                            }
+                            if (auto max_s = constraint->get("max_seconds")) {
+                                tc.max_seconds = max_s->value<double>();
+                            }
+
+                            // Score target constraints
+                            if (auto min_sc = constraint->get("min_score")) {
+                                tc.min_score = min_sc->value<double>();
+                            }
+                            if (auto max_sc = constraint->get("max_score")) {
+                                tc.max_score = max_sc->value<double>();
+                            }
+
+                            config.filter.target_constraints.push_back(tc);
+                        }
+                    }
+                }
             }
         }
 
@@ -606,8 +605,7 @@ std::pair<bool, metrics::ProbePhaseResults> BatchGenerator::runProbe(Config cons
     Simulation sim(probe_config);
     metrics::ProbePhaseResults results = sim.runProbe();
 
-    // Create a dummy collector and event detector to evaluate filter
-    // (filter evaluation needs these even though results already have key data)
+    // Create a minimal collector for uniformity metric evaluation
     metrics::MetricsCollector collector;
     collector.registerStandardMetrics();
 
@@ -618,18 +616,10 @@ std::pair<bool, metrics::ProbePhaseResults> BatchGenerator::runProbe(Config cons
         collector.endFrame();
     }
 
-    metrics::EventDetector events;
-    // Force boom event for filter evaluation (already detected via max causticness)
-    if (results.boom_frame) {
-        metrics::DetectedEvent boom_event;
-        boom_event.frame = *results.boom_frame;
-        boom_event.seconds = results.boom_seconds;
-        boom_event.value = results.final_variance;
-        events.forceEvent(metrics::EventNames::Boom, boom_event);
-    }
-
-    // Evaluate filter
-    auto filter_result = filter_.evaluate(collector, events, results.score);
+    // Evaluate filter with predictions from the probe
+    // Note: Target constraints are evaluated against predictions, not events
+    metrics::EventDetector events;  // Empty - legacy events not used with target constraints
+    auto filter_result = filter_.evaluate(collector, events, results.score, results.predictions);
     results.passed_filter = filter_result.passed;
     results.rejection_reason = filter_result.reason;
 

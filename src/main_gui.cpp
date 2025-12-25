@@ -390,7 +390,6 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
                                 state.causticness_analyzer);
     metrics::initializeMetricsSystem(
         state.metrics_collector, state.event_detector, state.causticness_analyzer,
-        state.config.detection.chaos_threshold, state.config.detection.chaos_confirmation,
         state.frame_duration, /*with_gpu=*/true);
 
     // Apply per-metric configs from config
@@ -473,7 +472,6 @@ bool loadSimulationData(AppState& state, GLRenderer& renderer, std::string const
                                 state.causticness_analyzer);
     metrics::initializeMetricsSystem(
         state.metrics_collector, state.event_detector, state.causticness_analyzer,
-        state.config.detection.chaos_threshold, state.config.detection.chaos_confirmation,
         state.frame_duration, /*with_gpu=*/true);
 
     for (uint32_t f = 0; f < reader->frameCount(); ++f) {
@@ -764,12 +762,6 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
                 ImPlot::PlotLine("Variance", frames.data(), normalized.data(), data_size);
             } else {
                 ImPlot::PlotLine("Variance", frames.data(), variance_values.data(), data_size);
-
-                // Draw chaos threshold line (only in non-normalized modes)
-                // Note: boom_threshold removed - boom is now detected via max causticness
-                double chaos_line = state.config.detection.chaos_threshold;
-                ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 0.5f), 1.0f);
-                ImPlot::PlotInfLines("##chaos_thresh", &chaos_line, 1, ImPlotInfLinesFlags_Horizontal);
             }
         }
         // Plot variance derivative
@@ -2350,20 +2342,6 @@ void drawMetricParametersWindow(AppState& state) {
     ImGui::End();
 }
 
-void drawDetectionSection(AppState& state) {
-    if (ImGui::CollapsingHeader("Detection")) {
-        // Chaos detection (active)
-        auto chaos_thresh = static_cast<float>(state.config.detection.chaos_threshold);
-        if (ImGui::InputFloat("Chaos Threshold", &chaos_thresh, 10.0f, 100.0f, "%.1f rad^2")) {
-            state.config.detection.chaos_threshold = chaos_thresh;
-        }
-        tooltip("Variance threshold for full chaos");
-
-        ImGui::SliderInt("Chaos Confirm", &state.config.detection.chaos_confirmation, 1, 30);
-        tooltip("Consecutive frames above threshold to confirm chaos");
-    }
-}
-
 void drawControlPanel(AppState& state, GLRenderer& renderer) {
     ImGui::Begin("Controls");
 
@@ -2491,7 +2469,6 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
     drawSimulationSection(state);
     drawColorSection(state);
     drawPostProcessSection(state);
-    drawDetectionSection(state);
 
     drawExportPanel(state);
 

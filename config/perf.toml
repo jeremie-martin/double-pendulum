@@ -12,7 +12,7 @@ initial_angle1_deg = 157.1
 initial_angle2_deg = 149.0
 
 [simulation]
-pendulum_count = 7500
+pendulum_count = 5000
 angle_variation_deg = 0.1
 duration_seconds = 15.0
 total_frames = 1440
@@ -34,9 +34,6 @@ normalization = "per_frame"
 scheme = "spectrum"
 start = 0.0
 end = 1.0
-
-[detection]
-chaos_threshold = 500
 
 [output]
 format = "video"

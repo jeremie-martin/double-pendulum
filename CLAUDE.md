@@ -74,8 +74,7 @@ The unified metrics system in `include/metrics/` replaces the legacy variance/an
 ### Key Concepts
 
 - **Metric**: Raw time-series measurement (variance, brightness, causticness)
-- **Boom**: Detected via BoomDetector with multiple methods (see Boom Detection below)
-- **Chaos**: Detected via EventDetector threshold crossing with confirmation
+- **Boom/Chaos**: Detected post-simulation via FrameDetector using `[targets.X]` config
 - **Analyzer**: Component that computes quality scores from metrics
 - **Score**: Quality assessment for ranking/filtering (SimulationScore)
 
@@ -118,18 +117,15 @@ if (boom.frame >= 0) {
 metrics::MetricsCollector collector;
 collector.registerStandardMetrics();
 
-// Only chaos uses threshold detection
-metrics::EventDetector detector;
-detector.addChaosCriteria(0.1, 10, metrics::MetricNames::Variance);
+metrics::EventDetector detector;  // Events added post-simulation
 
 // In simulation loop:
 collector.beginFrame(frame);
 collector.updateFromAngles(angle1s, angle2s);
 collector.setGPUMetrics(gpu_bundle);
 collector.endFrame();
-detector.update(collector, frame_duration);
 
-// After loop: detect boom from max causticness
+// After loop: detect boom using configured method
 auto boom = metrics::findBoomFrame(collector, config.simulation.frameDuration());
 ```
 
@@ -152,9 +148,18 @@ auto boom = metrics::findBoomFrame(collector, config.simulation.frameDuration())
 - Thread-safe (each pendulum is independent)
 
 ### Add new filter criterion for batch probing
+
+Filters now use target-based constraints. To add a new filter:
+
+**For target-based constraints** (referencing `[targets.X]`):
+1. Add new constraint type to `TargetConstraint` struct in `include/batch_generator.h`
+2. Add TOML parsing in `BatchConfig::load()` in `src/batch_generator.cpp`
+3. Add evaluation in `metrics::ProbeFilter::evaluate()` in `src/metrics/probe_filter.cpp`
+
+**For general (non-target) filters**:
 1. Add field to `FilterCriteria` struct in `include/batch_generator.h`
 2. Add criterion to `FilterCriteria::toProbeFilter()` method
-3. Add check in `metrics::ProbeFilter::passes()` method in `include/metrics/probe_filter.h`
+3. Add check in `metrics::ProbeFilter::evaluate()` in `src/metrics/probe_filter.cpp`
 4. Add TOML parsing in `BatchConfig::load()` in `src/batch_generator.cpp`
 
 ### Add new analysis metric
@@ -195,14 +200,22 @@ The batch system supports a two-phase workflow for generating videos with qualit
 
 #### Filter Criteria
 
+Filters use a target-based constraint system that references `[targets.X]` sections by name.
+
+**General Filters** (non-target):
 | Criterion | Purpose |
 |-----------|---------|
-| `min_boom_seconds` | Boom must happen after this time |
-| `max_boom_seconds` | Boom must happen before this time |
 | `min_uniformity` | Minimum distribution uniformity (0=concentrated, 1=uniform, 0.9 recommended) |
-| `min_peak_clarity` | Minimum peak clarity score (0.5=equal peaks, 1.0=no competition, 0.75 recommended) |
-| `require_boom` | Reject simulations with no detectable boom |
 | `require_valid_music` | Fail if no music track has drop > boom time |
+
+**Target Constraints** (`[filter.targets.X]`):
+| Field | Purpose |
+|-------|---------|
+| `min_seconds` | Target frame must happen after this time |
+| `max_seconds` | Target frame must happen before this time |
+| `required` | Reject simulations where target is not detected |
+| `min_score` | Minimum score value (for score targets) |
+| `max_score` | Maximum score value (for score targets) |
 
 #### Spread / Uniformity Metrics
 
@@ -252,10 +265,13 @@ pendulum_count = 1000    # Fast probing
 max_retries = 10         # Retry with new params if rejected
 
 [filter]
-min_boom_seconds = 8.0   # Boom between 8-15 seconds
-max_boom_seconds = 15.0
 min_uniformity = 0.9     # Minimum distribution uniformity
-min_peak_clarity = 0.75  # Reject simulations with competing peaks
+
+# Target-based constraints (reference [targets.X] by name)
+[filter.targets.boom]
+min_seconds = 8.0        # Boom must happen after this time
+max_seconds = 15.0       # Boom must happen before this time
+required = true          # Reject simulations with no boom
 
 [physics_ranges]
 initial_angle1_deg = [140.0, 200.0]

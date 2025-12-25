@@ -211,13 +211,7 @@ ProbePhaseResults ProbePipeline::buildResults(ProbeFilter const& filter) {
     // Get scores
     results.score = getScores();
 
-    // Evaluate filter
-    FilterResult filter_result =
-        filter.evaluate(collector_, event_detector_, results.score);
-    results.passed_filter = filter_result.passed;
-    results.rejection_reason = filter_result.reason;
-
-    // Populate predictions
+    // Populate predictions BEFORE filter evaluation (filter needs predictions)
     if (!prediction_targets_.empty() && causticness_analyzer_) {
         // Use explicit targets
         optimize::TargetEvaluator evaluator;
@@ -266,6 +260,12 @@ ProbePhaseResults ProbePipeline::buildResults(ProbeFilter const& filter) {
             results.predictions.push_back(quality_pred);
         }
     }
+
+    // Evaluate filter with predictions
+    FilterResult filter_result =
+        filter.evaluate(collector_, event_detector_, results.score, results.predictions);
+    results.passed_filter = filter_result.passed;
+    results.rejection_reason = filter_result.reason;
 
     return results;
 }

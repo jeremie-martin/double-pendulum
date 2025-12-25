@@ -11,9 +11,9 @@ presets = "config/presets.toml"          # Preset library file
 
 [probe]
 enabled = true           # Enable probe-based filtering
-pendulum_count = 5000    # Fast probing with fewer pendulums (no rendering)
-total_frames = 300       # Fewer frames for faster probing (0 = use base_config)
-max_dt = 0.005            # Larger timestep for faster probing (0 = use base_config)
+pendulum_count = 2500    # Fast probing with fewer pendulums (no rendering)
+total_frames = 200       # Fewer frames for faster probing (0 = use base_config)
+max_dt = 0.0075            # Larger timestep for faster probing (0 = use base_config)
 max_retries = 100000       # Retry with new params if probe fails
 
 [physics_ranges]
@@ -28,13 +28,18 @@ initial_velocity2 = [-0.05, 0.05]
 
 
 [filter]
-min_boom_seconds = 7.0     # Boom must happen after this time
-max_boom_seconds = 14.0    # Boom must happen before this time
+# General constraints (non-target)
 min_uniformity = 0.9       # Minimum distribution uniformity (0=concentrated, 1=uniform)
-min_peak_clarity = 0    # Minimum peak clarity (0.5=equal peaks, 1.0=no competition)
-# min_post_boom_sustain = 0.3  # Minimum post-boom sustain (area under curve / max area)
-require_boom = true        # Reject simulations with no detectable boom
 require_valid_music = true # Fail if no music track has drop > boom time
+
+# Target-based constraints (reference [targets.X] by name)
+[filter.targets.boom]
+min_seconds = 7.0          # Boom must happen after this time
+max_seconds = 14.0         # Boom must happen before this time
+required = true            # Reject simulations with no detectable boom
+
+# [filter.targets.boom_quality]
+# min_score = 0.6          # Minimum quality score for boom
 
 [music]
 database = "music"

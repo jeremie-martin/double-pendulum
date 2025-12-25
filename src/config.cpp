@@ -304,27 +304,6 @@ static void loadConfigFromTable(Config& config, toml::table const& tbl) {
         }
     }
 
-    // Detection thresholds
-    if (auto detect = tbl["detection"].as_table()) {
-        config.detection.boom_threshold = get_or(*detect, "boom_threshold", config.detection.boom_threshold);
-        config.detection.boom_confirmation = get_or(*detect, "boom_confirmation", config.detection.boom_confirmation);
-        if (detect->contains("chaos_threshold")) {
-            config.detection.chaos_threshold = get_or(*detect, "chaos_threshold", config.detection.chaos_threshold);
-        } else if (detect->contains("white_threshold")) {
-            config.detection.chaos_threshold = get_or(*detect, "white_threshold", config.detection.chaos_threshold);
-        }
-        if (detect->contains("chaos_confirmation")) {
-            config.detection.chaos_confirmation = get_or(*detect, "chaos_confirmation", config.detection.chaos_confirmation);
-        } else if (detect->contains("white_confirmation")) {
-            config.detection.chaos_confirmation = get_or(*detect, "white_confirmation", config.detection.chaos_confirmation);
-        }
-        if (detect->contains("early_stop_after_chaos")) {
-            config.detection.early_stop_after_chaos = get_or(*detect, "early_stop_after_chaos", config.detection.early_stop_after_chaos);
-        } else if (detect->contains("early_stop_after_white")) {
-            config.detection.early_stop_after_chaos = get_or(*detect, "early_stop_after_white", config.detection.early_stop_after_chaos);
-        }
-    }
-
     // Output
     if (auto out = tbl["output"].as_table()) {
         auto format_str = get_string_or(*out, "format", "");
@@ -564,23 +543,6 @@ bool Config::applyOverride(std::string const& key, std::string const& value) {
                 color.end = std::stod(value);
             } else {
                 std::cerr << "Unknown color parameter: " << param << "\n";
-                return false;
-            }
-        }
-        // Detection parameters
-        else if (section == "detection") {
-            if (param == "boom_threshold") {
-                detection.boom_threshold = std::stod(value);
-            } else if (param == "boom_confirmation") {
-                detection.boom_confirmation = std::stoi(value);
-            } else if (param == "chaos_threshold" || param == "white_threshold") {
-                detection.chaos_threshold = std::stod(value);
-            } else if (param == "chaos_confirmation" || param == "white_confirmation") {
-                detection.chaos_confirmation = std::stoi(value);
-            } else if (param == "early_stop_after_chaos" || param == "early_stop_after_white") {
-                detection.early_stop_after_chaos = (value == "true" || value == "1");
-            } else {
-                std::cerr << "Unknown detection parameter: " << param << "\n";
                 return false;
             }
         }
@@ -936,15 +898,6 @@ void Config::save(std::string const& path) const {
         }
         file << "\n";
     }
-
-    // Detection section
-    // Note: boom_threshold and boom_confirmation are deprecated (boom uses max causticness)
-    file << "[detection]\n";
-    file << "chaos_threshold = " << detection.chaos_threshold << "\n";
-    file << "chaos_confirmation = " << detection.chaos_confirmation << "\n";
-    file << "early_stop_after_chaos = " << (detection.early_stop_after_chaos ? "true" : "false")
-         << "\n";
-    file << "\n";
 
     // Output section
     file << "[output]\n";

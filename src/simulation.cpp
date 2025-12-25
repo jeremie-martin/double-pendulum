@@ -147,7 +147,6 @@ Simulation::Simulation(Config const& config) : config_(config), color_gen_(confi
     double frame_duration = config_.simulation.frameDuration();
     metrics::initializeMetricsSystem(
         metrics_collector_, event_detector_, causticness_analyzer_,
-        config_.detection.chaos_threshold, config_.detection.chaos_confirmation,
         frame_duration, /*with_gpu=*/true);
 }
 
@@ -261,41 +260,34 @@ void Simulation::saveMetadata(SimulationResults const& results) {
     out << "    \"io_seconds\": " << results.timing.io_seconds << "\n";
     out << "  },\n";
 
-    // Add detection parameters section
-    out << "  \"detection\": {\n";
-    out << "    \"chaos\": {\n";
-    out << "      \"threshold\": " << config_.detection.chaos_threshold << ",\n";
-    out << "      \"confirmation\": " << config_.detection.chaos_confirmation << ",\n";
-    out << "      \"early_stop\": " << (config_.detection.early_stop_after_chaos ? "true" : "false") << "\n";
-    out << "    },\n";
-    out << "    \"targets\": [\n";
+    // Add targets section
+    out << "  \"targets\": [\n";
     bool first_target = true;
     for (auto const& tc : config_.targets) {
         if (!first_target)
             out << ",\n";
-        out << "      {\n";
-        out << "        \"name\": \"" << tc.name << "\",\n";
-        out << "        \"type\": \"" << tc.type << "\",\n";
-        out << "        \"metric\": \"" << tc.metric << "\",\n";
-        out << "        \"method\": \"" << tc.method << "\"";
+        out << "    {\n";
+        out << "      \"name\": \"" << tc.name << "\",\n";
+        out << "      \"type\": \"" << tc.type << "\",\n";
+        out << "      \"metric\": \"" << tc.metric << "\",\n";
+        out << "      \"method\": \"" << tc.method << "\"";
         if (tc.type == "frame") {
-            out << ",\n        \"offset_seconds\": " << tc.offset_seconds;
+            out << ",\n      \"offset_seconds\": " << tc.offset_seconds;
             // Write method-specific params
             if (tc.method == "first_peak_percent") {
-                out << ",\n        \"peak_percent_threshold\": " << tc.peak_percent_threshold;
-                out << ",\n        \"min_peak_prominence\": " << tc.min_peak_prominence;
+                out << ",\n      \"peak_percent_threshold\": " << tc.peak_percent_threshold;
+                out << ",\n      \"min_peak_prominence\": " << tc.min_peak_prominence;
             } else if (tc.method == "derivative_peak" || tc.method == "second_derivative_peak") {
-                out << ",\n        \"smoothing_window\": " << tc.smoothing_window;
+                out << ",\n      \"smoothing_window\": " << tc.smoothing_window;
             } else if (tc.method == "threshold_crossing") {
-                out << ",\n        \"crossing_threshold\": " << tc.crossing_threshold;
-                out << ",\n        \"crossing_confirmation\": " << tc.crossing_confirmation;
+                out << ",\n      \"crossing_threshold\": " << tc.crossing_threshold;
+                out << ",\n      \"crossing_confirmation\": " << tc.crossing_confirmation;
             }
         }
-        out << "\n      }";
+        out << "\n    }";
         first_target = false;
     }
-    out << "\n    ]\n";
-    out << "  }";
+    out << "\n  ]";
 
     // Add scores section if any scores computed
     if (!results.score.empty()) {
@@ -531,7 +523,6 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     event_detector_.reset();
 
     // Main simulation loop (streaming mode)
-    bool early_stopped = false;
     for (int frame = 0; frame < total_frames; ++frame) {
         // Physics timing
         auto physics_start = Clock::now();
@@ -598,29 +589,6 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
 
         // End frame metrics collection (after ALL metrics including GPU are set)
         metrics_collector_.endFrame();
-
-        // Update event detection (needs complete frame data)
-        bool had_chaos = event_detector_.isDetected(metrics::EventNames::Chaos);
-        event_detector_.update(metrics_collector_, frame_duration);
-
-        // Early stop if chaos was newly detected and configured
-        if (!had_chaos && event_detector_.isDetected(metrics::EventNames::Chaos) &&
-            config_.detection.early_stop_after_chaos) {
-            results.chaos_frame = event_detector_.getEvent(metrics::EventNames::Chaos)->frame;
-            results.chaos_variance = event_detector_.getEvent(metrics::EventNames::Chaos)->value;
-            results.frames_completed = frame + 1;
-            early_stopped = true;
-            // Still need to write this frame
-            render_time += Clock::now() - render_start;
-            auto io_start = Clock::now();
-            if (config_.output.format == OutputFormat::Video) {
-                video_writer->writeFrame(rgb_buffer.data());
-            } else {
-                savePNG(rgb_buffer, width, height, frame);
-            }
-            io_time += Clock::now() - io_start;
-            break;
-        }
 
         render_time += Clock::now() - render_start;
 
@@ -758,20 +726,13 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
 
     // Print results
     std::cout << "\n\n";
-    if (early_stopped) {
-        std::cout << "=== Simulation Stopped Early (chaos detected) ===\n";
-    } else {
-        std::cout << "=== Simulation Complete ===\n";
-    }
+    std::cout << "=== Simulation Complete ===\n";
 
     // Calculate simulation speed
     double simulation_speed = config_.simulation.duration_seconds / video_duration;
 
     std::cout << std::fixed << std::setprecision(2);
-    std::cout << "Frames:      " << results.frames_completed << "/" << total_frames;
-    if (early_stopped)
-        std::cout << " (early stop)";
-    std::cout << "\n";
+    std::cout << "Frames:      " << results.frames_completed << "/" << total_frames << "\n";
     std::cout << "Video:       " << video_duration << "s @ " << config_.output.video_fps << " FPS ("
               << simulation_speed << "x speed)\n";
     std::cout << "Pendulums:   " << pendulum_count << "\n";
@@ -846,7 +807,6 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
     metrics::resetMetricsSystem(metrics_collector_, event_detector_, causticness_analyzer_);
     metrics::initializeMetricsSystem(
         metrics_collector_, event_detector_, causticness_analyzer_,
-        config_.detection.chaos_threshold, config_.detection.chaos_confirmation,
         frame_duration, /*with_gpu=*/false);
 
     // Main physics loop
@@ -869,9 +829,6 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
         // Update metrics collector with angles
         metrics_collector_.updateFromAngles(angle1s, angle2s);
 
-        // Update event detection
-        event_detector_.update(metrics_collector_, frame_duration);
-
         // End frame metrics collection
         metrics_collector_.endFrame();
 
@@ -880,14 +837,6 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
         // Progress callback
         if (progress) {
             progress(frame + 1, total_frames);
-        }
-    }
-
-    // Get chaos event from detector
-    if (auto chaos_event = event_detector_.getEvent(metrics::EventNames::Chaos)) {
-        if (chaos_event->detected()) {
-            results.chaos_frame = chaos_event->frame;
-            results.chaos_seconds = chaos_event->seconds;
         }
     }
 
@@ -931,13 +880,14 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
             causticness_analyzer_, frame_duration);
     } else {
         // Use default predictions (backward compat)
+        // Note: chaos is only detected via [targets.chaos] now, not EventDetector
         results.predictions = createDefaultPredictions(
-            results.boom_frame >= 0 ? std::optional<int>(results.boom_frame) : std::nullopt,
+            results.boom_frame.has_value() ? results.boom_frame : std::nullopt,
             results.boom_seconds,
             0.0, // boom_value not tracked in probe
-            results.chaos_frame >= 0 ? std::optional<int>(results.chaos_frame) : std::nullopt,
-            results.chaos_seconds,
-            0.0, // chaos_variance not tracked in probe
+            std::nullopt, // chaos only detected via [targets.chaos]
+            0.0,
+            0.0,
             causticness_analyzer_);
     }
 

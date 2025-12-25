@@ -45,20 +45,10 @@ scheme = "spectrum"            # spectrum, rainbow, heat, cool, monochrome
 start = 0.0                    # Range start [0, 1]
 end = 1.0                      # Range end [0, 1]
 
-[detection]
-# EventDetector: real-time chaos detection with ABSOLUTE threshold
-chaos_threshold = 500.0        # radians^2 - triggers when variance exceeds this
-chaos_confirmation = 10        # Consecutive frames above threshold to confirm
-
-# Optional early stopping
-early_stop_after_chaos = false
-
 # ============================================================================
 # PREDICTION TARGETS
 # ============================================================================
 # Configure how boom/chaos frames are detected using FrameDetector (post-hoc).
-# Note: EventDetector chaos (above) uses ABSOLUTE threshold for real-time detection.
-#       [targets.chaos] uses RELATIVE threshold (0.0-1.0) for post-hoc analysis.
 #
 # Available methods for frame targets:
 #   max_value            - Frame with maximum metric value
@@ -100,9 +90,14 @@ crossing_confirmation = 1      # For threshold_crossing (consecutive frames)
 # metric = "cv_causticness"
 
 [filter]
-min_boom_seconds = 8.0   # Boom between 8-15 seconds
-max_boom_seconds = 15.0
+# General constraints (non-target)
 min_uniformity = 0.9     # Minimum distribution uniformity (0=concentrated, 1=uniform on disk)
+
+# Target-based constraints (reference [targets.X] by name)
+[filter.targets.boom]
+min_seconds = 8.0        # Boom must happen after this time
+max_seconds = 15.0       # Boom must happen before this time
+required = true          # Boom must be detected
 
 [output]
 format = "png"                 # "png" or "video"

@@ -41,7 +41,7 @@ void printUsage(char const* program) {
               << "Usage:\n"
               << "  " << program << " <simulation_data.bin> [options]\n\n"
               << "Options:\n"
-              << "  --config <path>       Config for render/detection settings\n"
+              << "  --config <path>       Config for render/metric settings\n"
               << "                        (default: config.toml in same directory)\n"
               << "  --physics-only        Only compute physics metrics (default, no GPU)\n"
               << "  --render              Re-render frames and compute GPU metrics\n"
@@ -124,7 +124,6 @@ int computePhysicsMetrics(Options const& opts,
 
     metrics::initializeMetricsSystem(
         collector, detector, causticness_analyzer,
-        config.detection.chaos_threshold, config.detection.chaos_confirmation,
         frame_duration, /*with_gpu=*/false);
 
     // Process each frame
@@ -284,7 +283,6 @@ int computeGPUMetrics(Options const& opts,
 
     metrics::initializeMetricsSystem(
         collector, detector, causticness_analyzer,
-        config.detection.chaos_threshold, config.detection.chaos_confirmation,
         frame_duration, /*with_gpu=*/true);
 
     std::cout << "Re-rendering " << reader.frameCount() << " frames at "

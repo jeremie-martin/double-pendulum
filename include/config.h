@@ -274,22 +274,6 @@ inline MetricConfig createDefaultMetricConfig(std::string const& name) {
     return config;
 }
 
-// Thresholds for detecting events from variance data
-struct DetectionParams {
-    // DEPRECATED: boom_threshold and boom_confirmation are no longer used.
-    // Boom is now detected via max angular causticness in boom_detection.h
-    // Kept for config file backwards compatibility.
-    double boom_threshold = 0.1; // radians^2 (unused)
-    int boom_confirmation = 10;  // (unused)
-
-    // "Chaos" threshold: when variance exceeds this, full chaos/noise
-    double chaos_threshold = 700.0; // radians^2
-    int chaos_confirmation = 10;    // Consecutive frames above threshold
-
-    // Early stopping
-    bool early_stop_after_chaos = false;
-};
-
 // ============================================================================
 // TARGET CONFIGURATION (for multi-target prediction system)
 // ============================================================================
@@ -356,10 +340,9 @@ struct Config {
     std::string boom_metric = "angular_causticness";
 
     // Multi-target prediction configuration
-    // If empty, default targets are auto-generated from boom_metric and detection settings
+    // If empty, default targets are auto-generated from boom_metric
     std::vector<TargetConfig> targets;
 
-    DetectionParams detection;
     OutputParams output;
     AnalysisParams analysis;
 

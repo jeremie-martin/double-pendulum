@@ -3,6 +3,7 @@
 #include "metrics/analyzer.h"
 #include "metrics/event_detector.h"
 #include "metrics/metrics_collector.h"
+#include "optimize/prediction_target.h"
 
 #include <functional>
 #include <optional>
@@ -22,7 +23,7 @@ namespace metrics {
 //    - User specifies filter criteria in TOML config (FilterCriteria struct)
 //    - FilterCriteria::toProbeFilter() converts to ProbeFilter
 //    - BatchGenerator uses Simulation::runProbe() with fewer pendulums
-//    - ProbeFilter evaluates if the probe passes
+//    - ProbeFilter evaluates if the probe passes (with predictions)
 //    - Only passing probes proceed to full rendering
 //
 // 2. PROBE PIPELINE (probe_pipeline.cpp):
@@ -32,16 +33,18 @@ namespace metrics {
 //    - Filter evaluation happens at each phase via finalizePhase()
 //
 // EVALUATION FLOW:
-//    Criteria → ProbeFilter → evaluate(collector, events, scores) → FilterResult
+//    Criteria → ProbeFilter → evaluate(collector, events, scores, predictions) → FilterResult
 //
 // CRITERION TYPES:
-//    - Event: Require an event exists (e.g., boom detected)
-//    - EventTiming: Event must occur within time range
+//    - Event: Require an event exists (legacy, for EventDetector events)
+//    - EventTiming: Event must occur within time range (legacy)
 //    - Metric: Final metric value must meet threshold (e.g., uniformity > 0.9)
-//    - Score: Analyzer score must meet threshold (e.g., peak_clarity > 0.75)
+//    - Score: Analyzer score must meet threshold (legacy)
+//    - TargetFrame: Check PredictionResult for frame target (boom, chaos)
+//    - TargetScore: Check PredictionResult for score target (boom_quality)
 //
-// IMPORTANT: Scores (from analyzers) are only available AFTER analyzers run.
-// Make sure to call runPostSimulationAnalysis() or equivalent before filtering.
+// IMPORTANT: Use TargetFrame/TargetScore for new code. They evaluate against
+// PredictionResult objects from the multi-target prediction system.
 // =============================================================================
 
 // Result of filter evaluation
@@ -59,10 +62,12 @@ struct FilterResult {
 
 // Types of filter criteria
 enum class FilterCriterionType {
-    Event,       // Event must exist (e.g., boom detected)
-    EventTiming, // Event must be in time range
-    Metric,      // Metric must meet threshold
-    Score        // Analyzer score must meet threshold
+    Event,       // Event must exist (legacy, for EventDetector events)
+    EventTiming, // Event must be in time range (legacy)
+    Metric,      // Metric must meet threshold (e.g., uniformity)
+    Score,       // Analyzer score must meet threshold (legacy)
+    TargetFrame, // Check PredictionResult for frame target (boom, chaos)
+    TargetScore  // Check PredictionResult for score target (boom_quality)
 };
 
 // Single filter criterion
@@ -91,14 +96,23 @@ public:
     ProbeFilter() = default;
     ~ProbeFilter() = default;
 
-    // Add criteria
+    // Add legacy criteria (for backward compatibility)
     void addEventRequired(std::string const& event_name);
     void addEventTiming(std::string const& event_name, double min_seconds,
                         double max_seconds);
+    void addScoreThreshold(std::string const& score_name, double min_value);
+
+    // Add metric threshold (still used for general constraints like uniformity)
     void addMetricThreshold(std::string const& metric_name, double min_value);
     void addMetricRange(std::string const& metric_name, double min_value,
                         double max_value);
-    void addScoreThreshold(std::string const& score_name, double min_value);
+
+    // Add target constraint (new system - evaluates against PredictionResult)
+    void addTargetConstraint(std::string const& target_name, bool required,
+                             std::optional<double> min_seconds,
+                             std::optional<double> max_seconds,
+                             std::optional<double> min_score,
+                             std::optional<double> max_score);
 
     // Add custom criterion
     void addCriterion(FilterCriterion const& criterion);
@@ -106,10 +120,19 @@ public:
     // Clear all criteria
     void clearCriteria();
 
-    // Evaluate filter against collected data
+    // Evaluate filter against collected data and predictions
+    // This is the primary evaluation method for the new target-based system
     FilterResult evaluate(MetricsCollector const& collector,
                           EventDetector const& events,
-                          SimulationScore const& scores = {}) const;
+                          SimulationScore const& scores,
+                          std::vector<optimize::PredictionResult> const& predictions) const;
+
+    // Legacy evaluate without predictions (for backward compatibility)
+    FilterResult evaluate(MetricsCollector const& collector,
+                          EventDetector const& events,
+                          SimulationScore const& scores = {}) const {
+        return evaluate(collector, events, scores, {});
+    }
 
     // Get all criteria
     std::vector<FilterCriterion> const& getCriteria() const { return criteria_; }
@@ -126,7 +149,8 @@ private:
     FilterResult evaluateCriterion(FilterCriterion const& criterion,
                                    MetricsCollector const& collector,
                                    EventDetector const& events,
-                                   SimulationScore const& scores) const;
+                                   SimulationScore const& scores,
+                                   std::vector<optimize::PredictionResult> const& predictions) const;
 };
 
 } // namespace metrics
