@@ -317,6 +317,29 @@ void updateAllBoomDetections(AppState& state) {
     updateBoomDetection(state);
 }
 
+// Helper: Shorten metric names for compact button display
+std::string shortenMetricName(std::string const& name) {
+    // Map long names to short 2-3 word versions
+    static std::map<std::string, std::string> const short_names = {
+        {"angular_causticness", "Angular"},
+        {"tip_causticness", "Tip"},
+        {"cv_causticness", "CV"},
+        {"spatial_concentration", "Spatial"},
+        {"fold_causticness", "Fold"},
+        {"organization_causticness", "Org"},
+        {"r1_concentration", "R1"},
+        {"r2_concentration", "R2"},
+        {"joint_concentration", "Joint"},
+        {"trajectory_smoothness", "Traj"},
+        {"curvature", "Curve"},
+        {"true_folds", "Folds"},
+        {"local_coherence", "Local"},
+        {"variance", "Var"}
+    };
+    auto it = short_names.find(name);
+    return it != short_names.end() ? it->second : name;
+}
+
 void initSimulation(AppState& state, GLRenderer& renderer) {
     int n = state.preview.pendulum_count;
 
@@ -1925,36 +1948,99 @@ void drawMetricParametersWindow(AppState& state) {
 
     // Boom Detection section (primary focus)
     if (ImGui::CollapsingHeader("Boom Detection", ImGuiTreeNodeFlags_DefaultOpen)) {
-        // Metric selector - all available metrics for boom detection
-        const char* metric_names[] = {
-            "angular_causticness",
-            "tip_causticness",
-            "cv_causticness",
-            "spatial_concentration",
-            "fold_causticness",
-            "organization_causticness",
-            "r1_concentration",
-            "r2_concentration",
-            "joint_concentration",
-            "trajectory_smoothness",
-            "curvature",
-            "true_folds",
-            "local_coherence",
-            "variance"
-        };
-        constexpr int num_metrics = sizeof(metric_names) / sizeof(metric_names[0]);
-        int metric_idx = 0;
-        for (int i = 0; i < num_metrics; ++i) {
-            if (active_metric == metric_names[i]) {
-                metric_idx = i;
-                break;
+        // Toggle button grid for all boom metrics
+        ImGui::Text("Boom Metrics (Click=toggle, Ctrl+Click=set primary)");
+        ImGui::Separator();
+
+        auto const& all_metrics = getAllBoomMetrics();
+        int const cols = 5;  // 5 columns of buttons for compact layout
+
+        // Style colors for different states
+        ImVec4 const primary_color(0.2f, 0.6f, 0.2f, 1.0f);
+        ImVec4 const primary_hover(0.3f, 0.7f, 0.3f, 1.0f);
+        ImVec4 const primary_active(0.15f, 0.5f, 0.15f, 1.0f);
+        ImVec4 const enabled_color(0.4f, 0.4f, 0.55f, 1.0f);
+        ImVec4 const enabled_hover(0.5f, 0.5f, 0.65f, 1.0f);
+        ImVec4 const enabled_active(0.3f, 0.3f, 0.45f, 1.0f);
+
+        for (size_t i = 0; i < all_metrics.size(); ++i) {
+            auto const& metric_name = all_metrics[i];
+            auto& boom_state = state.boom_metrics[metric_name];
+            bool is_primary = (metric_name == state.config.boom_metric);
+
+            // Apply button styling based on state
+            int style_colors = 0;
+            if (is_primary) {
+                ImGui::PushStyleColor(ImGuiCol_Button, primary_color);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, primary_hover);
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, primary_active);
+                style_colors = 3;
+            } else if (boom_state.enabled) {
+                ImGui::PushStyleColor(ImGuiCol_Button, enabled_color);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, enabled_hover);
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, enabled_active);
+                style_colors = 3;
+            }
+
+            // Short display name for button
+            std::string short_name = shortenMetricName(metric_name);
+            if (is_primary) short_name += "*";  // Mark primary with asterisk
+
+            if (ImGui::Button(short_name.c_str(), ImVec2(60, 22))) {
+                if (ImGui::GetIO().KeyCtrl) {
+                    // Ctrl+click: Set as primary
+                    state.config.boom_metric = metric_name;
+                    boom_state.enabled = true;
+                    boom_state.show_params = true;
+                    active_metric = metric_name;
+                    params_changed = true;
+                } else {
+                    // Regular click: Toggle enable + show params
+                    if (boom_state.enabled && boom_state.show_params) {
+                        // If already showing, hide params but keep enabled
+                        boom_state.show_params = false;
+                    } else if (boom_state.enabled) {
+                        // If enabled but not showing params, disable
+                        boom_state.enabled = false;
+                        boom_state.show_params = false;
+                    } else {
+                        // Enable and show params
+                        boom_state.enabled = true;
+                        boom_state.show_params = true;
+                    }
+                    params_changed = true;
+                }
+                // Trigger boom re-detection for all enabled metrics
+                if (!state.frame_history.empty()) {
+                    updateAllBoomDetections(state);
+                }
+            }
+
+            // Tooltip with full name and instructions
+            if (ImGui::IsItemHovered()) {
+                std::string tooltip = metric_name;
+                if (is_primary) tooltip += " [PRIMARY]";
+                if (boom_state.enabled) tooltip += " [ENABLED]";
+                if (boom_state.boom_frame >= 0) {
+                    tooltip += "\nBoom @ frame " + std::to_string(boom_state.boom_frame);
+                }
+                tooltip += "\nClick: Toggle | Ctrl+Click: Set primary";
+                ImGui::SetTooltip("%s", tooltip.c_str());
+            }
+
+            if (style_colors > 0) {
+                ImGui::PopStyleColor(style_colors);
+            }
+
+            // Layout: cols per row
+            if ((i + 1) % cols != 0 && i < all_metrics.size() - 1) {
+                ImGui::SameLine();
             }
         }
-        if (ImGui::Combo("Metric", &metric_idx, metric_names, num_metrics)) {
-            state.config.boom_metric = metric_names[metric_idx];
-            params_changed = true;
-        }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Which metric to use for boom detection");
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Text("Primary: %s", active_metric.c_str());
 
         // Method selector
         const char* method_names[] = {"Max Causticness", "First Peak %", "Derivative Peak",
