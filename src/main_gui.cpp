@@ -1232,10 +1232,10 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
             }
         }
 
-        // Draw chaos marker
+        // Draw chaos marker (blue)
         if (state.chaos_frame.has_value()) {
             double chaos_x = static_cast<double>(*state.chaos_frame);
-            ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), 2.0f);
+            ImPlot::SetNextLineStyle(ImVec4(0.3f, 0.5f, 1.0f, 1.0f), 2.0f);
             ImPlot::PlotInfLines("##chaos", &chaos_x, 1);
         }
 
@@ -2372,7 +2372,7 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
     }
     if (state.chaos_frame.has_value()) {
         double chaos_seconds = *state.chaos_frame * state.frame_duration;
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "Chaos: frame %d (%.2fs)",
+        ImGui::TextColored(ImVec4(0.3f, 0.5f, 1.0f, 1.0f), "Chaos: frame %d (%.2fs)",
                            *state.chaos_frame, chaos_seconds);
     }
 
