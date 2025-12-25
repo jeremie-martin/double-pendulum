@@ -636,47 +636,57 @@ struct BoomMethodGrid {
 };
 
 // ============================================================================
-// STREAMING EVALUATION (memory-efficient)
+// STREAMING EVALUATION (memory-efficient with global thread pool)
 // ============================================================================
 
-// Compute metrics for a single parameterized metric across all simulations
+// Computed metrics for one parameter configuration across all simulations
 struct ComputedMetricsForConfig {
-    std::string metric_name;
+    std::vector<metrics::MetricsCollector> collectors;
     std::vector<double> frame_durations;
     std::vector<int> boom_frame_truths;
-    std::vector<metrics::MetricsCollector> collectors;
+    std::atomic<size_t> sims_completed{0};
+
+    void init(size_t num_sims) {
+        collectors.resize(num_sims);
+        frame_durations.resize(num_sims);
+        boom_frame_truths.resize(num_sims);
+        sims_completed.store(0);
+    }
+
+    void reset() {
+        collectors.clear();
+        collectors.shrink_to_fit();
+        frame_durations.clear();
+        boom_frame_truths.clear();
+        sims_completed.store(0);
+    }
 };
 
-void computeMetricsForConfig(
+// Compute metrics for a single (config, sim) pair
+void computeMetricsForSim(
     ParameterizedMetric const& pm,
-    std::vector<LoadedSimulation> const& simulations,
-    ComputedMetricsForConfig& out) {
+    LoadedSimulation const& sim,
+    metrics::MetricsCollector& collector,
+    double& frame_duration_out,
+    int& boom_frame_truth_out) {
 
-    out.metric_name = pm.metric_name;
-    out.frame_durations.resize(simulations.size());
-    out.boom_frame_truths.resize(simulations.size());
-    out.collectors.resize(simulations.size());
+    auto const& header = sim.reader.header();
+
+    frame_duration_out = sim.frame_duration;
+    boom_frame_truth_out = sim.boom_frame_truth;
 
     std::unordered_map<std::string, ::MetricConfig> config_map;
     config_map[pm.metric_name] = pm.config;
 
-    for (size_t i = 0; i < simulations.size(); ++i) {
-        auto const& sim = simulations[i];
-        auto const& header = sim.reader.header();
+    collector.setAllMetricConfigs(config_map);
+    collector.registerStandardMetrics();
 
-        out.frame_durations[i] = sim.frame_duration;
-        out.boom_frame_truths[i] = sim.boom_frame_truth;
-
-        out.collectors[i].setAllMetricConfigs(config_map);
-        out.collectors[i].registerStandardMetrics();
-
-        for (int frame = 0; frame < header.frame_count; ++frame) {
-            auto const* packed = sim.reader.getFramePacked(frame);
-            if (!packed) break;
-            out.collectors[i].beginFrame(frame);
-            out.collectors[i].updateFromPackedStates(packed, header.pendulum_count);
-            out.collectors[i].endFrame();
-        }
+    for (int frame = 0; frame < static_cast<int>(header.frame_count); ++frame) {
+        auto const* packed = sim.reader.getFramePacked(frame);
+        if (!packed) break;
+        collector.beginFrame(frame);
+        collector.updateFromPackedStates(packed, header.pendulum_count);
+        collector.endFrame();
     }
 }
 
@@ -1013,13 +1023,11 @@ int main(int argc, char* argv[]) {
 
     auto start_time = std::chrono::steady_clock::now();
     std::vector<EvaluationResult> results;
-    std::mutex results_mutex;
-    std::mutex print_mutex;
 
     std::atomic<size_t> metrics_completed{0};
     std::atomic<bool> done{false};
 
-    // Progress thread
+    // Progress thread (prints while main thread works)
     std::thread progress_thread([&]() {
         while (!done.load()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -1029,7 +1037,6 @@ int main(int argc, char* argv[]) {
             double rate = c > 0 ? c / elapsed : 0;
             double eta = rate > 0 ? (param_metrics.size() - c) / rate : 0;
 
-            std::lock_guard<std::mutex> lock(print_mutex);
             std::cout << "\rProgress: " << c << "/" << param_metrics.size()
                       << " metrics (" << std::fixed << std::setprecision(1)
                       << (100.0 * c / param_metrics.size()) << "%)"
@@ -1038,15 +1045,21 @@ int main(int argc, char* argv[]) {
         }
     });
 
-    // Worker function for a single metric config
-    auto processMetricConfig = [&](size_t idx) {
-        auto const& pm = param_metrics[idx];
+    // Pre-allocate storage for all configs
+    size_t num_sims = simulations.size();
+    std::vector<ComputedMetricsForConfig> config_states(param_metrics.size());
+    for (size_t i = 0; i < param_metrics.size(); ++i) {
+        config_states[i].init(num_sims);
+    }
 
-        // Phase 1: Compute metrics for this config
-        ComputedMetricsForConfig computed;
-        computeMetricsForConfig(pm, simulations, computed);
+    // Mutex for results and boom evaluation
+    std::mutex results_mutex;
+    std::mutex eval_mutex;
 
-        // Phase 2: Evaluate all boom methods
+    // Lambda to evaluate boom methods for a completed config
+    auto evaluateCompletedConfig = [&](size_t config_idx) {
+        auto const& pm = param_metrics[config_idx];
+        auto const& computed = config_states[config_idx];
         std::vector<EvaluationResult> local_results;
 
         auto evaluateMethod = [&](BoomDetectionParams const& bp) {
@@ -1117,25 +1130,48 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Merge results
+        // Merge results and free memory
         {
             std::lock_guard<std::mutex> lock(results_mutex);
             results.insert(results.end(), local_results.begin(), local_results.end());
         }
-
+        config_states[config_idx].reset();
         metrics_completed.fetch_add(1);
-        // computed goes out of scope here, memory freed
     };
 
-    // Process all metric configs using thread pool
+    // Build work items as (config_idx, sim_idx) pairs
+    size_t total_work_items = param_metrics.size() * num_sims;
     std::atomic<size_t> work_idx{0};
+
+    // Global thread pool processes (config, sim) pairs
     std::vector<std::thread> workers;
     for (unsigned int t = 0; t < num_threads; ++t) {
         workers.emplace_back([&]() {
             while (true) {
                 size_t idx = work_idx.fetch_add(1);
-                if (idx >= param_metrics.size()) break;
-                processMetricConfig(idx);
+                if (idx >= total_work_items) break;
+
+                size_t config_idx = idx / num_sims;
+                size_t sim_idx = idx % num_sims;
+
+                auto const& pm = param_metrics[config_idx];
+                auto const& sim = simulations[sim_idx];
+                auto& state = config_states[config_idx];
+
+                // Compute metrics for this (config, sim) pair
+                computeMetricsForSim(
+                    pm, sim,
+                    state.collectors[sim_idx],
+                    state.frame_durations[sim_idx],
+                    state.boom_frame_truths[sim_idx]);
+
+                // Check if this config is complete
+                size_t completed = state.sims_completed.fetch_add(1) + 1;
+                if (completed == num_sims) {
+                    // This thread completed the config - evaluate boom methods
+                    std::lock_guard<std::mutex> lock(eval_mutex);
+                    evaluateCompletedConfig(config_idx);
+                }
             }
         });
     }
