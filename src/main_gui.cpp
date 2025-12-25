@@ -2254,16 +2254,6 @@ void drawDetectionSection(AppState& state) {
 
         ImGui::SliderInt("Chaos Confirm", &state.config.detection.chaos_confirmation, 1, 30);
         tooltip("Consecutive frames above threshold to confirm chaos");
-
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Legacy (display only):");
-        tooltip("These parameters are deprecated. Boom is now detected via max causticness.");
-
-        ImGui::BeginDisabled();
-        auto boom_thresh = static_cast<float>(state.config.detection.boom_threshold);
-        ImGui::SliderFloat("Boom Threshold##deprecated", &boom_thresh, 0.01f, 1.0f, "%.3f rad^2");
-        ImGui::SliderInt("Boom Confirm##deprecated", &state.config.detection.boom_confirmation, 1, 30);
-        ImGui::EndDisabled();
     }
 }
 
