@@ -427,16 +427,17 @@ bool BatchGenerator::generateOne(int index) {
             std::cout << "\rFrame " << current << "/" << total << std::flush;
         });
 
-        // Calculate boom_seconds from boom_frame (needed for music selection)
-        double boom_seconds = 0.0;
+        // Calculate boom time in VIDEO seconds (for music sync)
+        // Note: This is different from simulation time - video time = frame / fps
+        double boom_video_seconds = 0.0;
         if (results.boom_frame) {
-            boom_seconds = *results.boom_frame * config.simulation.frameDuration();
+            boom_video_seconds = static_cast<double>(*results.boom_frame) / config.output.video_fps;
         }
 
         // Mux with music if we have tracks and a boom frame
         std::string final_video_path = results.video_path;
         if (results.boom_frame && music_.trackCount() > 0) {
-            auto track = pickMusicTrackForBoom(boom_seconds);
+            auto track = pickMusicTrackForBoom(boom_video_seconds);
             if (track) {
                 std::filesystem::path video_path = results.video_path;
                 std::filesystem::path output_path =
@@ -479,7 +480,7 @@ bool BatchGenerator::generateOne(int index) {
             } else if (config_.filter.require_valid_music) {
                 // No valid music track found (drop not after boom) - fail and retry
                 std::cout << "\nNo music track with drop > " << std::fixed << std::setprecision(1)
-                          << boom_seconds << "s - failing video for retry\n";
+                          << boom_video_seconds << "s (video time) - failing video for retry\n";
                 // Clean up the rendered video
                 std::filesystem::remove(results.video_path);
                 return false;
@@ -504,8 +505,12 @@ bool BatchGenerator::generateOne(int index) {
         }
         double boom_quality = results.getBoomQuality().value_or(0.0);
 
+        // For RunResult summary, use simulation time (consistent with historical display)
+        double boom_sim_seconds = results.boom_frame
+            ? *results.boom_frame * config.simulation.frameDuration() : 0.0;
+
         RunResult result{
-            video_name, final_video_path, true, results.boom_frame, boom_seconds,
+            video_name, final_video_path, true, results.boom_frame, boom_sim_seconds,
             chaos_frame, chaos_seconds, boom_quality,
             duration, results.final_uniformity, probe_retries, simulation_speed};
         progress_.results.push_back(result);
