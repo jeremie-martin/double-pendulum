@@ -19,6 +19,8 @@ BatchConfig BatchConfig::load(std::string const& path) {
 
     try {
         auto tbl = toml::parse_file(path);
+        std::string base_path = std::filesystem::path(path).parent_path().string();
+        if (base_path.empty()) base_path = ".";
 
         // Batch settings
         if (auto batch = tbl["batch"].as_table()) {
@@ -72,6 +74,42 @@ BatchConfig BatchConfig::load(std::string const& path) {
             }
         }
         config.base_config = Config::load(base_config_path);
+
+        // Process includes from batch config and merge into base_config
+        // This allows batch.toml to include best_params.toml directly
+        if (auto includes = tbl["include"].as_array()) {
+            for (auto const& inc : *includes) {
+                if (auto inc_path = inc.value<std::string>()) {
+                    std::filesystem::path full_path;
+                    if (std::filesystem::path(*inc_path).is_absolute()) {
+                        full_path = *inc_path;
+                    } else {
+                        full_path = std::filesystem::path(base_path) / *inc_path;
+                    }
+                    if (std::filesystem::exists(full_path)) {
+                        // Load included config and merge into base_config
+                        Config included = Config::load(full_path.string());
+                        // Merge metric configs (included values override base)
+                        for (auto const& [name, cfg] : included.metric_configs) {
+                            config.base_config.metric_configs[name] = cfg;
+                        }
+                        // Merge targets (included targets override base if same name)
+                        for (auto const& target : included.targets) {
+                            auto it = std::find_if(config.base_config.targets.begin(),
+                                                   config.base_config.targets.end(),
+                                                   [&](auto const& t) { return t.name == target.name; });
+                            if (it != config.base_config.targets.end()) {
+                                *it = target;  // Override existing
+                            } else {
+                                config.base_config.targets.push_back(target);  // Add new
+                            }
+                        }
+                    } else {
+                        std::cerr << "Warning: Batch include not found: " << full_path << "\n";
+                    }
+                }
+            }
+        }
 
         // Music settings
         if (auto music = tbl["music"].as_table()) {

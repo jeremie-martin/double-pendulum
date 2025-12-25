@@ -33,7 +33,7 @@ enum class FrameDetectionMethod {
 // Parameters for frame detection
 struct FrameDetectionParams {
     FrameDetectionMethod method = FrameDetectionMethod::MaxValue;
-    std::string metric_name = "angular_causticness";
+    std::string metric_name;  // REQUIRED: Must be set from config, no default
 
     // Offset applied after detection for visual alignment
     double offset_seconds = 0.0;
@@ -68,7 +68,7 @@ enum class ScoreMethod {
 // Parameters for score prediction
 struct ScoreParams {
     ScoreMethod method = ScoreMethod::PeakClarity;
-    std::string metric_name = "angular_causticness";
+    std::string metric_name;  // REQUIRED: Must be set from config, no default
 
     // For Composite: pairs of (score_name, weight)
     std::vector<std::pair<std::string, double>> weights;

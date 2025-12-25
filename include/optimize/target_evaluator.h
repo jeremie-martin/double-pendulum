@@ -157,11 +157,13 @@ private:
 };
 
 // ============================================================================
-// DEFAULT TARGETS
+// TARGET CREATION HELPERS
 // ============================================================================
+// NOTE: These helpers require explicit metric names. No defaults.
+// Targets should be defined in config files using [targets.X] sections.
 
-// Create default boom target
-inline PredictionTarget createDefaultBoomTarget(std::string const& metric_name = "angular_causticness") {
+// Create boom target with given metric
+inline PredictionTarget createBoomTarget(std::string const& metric_name) {
     PredictionTarget target;
     target.name = "boom";
     target.type = PredictionType::Frame;
@@ -175,8 +177,8 @@ inline PredictionTarget createDefaultBoomTarget(std::string const& metric_name =
     return target;
 }
 
-// Create default chaos target
-inline PredictionTarget createDefaultChaosTarget(std::string const& metric_name = "variance") {
+// Create chaos target with given metric
+inline PredictionTarget createChaosTarget(std::string const& metric_name) {
     PredictionTarget target;
     target.name = "chaos";
     target.type = PredictionType::Frame;
@@ -191,8 +193,8 @@ inline PredictionTarget createDefaultChaosTarget(std::string const& metric_name 
     return target;
 }
 
-// Create default boom quality target
-inline PredictionTarget createDefaultBoomQualityTarget(std::string const& metric_name = "angular_causticness") {
+// Create boom quality target with given metric
+inline PredictionTarget createBoomQualityTarget(std::string const& metric_name) {
     PredictionTarget target;
     target.name = "boom_quality";
     target.type = PredictionType::Score;
@@ -204,18 +206,6 @@ inline PredictionTarget createDefaultBoomQualityTarget(std::string const& metric
     target.params = params;
 
     return target;
-}
-
-// Create default targets for backward compatibility
-inline std::vector<PredictionTarget> createDefaultTargets(
-    std::string const& boom_metric = "angular_causticness",
-    std::string const& chaos_metric = "variance") {
-
-    return {
-        createDefaultBoomTarget(boom_metric),
-        createDefaultChaosTarget(chaos_metric),
-        createDefaultBoomQualityTarget(boom_metric)
-    };
 }
 
 // ============================================================================

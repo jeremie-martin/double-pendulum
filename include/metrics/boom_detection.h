@@ -19,20 +19,8 @@ namespace metrics {
 // Boom detection result - alias for FrameDetection with a boom-specific name
 using BoomDetection = optimize::FrameDetection;
 
-// Find boom frame using default parameters (max angular_causticness with offset)
-inline BoomDetection findBoomFrame(MetricsCollector const& collector,
-                                    double frame_duration,
-                                    double offset_seconds = 0.3) {
-    optimize::FrameDetectionParams params;
-    params.method = optimize::FrameDetectionMethod::MaxValue;
-    params.metric_name = MetricNames::AngularCausticness;
-    params.offset_seconds = offset_seconds;
-
-    optimize::FrameDetector detector(params);
-    return detector.detect(collector, frame_duration);
-}
-
-// Find boom frame using custom FrameDetectionParams
+// Find boom frame using FrameDetectionParams from config
+// NOTE: No default metric - caller MUST provide params from config.targets
 inline BoomDetection findBoomFrame(MetricsCollector const& collector,
                                     double frame_duration,
                                     optimize::FrameDetectionParams const& params) {

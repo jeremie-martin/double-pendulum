@@ -647,13 +647,17 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         }
     }
 
-    // Detect boom using configured target or defaults
+    // Detect boom using configured target (required - no defaults)
     auto boom_params = getBoomParamsFromTargets(config_.targets);
     bool has_boom_target = !boom_params.metric_name.empty();
 
-    auto boom = has_boom_target
-        ? metrics::findBoomFrame(metrics_collector_, frame_duration, boom_params)
-        : metrics::findBoomFrame(metrics_collector_, frame_duration);
+    metrics::BoomDetection boom;
+    if (has_boom_target) {
+        boom = metrics::findBoomFrame(metrics_collector_, frame_duration, boom_params);
+    } else {
+        // No boom target configured - boom detection disabled
+        boom.frame = -1;
+    }
 
     if (boom.frame >= 0) {
         results.boom_frame = boom.frame;
@@ -842,14 +846,10 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
 
     // Get boom params from config.targets (consistent with run())
     auto boom_params = getBoomParamsFromTargets(config_.targets);
-    bool has_boom_target = !boom_params.metric_name.empty();
 
-    // Run post-simulation analysis with configured boom params
-    auto boom = has_boom_target
-        ? metrics::runPostSimulationAnalysis(
-              metrics_collector_, event_detector_, causticness_analyzer_, frame_duration, boom_params)
-        : metrics::runPostSimulationAnalysis(
-              metrics_collector_, event_detector_, causticness_analyzer_, frame_duration);
+    // Run post-simulation analysis (handles empty metric_name gracefully)
+    auto boom = metrics::runPostSimulationAnalysis(
+        metrics_collector_, event_detector_, causticness_analyzer_, frame_duration, boom_params);
 
     if (boom.frame >= 0) {
         results.boom_frame = boom.frame;

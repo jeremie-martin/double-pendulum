@@ -336,11 +336,13 @@ struct Config {
     // Per-metric configuration (replaces old MetricParams and BoomDetectionParams)
     std::unordered_map<std::string, MetricConfig> metric_configs;
 
-    // Which metric to use for boom detection
-    std::string boom_metric = "angular_causticness";
+    // Which metric to use for boom detection (legacy - prefer using targets)
+    // Empty by default - should be set via [targets.boom] in config
+    std::string boom_metric;
 
     // Multi-target prediction configuration
-    // If empty, default targets are auto-generated from boom_metric
+    // REQUIRED: Define [targets.boom] in config file to enable boom detection
+    // No auto-generation from boom_metric - targets must be explicit
     std::vector<TargetConfig> targets;
 
     OutputParams output;

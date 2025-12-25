@@ -273,7 +273,10 @@ static void loadConfigFromTable(Config& config, toml::table const& tbl) {
                 TargetConfig tc;
                 tc.name = std::string(key);
                 tc.type = get_string_or(*target_tbl, "type", "frame");
-                tc.metric = get_string_or(*target_tbl, "metric", "angular_causticness");
+                tc.metric = get_string_or(*target_tbl, "metric", "");
+                if (tc.metric.empty()) {
+                    std::cerr << "Warning: Target '" << tc.name << "' has no metric specified\n";
+                }
                 tc.method = get_string_or(*target_tbl, "method", "max_value");
 
                 // Frame detection parameters

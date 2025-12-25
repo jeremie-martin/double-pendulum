@@ -54,18 +54,23 @@ inline void resetMetricsSystem(MetricsCollector& collector,
 
 // Run boom detection and analyzers after simulation completes.
 // This is the standard pattern used by all executables:
-// 1. Find boom frame using configured method and metric
+// 1. Find boom frame using configured method and metric (REQUIRED: boom_params must have metric_name set)
 // 2. Force boom event into detector for analyzer access
 // 3. Run analyzers
 //
-// Returns the BoomDetection result (frame may be -1 if no boom found)
+// Returns the BoomDetection result (frame may be -1 if no boom found or no target configured)
 inline BoomDetection runPostSimulationAnalysis(MetricsCollector const& collector,
                                                EventDetector& detector,
                                                CausticnessAnalyzer& causticness_analyzer,
                                                double frame_duration,
-                                               optimize::FrameDetectionParams const& boom_params = {}) {
-    // Detect boom using configured method and metric
-    auto boom = findBoomFrame(collector, frame_duration, boom_params);
+                                               optimize::FrameDetectionParams const& boom_params) {
+    // Skip boom detection if no metric specified (target not configured)
+    BoomDetection boom;
+    if (boom_params.metric_name.empty()) {
+        boom.frame = -1;  // No boom target configured
+    } else {
+        boom = findBoomFrame(collector, frame_duration, boom_params);
+    }
 
     if (boom.frame >= 0) {
         // Get variance at boom for the event

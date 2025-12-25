@@ -275,10 +275,14 @@ void updateBoomDetection(AppState& state, bool run_analyzer = true) {
         }
     }
 
-    // Use configured boom target params or defaults
-    auto boom = has_boom_target
-        ? metrics::findBoomFrame(state.metrics_collector, state.frame_duration, boom_params)
-        : metrics::findBoomFrame(state.metrics_collector, state.frame_duration);
+    // Use configured boom target params; if none configured, skip boom detection
+    metrics::BoomDetection boom;
+    if (has_boom_target) {
+        boom = metrics::findBoomFrame(state.metrics_collector, state.frame_duration, boom_params);
+    } else {
+        // No boom target configured - boom detection disabled
+        boom.frame = -1;
+    }
 
     if (boom.frame >= 0) {
         state.boom_frame = boom.frame;
@@ -1939,9 +1943,29 @@ void recomputeMetrics(AppState& state) {
         state.metrics_collector.endFrame();
     }
 
-    // Re-detect boom with default params
-    auto boom = metrics::findBoomFrame(state.metrics_collector,
-                                       state.frame_duration);
+    // Re-detect boom with params from config targets
+    optimize::FrameDetectionParams boom_params;
+    for (auto const& tc : state.config.targets) {
+        if (tc.name == "boom" && tc.type == "frame") {
+            auto target = optimize::targetConfigToPredictionTarget(
+                tc.name, tc.type, tc.metric, tc.method,
+                tc.offset_seconds, tc.peak_percent_threshold,
+                tc.min_peak_prominence, tc.smoothing_window,
+                tc.crossing_threshold, tc.crossing_confirmation,
+                tc.weights);
+            boom_params = target.frameParams();
+            break;
+        }
+    }
+
+    metrics::BoomDetection boom;
+    if (!boom_params.metric_name.empty()) {
+        boom = metrics::findBoomFrame(state.metrics_collector,
+                                      state.frame_duration, boom_params);
+    } else {
+        boom.frame = -1;  // No boom target configured
+    }
+
     if (boom.frame >= 0) {
         state.boom_frame = boom.frame;
         state.boom_causticness = boom.metric_value;
@@ -1980,8 +2004,16 @@ void drawMetricParametersWindow(AppState& state) {
 
     // Initialize editing_metric if empty
     if (state.editing_metric.empty()) {
+        // Try to get metric from boom target, otherwise use first available metric
+        std::string default_metric = all_metrics.empty() ? "" : all_metrics[0];
+        for (auto const& tc : state.config.targets) {
+            if (tc.name == "boom" && !tc.metric.empty()) {
+                default_metric = tc.metric;
+                break;
+            }
+        }
         state.editing_metric = state.config.boom_metric.empty()
-            ? "angular_causticness" : state.config.boom_metric;
+            ? default_metric : state.config.boom_metric;
     }
 
     // ========== SECTION 1: Metric selector dropdown ==========
@@ -2330,8 +2362,19 @@ void drawMetricParametersWindow(AppState& state) {
     ImGui::SameLine();
     if (ImGui::Button("Reset", ImVec2(60, 0))) {
         state.config.metric_configs.clear();
-        state.config.boom_metric = "angular_causticness";
-        state.editing_metric = "angular_causticness";
+        // Keep the boom_metric from targets if configured, otherwise clear
+        std::string default_metric;
+        for (auto const& tc : state.config.targets) {
+            if (tc.name == "boom" && !tc.metric.empty()) {
+                default_metric = tc.metric;
+                break;
+            }
+        }
+        if (default_metric.empty() && !all_metrics.empty()) {
+            default_metric = all_metrics[0];
+        }
+        state.config.boom_metric = default_metric;
+        state.editing_metric = default_metric;
         state.initBoomMetrics();
     }
 

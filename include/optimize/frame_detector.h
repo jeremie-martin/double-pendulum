@@ -33,13 +33,14 @@ public:
     // Main detection entry point
     FrameDetection detect(metrics::MetricsCollector const& collector,
                           double frame_duration) const {
+        if (params_.metric_name.empty()) {
+            // No metric specified - caller must provide params from config
+            return FrameDetection{};
+        }
         auto const* metric_series = collector.getMetric(params_.metric_name);
         if (!metric_series || metric_series->empty()) {
-            // Fall back to AngularCausticness if specified metric not found
-            metric_series = collector.getMetric(metrics::MetricNames::AngularCausticness);
-            if (!metric_series || metric_series->empty()) {
-                return FrameDetection{};
-            }
+            // Metric not found or empty - no fallback, return invalid detection
+            return FrameDetection{};
         }
 
         auto const& values = metric_series->values();
