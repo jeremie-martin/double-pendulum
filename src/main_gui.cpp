@@ -236,6 +236,7 @@ struct AppState {
     // Metric parameters window
     bool show_metric_params_window = false;
     bool needs_metric_recompute = false;
+    std::string editing_metric;  // Which metric's params are being edited (separate from primary)
 
     // Multi-metric boom detection state
     std::map<std::string, MetricBoomState> boom_metrics;
@@ -1190,8 +1191,8 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
         }
 
         // Draw boom markers for all enabled metrics
-        // Primary metric = solid thick orange line
-        // Secondary metrics = faint colored lines
+        // Primary metric = bright thick red-orange line
+        // Secondary metrics = visible cyan lines
         for (auto const& [metric_name, boom_state] : state.boom_metrics) {
             if (!boom_state.enabled || boom_state.boom_frame < 0) continue;
 
@@ -1199,11 +1200,11 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
             double boom_x = static_cast<double>(boom_state.boom_frame);
 
             if (is_primary) {
-                // Primary: Solid thick orange line
-                ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), 2.5f);
+                // Primary: Bright thick red-orange line
+                ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.4f, 0.1f, 1.0f), 4.0f);
             } else {
-                // Secondary: Faint purple line
-                ImPlot::SetNextLineStyle(ImVec4(0.7f, 0.5f, 0.9f, 0.5f), 1.5f);
+                // Secondary: Visible cyan line
+                ImPlot::SetNextLineStyle(ImVec4(0.3f, 0.9f, 1.0f, 0.85f), 2.5f);
             }
 
             std::string label = "##boom_" + metric_name;
@@ -1213,7 +1214,7 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
             if (is_primary) {
                 auto limits = ImPlot::GetPlotLimits();
                 double y_top = limits.Y.Max * 0.92;
-                ImPlot::Annotation(boom_x, y_top, ImVec4(1.0f, 0.8f, 0.2f, 1.0f),
+                ImPlot::Annotation(boom_x, y_top, ImVec4(1.0f, 0.4f, 0.1f, 1.0f),
                                    ImVec2(3, 0), true, "BOOM");
             }
         }
@@ -1226,7 +1227,7 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
             }
             if (!any_enabled) {
                 double boom_x = static_cast<double>(*state.boom_frame);
-                ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), 2.0f);
+                ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.4f, 0.1f, 1.0f), 4.0f);
                 ImPlot::PlotInfLines("##boom_primary", &boom_x, 1);
             }
         }
@@ -1947,138 +1948,75 @@ void recomputeMetrics(AppState& state) {
     state.needs_metric_recompute = false;
 }
 
-// Draw metric parameters window
+// Helper: Get or create metric config with proper defaults
+MetricConfig& getOrCreateMetricConfig(Config& config, std::string const& metric_name) {
+    auto& configs = config.metric_configs;
+    if (configs.find(metric_name) == configs.end()) {
+        configs[metric_name] = createDefaultMetricConfig(metric_name);
+    }
+    return configs[metric_name];
+}
+
+// Draw metric parameters window - redesigned with clear separation of concerns
 void drawMetricParametersWindow(AppState& state) {
     if (!state.show_metric_params_window) return;
 
-    ImGui::SetNextWindowSize(ImVec2(400, 500), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(420, 600), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("Metric Parameters", &state.show_metric_params_window)) {
         ImGui::End();
         return;
     }
 
-    bool params_changed = false;
+    auto const& all_metrics = getAllBoomMetrics();
 
-    // Get the active boom metric name and its config
-    std::string active_metric = state.config.boom_metric;
-    if (active_metric.empty()) {
-        active_metric = "angular_causticness";
+    // Initialize editing_metric if empty
+    if (state.editing_metric.empty()) {
+        state.editing_metric = state.config.boom_metric.empty()
+            ? "angular_causticness" : state.config.boom_metric;
     }
 
-    // Get or create config for active metric
-    auto& metric_configs = state.config.metric_configs;
-    if (metric_configs.find(active_metric) == metric_configs.end()) {
-        // Create default config for the metric
-        MetricConfig mc;
-        mc.name = active_metric;
-        mc.params = SectorMetricParams{};  // Default to sector params
-        metric_configs[active_metric] = mc;
-    }
-    auto& active_config = metric_configs[active_metric];
-
-    // Get boom params from active config
-    BoomDetectionParams boom_params = std::visit([](auto const& p) -> BoomDetectionParams {
-        return p.boom;
-    }, active_config.params);
-
-    // Boom Detection section (primary focus)
-    if (ImGui::CollapsingHeader("Boom Detection", ImGuiTreeNodeFlags_DefaultOpen)) {
-        // Toggle button grid for all boom metrics
-        ImGui::Text("Boom Metrics (Click=toggle, Ctrl+Click=set primary)");
-        ImGui::Separator();
-
-        auto const& all_metrics = getAllBoomMetrics();
-        int const cols = 5;  // 5 columns of buttons for compact layout
-
-        // Style colors for different states
-        ImVec4 const primary_color(0.2f, 0.6f, 0.2f, 1.0f);
-        ImVec4 const primary_hover(0.3f, 0.7f, 0.3f, 1.0f);
-        ImVec4 const primary_active(0.15f, 0.5f, 0.15f, 1.0f);
-        ImVec4 const enabled_color(0.4f, 0.4f, 0.55f, 1.0f);
-        ImVec4 const enabled_hover(0.5f, 0.5f, 0.65f, 1.0f);
-        ImVec4 const enabled_active(0.3f, 0.3f, 0.45f, 1.0f);
-
-        for (size_t i = 0; i < all_metrics.size(); ++i) {
-            auto const& metric_name = all_metrics[i];
-            auto& boom_state = state.boom_metrics[metric_name];
-            bool is_primary = (metric_name == state.config.boom_metric);
-
-            // Apply button styling based on state
-            int style_colors = 0;
-            if (is_primary) {
-                ImGui::PushStyleColor(ImGuiCol_Button, primary_color);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, primary_hover);
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive, primary_active);
-                style_colors = 3;
-            } else if (boom_state.enabled) {
-                ImGui::PushStyleColor(ImGuiCol_Button, enabled_color);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, enabled_hover);
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive, enabled_active);
-                style_colors = 3;
-            }
-
-            // Short display name for button
-            std::string short_name = shortenMetricName(metric_name);
-            if (is_primary) short_name += "*";  // Mark primary with asterisk
-
-            if (ImGui::Button(short_name.c_str(), ImVec2(60, 22))) {
-                if (ImGui::GetIO().KeyCtrl) {
-                    // Ctrl+click: Set as primary
-                    state.config.boom_metric = metric_name;
-                    boom_state.enabled = true;
-                    boom_state.show_params = true;
-                    active_metric = metric_name;
-                    params_changed = true;
-                } else {
-                    // Regular click: Toggle enable + show params
-                    if (boom_state.enabled && boom_state.show_params) {
-                        // If already showing, hide params but keep enabled
-                        boom_state.show_params = false;
-                    } else if (boom_state.enabled) {
-                        // If enabled but not showing params, disable
-                        boom_state.enabled = false;
-                        boom_state.show_params = false;
-                    } else {
-                        // Enable and show params
-                        boom_state.enabled = true;
-                        boom_state.show_params = true;
-                    }
-                    params_changed = true;
+    // ========== SECTION 1: Metric selector dropdown ==========
+    if (ImGui::CollapsingHeader("Edit Metric Parameters", ImGuiTreeNodeFlags_DefaultOpen)) {
+        // Build combo items
+        std::string combo_preview = state.editing_metric;
+        if (ImGui::BeginCombo("Edit Metric", combo_preview.c_str())) {
+            for (size_t i = 0; i < all_metrics.size(); ++i) {
+                bool is_selected = (all_metrics[i] == state.editing_metric);
+                std::string label = all_metrics[i];
+                if (all_metrics[i] == state.config.boom_metric) {
+                    label += " [PRIMARY]";
                 }
-                // Trigger boom re-detection for all enabled metrics
-                if (!state.frame_history.empty()) {
-                    updateAllBoomDetections(state);
+                if (state.boom_metrics[all_metrics[i]].enabled) {
+                    label += " *";
+                }
+                if (ImGui::Selectable(label.c_str(), is_selected)) {
+                    state.editing_metric = all_metrics[i];
+                }
+                if (is_selected) {
+                    ImGui::SetItemDefaultFocus();
                 }
             }
-
-            // Tooltip with full name and instructions
-            if (ImGui::IsItemHovered()) {
-                std::string tooltip = metric_name;
-                if (is_primary) tooltip += " [PRIMARY]";
-                if (boom_state.enabled) tooltip += " [ENABLED]";
-                if (boom_state.boom_frame >= 0) {
-                    tooltip += "\nBoom @ frame " + std::to_string(boom_state.boom_frame);
-                }
-                tooltip += "\nClick: Toggle | Ctrl+Click: Set primary";
-                ImGui::SetTooltip("%s", tooltip.c_str());
-            }
-
-            if (style_colors > 0) {
-                ImGui::PopStyleColor(style_colors);
-            }
-
-            // Layout: cols per row
-            if ((i + 1) % cols != 0 && i < all_metrics.size() - 1) {
-                ImGui::SameLine();
-            }
+            ImGui::EndCombo();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Select which metric's parameters to edit");
         }
 
         ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Text("Primary: %s", active_metric.c_str());
 
-        // Method selector
-        const char* method_names[] = {"Max Causticness", "First Peak %", "Derivative Peak",
+        // Get config for the metric being edited
+        auto& editing_config = getOrCreateMetricConfig(state.config, state.editing_metric);
+        BoomDetectionParams boom_params = std::visit([](auto const& p) -> BoomDetectionParams {
+            return p.boom;
+        }, editing_config.params);
+
+        bool params_changed = false;
+
+        // Boom detection parameters
+        ImGui::Text("Boom Detection:");
+        ImGui::Indent();
+
+        const char* method_names[] = {"Max Value", "First Peak %%", "Derivative Peak",
                                        "Threshold Crossing", "2nd Derivative Peak"};
         int method = static_cast<int>(boom_params.method);
         if (ImGui::Combo("Method", &method, method_names, 5)) {
@@ -2086,30 +2024,27 @@ void drawMetricParametersWindow(AppState& state) {
             params_changed = true;
         }
 
-        // Offset is applied to ALL methods now
         float offset = static_cast<float>(boom_params.offset_seconds);
         if (ImGui::SliderFloat("Offset (s)", &offset, -0.5f, 1.0f, "%.2f")) {
             boom_params.offset_seconds = offset;
             params_changed = true;
         }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Time offset from detected point for visual alignment (negative=earlier)");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Time offset for visual alignment");
 
         // Method-specific parameters
         if (boom_params.method == BoomDetectionMethod::FirstPeakPercent) {
-            float peak_pct_display = static_cast<float>(boom_params.peak_percent_threshold) * 100.0f;
-            if (ImGui::SliderFloat("Peak %", &peak_pct_display, 30.0f, 90.0f, "%.0f%%")) {
-                boom_params.peak_percent_threshold = peak_pct_display / 100.0;
+            float peak_pct = static_cast<float>(boom_params.peak_percent_threshold) * 100.0f;
+            if (ImGui::SliderFloat("Peak %%", &peak_pct, 30.0f, 90.0f, "%.0f%%%%")) {
+                boom_params.peak_percent_threshold = peak_pct / 100.0;
                 params_changed = true;
             }
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("First peak >= this percentage of max");
         }
 
         if (boom_params.method == BoomDetectionMethod::DerivativePeak ||
             boom_params.method == BoomDetectionMethod::SecondDerivativePeak) {
-            if (ImGui::SliderInt("Smoothing", &boom_params.smoothing_window, 1, 15)) {
+            if (ImGui::SliderInt("Smoothing", &boom_params.smoothing_window, 1, 40)) {
                 params_changed = true;
             }
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Smoothing window for derivative calculation");
         }
 
         if (boom_params.method == BoomDetectionMethod::ThresholdCrossing) {
@@ -2118,40 +2053,33 @@ void drawMetricParametersWindow(AppState& state) {
                 boom_params.crossing_threshold = crossing;
                 params_changed = true;
             }
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Threshold as fraction of max value");
-
-            if (ImGui::SliderInt("Confirm Frames", &boom_params.crossing_confirmation, 1, 10)) {
+            if (ImGui::SliderInt("Confirm", &boom_params.crossing_confirmation, 1, 15)) {
                 params_changed = true;
             }
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Consecutive frames above threshold to confirm crossing");
         }
 
         float prominence = static_cast<float>(boom_params.min_peak_prominence);
-        if (ImGui::SliderFloat("Min Prominence", &prominence, 0.01f, 0.2f, "%.3f")) {
+        if (ImGui::SliderFloat("Min Prominence", &prominence, 0.01f, 0.3f, "%.3f")) {
             boom_params.min_peak_prominence = prominence;
             params_changed = true;
         }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Minimum peak prominence (fraction of max)");
 
-        // Apply boom params changes back to config
-        if (params_changed) {
-            std::visit([&boom_params](auto& p) {
-                p.boom = boom_params;
-            }, active_config.params);
-        }
-    }
+        ImGui::Unindent();
 
-    // Show metric-specific parameters (read from active config)
-    if (ImGui::CollapsingHeader("Metric Parameters")) {
-        std::visit([&](auto& p) {
+        // Metric-specific parameters
+        ImGui::Spacing();
+        ImGui::Text("Metric Parameters:");
+        ImGui::Indent();
+
+        std::visit([&params_changed](auto& p) {
             using T = std::decay_t<decltype(p)>;
             if constexpr (std::is_same_v<T, SectorMetricParams> || std::is_same_v<T, CVSectorMetricParams>) {
-                if (ImGui::SliderInt("Min Sectors", &p.min_sectors, 4, 24)) params_changed = true;
-                if (ImGui::SliderInt("Max Sectors", &p.max_sectors, 24, 144)) params_changed = true;
-                if (ImGui::SliderInt("Target/Sector", &p.target_per_sector, 10, 100)) params_changed = true;
+                if (ImGui::SliderInt("Min Sectors", &p.min_sectors, 4, 32)) params_changed = true;
+                if (ImGui::SliderInt("Max Sectors", &p.max_sectors, 8, 144)) params_changed = true;
+                if (ImGui::SliderInt("Target/Sector", &p.target_per_sector, 10, 500)) params_changed = true;
             }
             if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
-                float cv = static_cast<float>(p.cv_normalization);
+                auto cv = static_cast<float>(p.cv_normalization);
                 if (ImGui::SliderFloat("CV Norm", &cv, 0.5f, 3.0f, "%.2f")) {
                     p.cv_normalization = cv;
                     params_changed = true;
@@ -2160,39 +2088,151 @@ void drawMetricParametersWindow(AppState& state) {
             if constexpr (std::is_same_v<T, GridMetricParams>) {
                 if (ImGui::SliderInt("Min Grid", &p.min_grid, 2, 16)) params_changed = true;
                 if (ImGui::SliderInt("Max Grid", &p.max_grid, 16, 64)) params_changed = true;
-                if (ImGui::SliderInt("Target/Cell", &p.target_per_cell, 10, 100)) params_changed = true;
+                if (ImGui::SliderInt("Target/Cell", &p.target_per_cell, 1, 50)) params_changed = true;
             }
             if constexpr (std::is_same_v<T, FoldMetricParams>) {
-                float r = static_cast<float>(p.max_radius);
-                if (ImGui::SliderFloat("Max Radius", &r, 1.0f, 4.0f)) { p.max_radius = r; params_changed = true; }
-                float cv = static_cast<float>(p.cv_normalization);
-                if (ImGui::SliderFloat("CV Norm", &cv, 0.5f, 3.0f)) { p.cv_normalization = cv; params_changed = true; }
+                auto r = static_cast<float>(p.max_radius);
+                if (ImGui::SliderFloat("Max Radius", &r, 0.5f, 4.0f)) { p.max_radius = r; params_changed = true; }
+                auto cv = static_cast<float>(p.cv_normalization);
+                if (ImGui::SliderFloat("CV Norm", &cv, 0.5f, 4.0f)) { p.cv_normalization = cv; params_changed = true; }
             }
-            if constexpr (std::is_same_v<T, TrajectoryMetricParams> || std::is_same_v<T, CurvatureMetricParams> ||
-                          std::is_same_v<T, TrueFoldsMetricParams> || std::is_same_v<T, LocalCoherenceMetricParams>) {
-                float r = static_cast<float>(p.max_radius);
-                if (ImGui::SliderFloat("Max Radius", &r, 1.0f, 4.0f)) { p.max_radius = r; params_changed = true; }
-                float s = static_cast<float>(p.min_spread_threshold);
+            if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
+                auto r = static_cast<float>(p.max_radius);
+                if (ImGui::SliderFloat("Max Radius", &r, 0.5f, 4.0f)) { p.max_radius = r; params_changed = true; }
+                auto s = static_cast<float>(p.min_spread_threshold);
                 if (ImGui::SliderFloat("Min Spread", &s, 0.01f, 0.2f, "%.3f")) { p.min_spread_threshold = s; params_changed = true; }
             }
-        }, active_config.params);
+            if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
+                auto r = static_cast<float>(p.max_radius);
+                if (ImGui::SliderFloat("Max Radius", &r, 0.5f, 4.0f)) { p.max_radius = r; params_changed = true; }
+                auto s = static_cast<float>(p.min_spread_threshold);
+                if (ImGui::SliderFloat("Min Spread", &s, 0.01f, 0.2f, "%.3f")) { p.min_spread_threshold = s; params_changed = true; }
+                auto ln = static_cast<float>(p.log_ratio_normalization);
+                if (ImGui::SliderFloat("Log Norm", &ln, 0.5f, 3.0f)) { p.log_ratio_normalization = ln; params_changed = true; }
+            }
+            if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
+                auto r = static_cast<float>(p.max_radius);
+                if (ImGui::SliderFloat("Max Radius", &r, 0.5f, 4.0f)) { p.max_radius = r; params_changed = true; }
+                auto s = static_cast<float>(p.min_spread_threshold);
+                if (ImGui::SliderFloat("Min Spread", &s, 0.01f, 0.2f, "%.3f")) { p.min_spread_threshold = s; params_changed = true; }
+                auto gb = static_cast<float>(p.gini_chaos_baseline);
+                if (ImGui::SliderFloat("Gini Baseline", &gb, 0.0f, 0.5f)) { p.gini_chaos_baseline = gb; params_changed = true; }
+                auto gd = static_cast<float>(p.gini_baseline_divisor);
+                if (ImGui::SliderFloat("Gini Divisor", &gd, 0.1f, 2.0f)) { p.gini_baseline_divisor = gd; params_changed = true; }
+            }
+            if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
+                auto r = static_cast<float>(p.max_radius);
+                if (ImGui::SliderFloat("Max Radius", &r, 0.5f, 4.0f)) { p.max_radius = r; params_changed = true; }
+                auto s = static_cast<float>(p.min_spread_threshold);
+                if (ImGui::SliderFloat("Min Spread", &s, 0.01f, 0.2f, "%.3f")) { p.min_spread_threshold = s; params_changed = true; }
+                auto lb = static_cast<float>(p.log_inverse_baseline);
+                if (ImGui::SliderFloat("Log Baseline", &lb, 0.1f, 2.0f)) { p.log_inverse_baseline = lb; params_changed = true; }
+                auto ld = static_cast<float>(p.log_inverse_divisor);
+                if (ImGui::SliderFloat("Log Divisor", &ld, 0.5f, 3.0f)) { p.log_inverse_divisor = ld; params_changed = true; }
+            }
+        }, editing_config.params);
+
+        ImGui::Unindent();
+
+        // Apply boom params changes back to config
+        if (params_changed) {
+            std::visit([&boom_params](auto& p) {
+                p.boom = boom_params;
+            }, editing_config.params);
+        }
     }
 
+    ImGui::Spacing();
     ImGui::Separator();
+    ImGui::Spacing();
 
-    // Action buttons
-    if (ImGui::Button("Reset Defaults")) {
+    // ========== SECTION 2: Boom line configuration ==========
+    if (ImGui::CollapsingHeader("Boom Line Display", ImGuiTreeNodeFlags_DefaultOpen)) {
+        // Primary metric selector (radio buttons in a compact layout)
+        ImGui::Text("Primary Metric:");
+        ImGui::Indent();
+        int cols = 4;
+        for (size_t i = 0; i < all_metrics.size(); ++i) {
+            auto const& name = all_metrics[i];
+            bool is_primary = (name == state.config.boom_metric);
+            std::string short_name = shortenMetricName(name);
+
+            if (ImGui::RadioButton(short_name.c_str(), is_primary)) {
+                state.config.boom_metric = name;
+                state.boom_metrics[name].enabled = true;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", name.c_str());
+            }
+            if ((i + 1) % cols != 0 && i < all_metrics.size() - 1) {
+                ImGui::SameLine();
+            }
+        }
+        ImGui::Unindent();
+
+        ImGui::Spacing();
+
+        // Show checkboxes for which boom lines to display
+        ImGui::Text("Show Boom Lines:");
+        ImGui::Indent();
+        for (size_t i = 0; i < all_metrics.size(); ++i) {
+            auto const& name = all_metrics[i];
+            auto& bs = state.boom_metrics[name];
+            std::string short_name = shortenMetricName(name);
+            bool is_primary = (name == state.config.boom_metric);
+
+            std::string label = short_name;
+            if (is_primary) label += "*";
+            if (bs.boom_frame >= 0) {
+                label += " [" + std::to_string(bs.boom_frame) + "]";
+            }
+
+            ImGui::Checkbox(label.c_str(), &bs.enabled);
+            if (ImGui::IsItemHovered()) {
+                std::string tip = name;
+                if (bs.boom_frame >= 0) {
+                    tip += "\nBoom @ frame " + std::to_string(bs.boom_frame);
+                }
+                ImGui::SetTooltip("%s", tip.c_str());
+            }
+            if ((i + 1) % cols != 0 && i < all_metrics.size() - 1) {
+                ImGui::SameLine();
+            }
+        }
+        ImGui::Unindent();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // ========== SECTION 3: Action buttons ==========
+    if (ImGui::Button("Detect All Booms", ImVec2(140, 0))) {
+        if (!state.frame_history.empty()) {
+            updateAllBoomDetections(state);
+        }
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Run boom detection for all enabled metrics");
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Recompute Metrics", ImVec2(140, 0))) {
+        state.needs_metric_recompute = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Recompute all metrics from history\n(needed after changing metric parameters)");
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Reset", ImVec2(60, 0))) {
         state.config.metric_configs.clear();
         state.config.boom_metric = "angular_causticness";
-        params_changed = true;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Recompute Now") || (params_changed && !state.frame_history.empty())) {
-        state.needs_metric_recompute = true;
+        state.editing_metric = "angular_causticness";
+        state.initBoomMetrics();
     }
 
     if (state.needs_metric_recompute) {
-        ImGui::SameLine();
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Recomputing...");
     }
 
