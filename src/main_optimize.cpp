@@ -7,9 +7,10 @@
 //   ./pendulum-optimize annotations.json [options] [simulation_data.bin ...]
 //
 // Options:
-//   --save-cache <dir>   Save Phase 1 computed metrics to cache directory
-//   --load-cache <dir>   Load Phase 1 metrics from cache (skip computation)
-//   --output <file>      Output file for best parameters (default: best_params.toml)
+//   --grid-steps <N>   Grid resolution per dimension (default: 8, use 3-4 for quick tests)
+//   --save-cache <dir> Save Phase 1 computed metrics to cache directory
+//   --load-cache <dir> Load Phase 1 metrics from cache (skip computation)
+//   --output <file>    Output file for best parameters (default: best_params.toml)
 //
 // Annotation format (JSON):
 // {
@@ -38,99 +39,394 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <map>
 #include <mutex>
 #include <optional>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
 
-// Annotation entry
+// ============================================================================
+// GRID SEARCH PARAMETER SYSTEM
+// ============================================================================
+
+// A single parameter dimension in the search grid
+struct ParamDim {
+    std::string name;
+    double min_val;
+    double max_val;
+    int snap_multiple = 1;  // For integer params (sectors), snap to multiples
+    bool is_integer = false;
+
+    // Generate values for this dimension given step count
+    std::vector<double> generate(int steps, int N = 0) const {
+        // For integer params, clamp max based on N if needed
+        double effective_max = max_val;
+        if (name == "sectors" && N > 0) {
+            effective_max = std::min(max_val, static_cast<double>(N / 2));
+        } else if (name == "grid" && N > 0) {
+            effective_max = std::min(max_val, std::floor(std::sqrt(static_cast<double>(N))));
+        }
+        effective_max = std::max(min_val, effective_max);
+
+        std::set<double> unique;
+        if (steps <= 1) {
+            unique.insert(min_val);
+        } else {
+            for (int i = 0; i < steps; ++i) {
+                double t = static_cast<double>(i) / (steps - 1);
+                double v = min_val + t * (effective_max - min_val);
+                if (is_integer || snap_multiple > 1) {
+                    v = std::round(v / snap_multiple) * snap_multiple;
+                    v = std::clamp(v, min_val, effective_max);
+                }
+                unique.insert(v);
+            }
+        }
+        return std::vector<double>(unique.begin(), unique.end());
+    }
+};
+
+// Generate Cartesian product of all dimensions
+std::vector<std::vector<double>> cartesianProduct(
+    std::vector<std::vector<double>> const& dimensions) {
+    if (dimensions.empty()) return {{}};
+
+    std::vector<std::vector<double>> result;
+    std::vector<size_t> indices(dimensions.size(), 0);
+
+    while (true) {
+        // Build current combination
+        std::vector<double> combo;
+        for (size_t i = 0; i < dimensions.size(); ++i) {
+            combo.push_back(dimensions[i][indices[i]]);
+        }
+        result.push_back(combo);
+
+        // Increment indices (like an odometer)
+        size_t dim = dimensions.size() - 1;
+        while (true) {
+            indices[dim]++;
+            if (indices[dim] < dimensions[dim].size()) break;
+            indices[dim] = 0;
+            if (dim == 0) return result;  // All done
+            dim--;
+        }
+    }
+}
+
+// Metric schema: defines what parameters a metric uses
+struct MetricSchema {
+    std::string name;
+    std::vector<ParamDim> dims;
+    std::function<::MetricConfig(std::vector<double> const&, int N)> make_config;
+};
+
+// Helper to create sector params from effective sector count
+SectorMetricParams makeSectorParams(int eff_sec, int N) {
+    SectorMetricParams p;
+    p.max_sectors = eff_sec;
+    p.min_sectors = std::min(8, eff_sec);
+    p.target_per_sector = std::max(1, N / (eff_sec * 2));
+    return p;
+}
+
+// Helper to create grid params from effective grid size
+GridMetricParams makeGridParams(int eff_grid, int N) {
+    GridMetricParams p;
+    p.max_grid = eff_grid;
+    p.min_grid = std::min(4, eff_grid);
+    p.target_per_cell = std::max(1, N / (eff_grid * eff_grid * 2));
+    return p;
+}
+
+// Build all metric schemas
+std::vector<MetricSchema> buildMetricSchemas() {
+    std::vector<MetricSchema> schemas;
+
+    // Sector-based metrics (angular_causticness, tip_causticness, etc.)
+    auto sector_dim = ParamDim{"sectors", 8, 128, 2, true};
+    auto make_sector_config = [](std::string const& metric_name) {
+        return [metric_name](std::vector<double> const& vals, int N) -> ::MetricConfig {
+            int eff_sec = static_cast<int>(vals[0]);
+            auto params = makeSectorParams(eff_sec, N);
+            ::MetricConfig cfg;
+            cfg.name = metric_name;
+            cfg.params = params;
+            return cfg;
+        };
+    };
+
+    for (auto const& name : {"angular_causticness", "tip_causticness", "organization_causticness",
+                             "r1_concentration", "r2_concentration", "joint_concentration"}) {
+        schemas.push_back({name, {sector_dim}, make_sector_config(name)});
+    }
+
+    // Variance (no real parameters, but we include it)
+    schemas.push_back({"variance", {},
+        [](std::vector<double> const&, int) -> ::MetricConfig {
+            ::MetricConfig cfg;
+            cfg.name = "variance";
+            cfg.params = SectorMetricParams{};
+            return cfg;
+        }});
+
+    // CV causticness: sectors × cv_normalization
+    schemas.push_back({"cv_causticness",
+        {sector_dim, {"cv_norm", 0.5, 3.0, 1, false}},
+        [](std::vector<double> const& vals, int N) -> ::MetricConfig {
+            int eff_sec = static_cast<int>(vals[0]);
+            double cv_norm = vals[1];
+            CVSectorMetricParams params;
+            params.max_sectors = eff_sec;
+            params.min_sectors = std::min(8, eff_sec);
+            params.target_per_sector = std::max(1, N / (eff_sec * 2));
+            params.cv_normalization = cv_norm;
+            ::MetricConfig cfg;
+            cfg.name = "cv_causticness";
+            cfg.params = params;
+            return cfg;
+        }});
+
+    // Spatial concentration: grid
+    schemas.push_back({"spatial_concentration",
+        {{"grid", 4, 64, 1, true}},
+        [](std::vector<double> const& vals, int N) -> ::MetricConfig {
+            int eff_grid = static_cast<int>(vals[0]);
+            auto params = makeGridParams(eff_grid, N);
+            ::MetricConfig cfg;
+            cfg.name = "spatial_concentration";
+            cfg.params = params;
+            return cfg;
+        }});
+
+    // Fold causticness: max_radius × cv_normalization
+    schemas.push_back({"fold_causticness",
+        {{"max_radius", 1.0, 2.5, 1, false}, {"cv_norm", 0.5, 3.0, 1, false}},
+        [](std::vector<double> const& vals, int) -> ::MetricConfig {
+            FoldMetricParams params;
+            params.max_radius = vals[0];
+            params.cv_normalization = vals[1];
+            ::MetricConfig cfg;
+            cfg.name = "fold_causticness";
+            cfg.params = params;
+            return cfg;
+        }});
+
+    // Trajectory smoothness: max_radius × min_spread
+    schemas.push_back({"trajectory_smoothness",
+        {{"max_radius", 1.0, 2.5, 1, false}, {"min_spread", 0.01, 0.1, 1, false}},
+        [](std::vector<double> const& vals, int) -> ::MetricConfig {
+            TrajectoryMetricParams params;
+            params.max_radius = vals[0];
+            params.min_spread_threshold = vals[1];
+            ::MetricConfig cfg;
+            cfg.name = "trajectory_smoothness";
+            cfg.params = params;
+            return cfg;
+        }});
+
+    // Curvature: max_radius × min_spread × log_ratio_normalization
+    schemas.push_back({"curvature",
+        {{"max_radius", 1.0, 2.5, 1, false},
+         {"min_spread", 0.01, 0.1, 1, false},
+         {"log_ratio_norm", 1.0, 2.5, 1, false}},
+        [](std::vector<double> const& vals, int) -> ::MetricConfig {
+            CurvatureMetricParams params;
+            params.max_radius = vals[0];
+            params.min_spread_threshold = vals[1];
+            params.log_ratio_normalization = vals[2];
+            ::MetricConfig cfg;
+            cfg.name = "curvature";
+            cfg.params = params;
+            return cfg;
+        }});
+
+    // True folds: max_radius × min_spread × gini_baseline × gini_divisor
+    schemas.push_back({"true_folds",
+        {{"max_radius", 1.0, 2.5, 1, false},
+         {"min_spread", 0.01, 0.1, 1, false},
+         {"gini_baseline", 0.1, 0.5, 1, false},
+         {"gini_divisor", 0.5, 0.8, 1, false}},
+        [](std::vector<double> const& vals, int) -> ::MetricConfig {
+            TrueFoldsMetricParams params;
+            params.max_radius = vals[0];
+            params.min_spread_threshold = vals[1];
+            params.gini_chaos_baseline = vals[2];
+            params.gini_baseline_divisor = vals[3];
+            ::MetricConfig cfg;
+            cfg.name = "true_folds";
+            cfg.params = params;
+            return cfg;
+        }});
+
+    // Local coherence: max_radius × min_spread × log_baseline × log_divisor
+    schemas.push_back({"local_coherence",
+        {{"max_radius", 1.0, 2.5, 1, false},
+         {"min_spread", 0.01, 0.1, 1, false},
+         {"log_baseline", 0.5, 1.5, 1, false},
+         {"log_divisor", 1.5, 3.0, 1, false}},
+        [](std::vector<double> const& vals, int) -> ::MetricConfig {
+            LocalCoherenceMetricParams params;
+            params.max_radius = vals[0];
+            params.min_spread_threshold = vals[1];
+            params.log_inverse_baseline = vals[2];
+            params.log_inverse_divisor = vals[3];
+            ::MetricConfig cfg;
+            cfg.name = "local_coherence";
+            cfg.params = params;
+            return cfg;
+        }});
+
+    return schemas;
+}
+
+// A parameterized metric: metric name + config (generated from schema)
+struct ParameterizedMetric {
+    std::string metric_name;
+    ::MetricConfig config;
+
+    // Generate unique key for deduplication
+    std::string key() const {
+        std::ostringstream oss;
+        oss << metric_name;
+        std::visit([&](auto const& p) {
+            using T = std::decay_t<decltype(p)>;
+            if constexpr (std::is_same_v<T, SectorMetricParams>) {
+                oss << "_sec" << p.max_sectors;
+            } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
+                oss << "_sec" << p.max_sectors << "_cvn" << static_cast<int>(p.cv_normalization * 100);
+            } else if constexpr (std::is_same_v<T, GridMetricParams>) {
+                oss << "_grid" << p.max_grid;
+            } else if constexpr (std::is_same_v<T, FoldMetricParams>) {
+                oss << "_rad" << static_cast<int>(p.max_radius * 100)
+                    << "_cvn" << static_cast<int>(p.cv_normalization * 100);
+            } else if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
+                oss << "_rad" << static_cast<int>(p.max_radius * 100)
+                    << "_spr" << static_cast<int>(p.min_spread_threshold * 1000);
+            } else if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
+                oss << "_rad" << static_cast<int>(p.max_radius * 100)
+                    << "_spr" << static_cast<int>(p.min_spread_threshold * 1000)
+                    << "_lrn" << static_cast<int>(p.log_ratio_normalization * 100);
+            } else if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
+                oss << "_rad" << static_cast<int>(p.max_radius * 100)
+                    << "_spr" << static_cast<int>(p.min_spread_threshold * 1000)
+                    << "_gb" << static_cast<int>(p.gini_chaos_baseline * 100)
+                    << "_gd" << static_cast<int>(p.gini_baseline_divisor * 100);
+            } else if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
+                oss << "_rad" << static_cast<int>(p.max_radius * 100)
+                    << "_spr" << static_cast<int>(p.min_spread_threshold * 1000)
+                    << "_lb" << static_cast<int>(p.log_inverse_baseline * 100)
+                    << "_ld" << static_cast<int>(p.log_inverse_divisor * 100);
+            }
+        }, config.params);
+        return oss.str();
+    }
+
+    // Human-readable description
+    std::string describe() const {
+        std::ostringstream oss;
+        std::string short_name = metric_name;
+        // Shorten common suffixes
+        for (auto const& suffix : {"_causticness", "_concentration", "_coherence", "_smoothness"}) {
+            auto pos = short_name.find(suffix);
+            if (pos != std::string::npos) {
+                short_name = short_name.substr(0, pos);
+                break;
+            }
+        }
+        oss << short_name;
+
+        std::visit([&](auto const& p) {
+            using T = std::decay_t<decltype(p)>;
+            if constexpr (std::is_same_v<T, SectorMetricParams>) {
+                oss << " sec=" << p.max_sectors;
+            } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
+                oss << " sec=" << p.max_sectors << " cvn=" << std::fixed << std::setprecision(2) << p.cv_normalization;
+            } else if constexpr (std::is_same_v<T, GridMetricParams>) {
+                oss << " grid=" << p.max_grid;
+            } else if constexpr (std::is_same_v<T, FoldMetricParams>) {
+                oss << " rad=" << std::fixed << std::setprecision(2) << p.max_radius
+                    << " cvn=" << p.cv_normalization;
+            } else if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
+                oss << " rad=" << std::fixed << std::setprecision(2) << p.max_radius
+                    << " spr=" << p.min_spread_threshold;
+            } else if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
+                oss << " rad=" << std::fixed << std::setprecision(2) << p.max_radius
+                    << " lrn=" << p.log_ratio_normalization;
+            } else if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
+                oss << " gini=" << std::fixed << std::setprecision(2) << p.gini_chaos_baseline
+                    << "/" << p.gini_baseline_divisor;
+            } else if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
+                oss << " log=" << std::fixed << std::setprecision(2) << p.log_inverse_baseline
+                    << "/" << p.log_inverse_divisor;
+            }
+        }, config.params);
+        return oss.str();
+    }
+};
+
+// Generate all parameterized metrics from schemas
+std::vector<ParameterizedMetric> generateParameterizedMetrics(
+    std::vector<MetricSchema> const& schemas, int grid_steps, int N) {
+
+    std::vector<ParameterizedMetric> result;
+    std::set<std::string> seen_keys;
+
+    for (auto const& schema : schemas) {
+        if (schema.dims.empty()) {
+            // No parameters (e.g., variance)
+            ParameterizedMetric pm;
+            pm.metric_name = schema.name;
+            pm.config = schema.make_config({}, N);
+            auto k = pm.key();
+            if (seen_keys.insert(k).second) {
+                result.push_back(pm);
+            }
+        } else {
+            // Generate grid for each dimension
+            std::vector<std::vector<double>> dim_values;
+            for (auto const& dim : schema.dims) {
+                dim_values.push_back(dim.generate(grid_steps, N));
+            }
+
+            // Cartesian product
+            auto combos = cartesianProduct(dim_values);
+            for (auto const& combo : combos) {
+                ParameterizedMetric pm;
+                pm.metric_name = schema.name;
+                pm.config = schema.make_config(combo, N);
+                auto k = pm.key();
+                if (seen_keys.insert(k).second) {
+                    result.push_back(pm);
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+// ============================================================================
+// ANNOTATION AND SIMULATION DATA
+// ============================================================================
+
 struct Annotation {
     std::string id;
     std::string data_path;
-    int boom_frame = -1; // Ground truth boom frame (-1 = unknown)
-    int peak_frame = -1; // Ground truth peak causticness frame (-1 = unknown)
+    int boom_frame = -1;
+    int peak_frame = -1;
     std::string notes;
 };
 
-// Parameter set being tested
-struct ParameterSet {
-    ::MetricConfig metric_config;  // Per-metric config (using global MetricConfig, not local one)
-    BoomDetectionParams boom;
-    int effective_sectors = 0; // Computed for actual N
-
-    // Short description for tables (boom detection only)
-    std::string describeShort() const {
-        std::ostringstream oss;
-        // Shorten metric name for display
-        std::string metric_short = boom.metric_name;
-        if (metric_short.find("_causticness") != std::string::npos) {
-            metric_short = metric_short.substr(0, metric_short.find("_causticness"));
-        } else if (metric_short.find("_concentration") != std::string::npos) {
-            metric_short = metric_short.substr(0, metric_short.find("_concentration")) + "_conc";
-        } else if (metric_short.find("_coherence") != std::string::npos) {
-            metric_short = metric_short.substr(0, metric_short.find("_coherence")) + "_coh";
-        }
-        oss << metric_short << " ";
-        switch (boom.method) {
-        case BoomDetectionMethod::MaxCausticness:
-            oss << "max";
-            break;
-        case BoomDetectionMethod::FirstPeakPercent:
-            oss << "first@" << (int)(boom.peak_percent_threshold * 100) << "%";
-            oss << " prom=" << std::fixed << std::setprecision(2) << boom.min_peak_prominence;
-            break;
-        case BoomDetectionMethod::DerivativePeak:
-            oss << "deriv w=" << boom.smoothing_window;
-            break;
-        case BoomDetectionMethod::ThresholdCrossing:
-            oss << "cross@" << (int)(boom.crossing_threshold * 100) << "% x"
-                << boom.crossing_confirmation;
-            break;
-        case BoomDetectionMethod::SecondDerivativePeak:
-            oss << "accel w=" << boom.smoothing_window;
-            break;
-        }
-        // Always show offset since it's applied to all methods
-        oss << " off=" << std::fixed << std::setprecision(1) << boom.offset_seconds;
-        return oss.str();
-    }
-
-    // Full description including metric params and effective sectors
-    std::string describeFull() const {
-        std::ostringstream oss;
-        oss << describeShort();
-        if (effective_sectors > 0) {
-            oss << " [eff_sec=" << effective_sectors << "]";
-        }
-        return oss.str();
-    }
-
-    // Legacy alias
-    std::string describe() const { return describeShort(); }
-};
-
-// Evaluation results for a parameter set
-struct EvaluationResult {
-    ParameterSet params;
-    double boom_mae = 0.0;       // Mean absolute error for boom detection (frames)
-    double boom_stddev = 0.0;    // Standard deviation of errors
-    double boom_median = 0.0;    // Median absolute error
-    double boom_max = 0.0;       // Maximum absolute error
-    double peak_mae = 0.0;       // Mean absolute error for peak detection (frames)
-    double combined_score = 0.0; // Combined score (lower is better)
-    int samples_evaluated = 0;
-    std::vector<int> per_sim_errors; // Error for each simulation (for analysis)
-};
-
-// Simple JSON value extraction helpers
+// Simple JSON extraction helpers
 namespace {
-
 std::string extractString(std::string const& json, std::string const& key) {
     std::regex pattern("\"" + key + "\"\\s*:\\s*\"([^\"]*)\"");
     std::smatch match;
@@ -148,25 +444,20 @@ int extractInt(std::string const& json, std::string const& key, int default_val 
     }
     return default_val;
 }
+}  // namespace
 
-} // namespace
-
-// Load annotations from JSON file
 std::vector<Annotation> loadAnnotations(std::string const& path) {
     std::vector<Annotation> annotations;
-
     std::ifstream file(path);
     if (!file.is_open()) {
         std::cerr << "Error: Could not open annotations file: " << path << "\n";
         return annotations;
     }
 
-    // Read entire file
     std::stringstream buffer;
     buffer << file.rdbuf();
     std::string content = buffer.str();
 
-    // Find annotations array and parse each object
     std::regex obj_pattern("\\{[^{}]*\"id\"[^{}]*\\}");
     auto obj_begin = std::sregex_iterator(content.begin(), content.end(), obj_pattern);
     auto obj_end = std::sregex_iterator();
@@ -184,11 +475,9 @@ std::vector<Annotation> loadAnnotations(std::string const& path) {
             annotations.push_back(ann);
         }
     }
-
     return annotations;
 }
 
-// Pre-loaded simulation data for fast parameter iteration
 struct LoadedSimulation {
     std::string id;
     simulation_data::Reader reader;
@@ -197,9 +486,7 @@ struct LoadedSimulation {
     int peak_frame_truth = -1;
 
     bool load(Annotation const& ann) {
-        if (!reader.open(ann.data_path)) {
-            return false;
-        }
+        if (!reader.open(ann.data_path)) return false;
         id = ann.id;
         boom_frame_truth = ann.boom_frame;
         peak_frame_truth = ann.peak_frame;
@@ -209,632 +496,263 @@ struct LoadedSimulation {
     }
 };
 
-// Pre-computed metrics for a simulation (computed once, used many times)
-struct ComputedMetrics {
-    std::string sim_id;
-    double frame_duration = 0.0;
-    int boom_frame_truth = -1;
-    metrics::MetricsCollector collector;
-};
-
-// Phase 1: Compute all metrics for a simulation (expensive, done once per metric config)
-void computeMetrics(LoadedSimulation const& sim,
-                    std::unordered_map<std::string, ::MetricConfig> const& metric_configs,
-                    ComputedMetrics& out) {
-    auto const& header = sim.reader.header();
-    int frame_count = header.frame_count;
-
-    out.sim_id = sim.id;
-    out.frame_duration = sim.frame_duration;
-    out.boom_frame_truth = sim.boom_frame_truth;
-
-    // Create metrics collector with our per-metric parameters
-    out.collector.setAllMetricConfigs(metric_configs);
-    out.collector.registerStandardMetrics();
-
-    // Process all frames using zero-copy packed state access
-    for (int frame = 0; frame < frame_count; ++frame) {
-        auto const* packed = sim.reader.getFramePacked(frame);
-        if (!packed)
-            break;
-        out.collector.beginFrame(frame);
-        out.collector.updateFromPackedStates(packed, header.pendulum_count);
-        out.collector.endFrame();
-    }
-}
-
-// Phase 2: Evaluate boom detection on pre-computed metrics (cheap, done many times)
-metrics::BoomDetection evaluateBoomDetection(ComputedMetrics const& computed,
-                                             BoomDetectionParams const& boom_params) {
-    return metrics::findBoomFrame(computed.collector, computed.frame_duration, boom_params);
-}
-
 // ============================================================================
-// PHASE 1 CACHE - Save/load computed metrics to avoid recomputation
+// EVALUATION RESULT
 // ============================================================================
 
-// Cache file format version
-constexpr uint32_t CACHE_VERSION = 1;
-constexpr uint32_t CACHE_MAGIC = 0x4F50544D;  // "OPTM"
+struct ParameterSet {
+    ::MetricConfig metric_config;
+    BoomDetectionParams boom;
+    int effective_sectors = 0;
 
-// Save a single ComputedMetrics to binary file
-bool saveComputedMetrics(std::string const& path, ComputedMetrics const& cm) {
-    std::ofstream file(path, std::ios::binary);
-    if (!file.is_open()) return false;
-
-    // Write header
-    file.write(reinterpret_cast<char const*>(&CACHE_MAGIC), sizeof(CACHE_MAGIC));
-    file.write(reinterpret_cast<char const*>(&CACHE_VERSION), sizeof(CACHE_VERSION));
-
-    // Write metadata
-    uint32_t id_len = static_cast<uint32_t>(cm.sim_id.size());
-    file.write(reinterpret_cast<char const*>(&id_len), sizeof(id_len));
-    file.write(cm.sim_id.data(), id_len);
-    file.write(reinterpret_cast<char const*>(&cm.frame_duration), sizeof(cm.frame_duration));
-    file.write(reinterpret_cast<char const*>(&cm.boom_frame_truth), sizeof(cm.boom_frame_truth));
-
-    // Get all metric names and write count
-    auto metric_names = cm.collector.getMetricNames();
-    uint32_t num_metrics = static_cast<uint32_t>(metric_names.size());
-    file.write(reinterpret_cast<char const*>(&num_metrics), sizeof(num_metrics));
-
-    // Write each metric's values
-    for (auto const& name : metric_names) {
-        auto const* series = cm.collector.getMetric(name);
-        if (!series) continue;
-
-        uint32_t name_len = static_cast<uint32_t>(name.size());
-        file.write(reinterpret_cast<char const*>(&name_len), sizeof(name_len));
-        file.write(name.data(), name_len);
-
-        auto const& values = series->values();
-        uint32_t num_values = static_cast<uint32_t>(values.size());
-        file.write(reinterpret_cast<char const*>(&num_values), sizeof(num_values));
-        file.write(reinterpret_cast<char const*>(values.data()), num_values * sizeof(double));
-    }
-
-    return file.good();
-}
-
-// Load a single ComputedMetrics from binary file
-bool loadComputedMetrics(std::string const& path, ComputedMetrics& cm) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file.is_open()) return false;
-
-    // Read and verify header
-    uint32_t magic, version;
-    file.read(reinterpret_cast<char*>(&magic), sizeof(magic));
-    file.read(reinterpret_cast<char*>(&version), sizeof(version));
-    if (magic != CACHE_MAGIC || version != CACHE_VERSION) return false;
-
-    // Read metadata
-    uint32_t id_len;
-    file.read(reinterpret_cast<char*>(&id_len), sizeof(id_len));
-    cm.sim_id.resize(id_len);
-    file.read(cm.sim_id.data(), id_len);
-    file.read(reinterpret_cast<char*>(&cm.frame_duration), sizeof(cm.frame_duration));
-    file.read(reinterpret_cast<char*>(&cm.boom_frame_truth), sizeof(cm.boom_frame_truth));
-
-    // Register metrics to prepare collector
-    cm.collector.registerStandardMetrics();
-
-    // Read metrics
-    uint32_t num_metrics;
-    file.read(reinterpret_cast<char*>(&num_metrics), sizeof(num_metrics));
-
-    for (uint32_t i = 0; i < num_metrics; ++i) {
-        uint32_t name_len;
-        file.read(reinterpret_cast<char*>(&name_len), sizeof(name_len));
-        std::string name(name_len, '\0');
-        file.read(name.data(), name_len);
-
-        uint32_t num_values;
-        file.read(reinterpret_cast<char*>(&num_values), sizeof(num_values));
-        std::vector<double> values(num_values);
-        file.read(reinterpret_cast<char*>(values.data()), num_values * sizeof(double));
-
-        // Populate the collector with loaded values
-        auto* series = cm.collector.getMetricMutable(name);
-        if (series) {
-            for (double v : values) {
-                series->push(v);
-            }
-        }
-    }
-
-    return file.good();
-}
-
-// Save Phase 1 cache to a directory
-bool savePhase1Cache(std::string const& cache_dir,
-                     std::map<std::string, std::vector<ComputedMetrics>> const& computed_by_config) {
-    namespace fs = std::filesystem;
-
-    // Create cache directory
-    std::error_code ec;
-    fs::create_directories(cache_dir, ec);
-    if (ec) {
-        std::cerr << "Error creating cache directory: " << ec.message() << "\n";
-        return false;
-    }
-
-    // Write index file with config keys
-    std::ofstream index(cache_dir + "/index.txt");
-    if (!index.is_open()) {
-        std::cerr << "Error creating cache index file\n";
-        return false;
-    }
-
-    size_t saved = 0;
-    for (auto const& [config_key, computed_vec] : computed_by_config) {
-        // Sanitize config_key for filesystem (replace special chars)
-        std::string safe_key = config_key;
-        std::replace(safe_key.begin(), safe_key.end(), '/', '_');
-        std::replace(safe_key.begin(), safe_key.end(), '\\', '_');
-
-        index << safe_key << "\n";
-
-        // Create subdirectory for this config
-        std::string config_dir = cache_dir + "/" + safe_key;
-        fs::create_directories(config_dir, ec);
-
-        // Save each simulation's computed metrics
-        for (size_t i = 0; i < computed_vec.size(); ++i) {
-            std::string file_path = config_dir + "/" + std::to_string(i) + ".bin";
-            if (saveComputedMetrics(file_path, computed_vec[i])) {
-                saved++;
-            }
-        }
-    }
-
-    std::cout << "Saved " << saved << " computed metric sets to " << cache_dir << "\n";
-    return true;
-}
-
-// Load Phase 1 cache from a directory
-bool loadPhase1Cache(std::string const& cache_dir,
-                     std::map<std::string, std::vector<ComputedMetrics>>& computed_by_config,
-                     size_t expected_sims_per_config) {
-    namespace fs = std::filesystem;
-
-    // Read index file
-    std::ifstream index(cache_dir + "/index.txt");
-    if (!index.is_open()) {
-        std::cerr << "Cache index not found: " << cache_dir << "/index.txt\n";
-        return false;
-    }
-
-    std::vector<std::string> config_keys;
-    std::string line;
-    while (std::getline(index, line)) {
-        if (!line.empty()) {
-            config_keys.push_back(line);
-        }
-    }
-
-    if (config_keys.empty()) {
-        std::cerr << "Empty cache index\n";
-        return false;
-    }
-
-    size_t loaded = 0;
-    for (auto const& safe_key : config_keys) {
-        std::string config_dir = cache_dir + "/" + safe_key;
-        if (!fs::exists(config_dir)) continue;
-
-        std::vector<ComputedMetrics> computed_vec(expected_sims_per_config);
-
-        bool all_loaded = true;
-        for (size_t i = 0; i < expected_sims_per_config; ++i) {
-            std::string file_path = config_dir + "/" + std::to_string(i) + ".bin";
-            if (!loadComputedMetrics(file_path, computed_vec[i])) {
-                all_loaded = false;
+    std::string describeShort() const {
+        std::ostringstream oss;
+        std::string metric_short = boom.metric_name;
+        for (auto const& suffix : {"_causticness", "_concentration", "_coherence"}) {
+            auto pos = metric_short.find(suffix);
+            if (pos != std::string::npos) {
+                metric_short = metric_short.substr(0, pos);
                 break;
             }
-            loaded++;
         }
-
-        if (all_loaded) {
-            computed_by_config[safe_key] = std::move(computed_vec);
+        oss << metric_short << " ";
+        switch (boom.method) {
+        case BoomDetectionMethod::MaxCausticness:
+            oss << "max";
+            break;
+        case BoomDetectionMethod::FirstPeakPercent:
+            oss << "first@" << static_cast<int>(boom.peak_percent_threshold * 100) << "%"
+                << " prom=" << std::fixed << std::setprecision(2) << boom.min_peak_prominence;
+            break;
+        case BoomDetectionMethod::DerivativePeak:
+            oss << "deriv w=" << boom.smoothing_window;
+            break;
+        case BoomDetectionMethod::ThresholdCrossing:
+            oss << "cross@" << static_cast<int>(boom.crossing_threshold * 100) << "% x"
+                << boom.crossing_confirmation;
+            break;
+        case BoomDetectionMethod::SecondDerivativePeak:
+            oss << "accel w=" << boom.smoothing_window;
+            break;
         }
-    }
-
-    std::cout << "Loaded " << loaded << " computed metric sets from cache\n";
-    return !computed_by_config.empty();
-}
-
-// ============================================================================
-
-// Compute effective sector count for sector-based metrics
-int computeEffectiveSectors(int pendulum_count, SectorMetricParams const& params) {
-    return std::max(params.min_sectors,
-                    std::min(params.max_sectors, pendulum_count / params.target_per_sector));
-}
-
-// Compute effective grid size for spatial metrics
-int computeEffectiveGrid(int pendulum_count, GridMetricParams const& params) {
-    return std::max(
-        params.min_grid,
-        std::min(params.max_grid, static_cast<int>(std::sqrt(static_cast<double>(pendulum_count) /
-                                                             params.target_per_cell))));
-}
-
-// ============================================================================
-// PARAMETERIZED METRIC SYSTEM
-// Each metric has specific parameters that affect it. We test variations of
-// those parameters independently for each metric type.
-// ============================================================================
-
-// A parameterized metric: metric name + its specific parameter values (using global MetricConfig)
-struct ParameterizedMetric {
-    std::string metric_name;
-    ::MetricConfig config;  // Uses the global MetricConfig type
-
-    // Human-readable description showing only relevant params
-    std::string describe(int N = 0) const {
-        std::ostringstream oss;
-        std::string short_name = metric_name;
-        if (short_name.find("_causticness") != std::string::npos) {
-            short_name = short_name.substr(0, short_name.find("_causticness"));
-        } else if (short_name.find("_concentration") != std::string::npos) {
-            short_name = short_name.substr(0, short_name.find("_concentration")) + "_conc";
-        } else if (short_name.find("_coherence") != std::string::npos) {
-            short_name = short_name.substr(0, short_name.find("_coherence")) + "_coh";
-        } else if (short_name.find("_smoothness") != std::string::npos) {
-            short_name = short_name.substr(0, short_name.find("_smoothness")) + "_smooth";
-        }
-        oss << short_name;
-
-        // Show relevant params based on metric type using std::visit
-        std::visit([&](auto const& p) {
-            using T = std::decay_t<decltype(p)>;
-            if constexpr (std::is_same_v<T, SectorMetricParams>) {
-                int eff = N > 0 ? computeEffectiveSectors(N, p) : p.max_sectors;
-                oss << " sec=" << eff;
-            } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
-                SectorMetricParams sp{p.min_sectors, p.max_sectors, p.target_per_sector, {}};
-                int eff = N > 0 ? computeEffectiveSectors(N, sp) : p.max_sectors;
-                oss << " sec=" << eff << " cvn=" << std::fixed << std::setprecision(2)
-                    << p.cv_normalization;
-            } else if constexpr (std::is_same_v<T, GridMetricParams>) {
-                int eff = N > 0 ? computeEffectiveGrid(N, p) : p.max_grid;
-                oss << " grid=" << eff;
-            } else if constexpr (std::is_same_v<T, FoldMetricParams>) {
-                oss << " rad=" << std::fixed << std::setprecision(1) << p.max_radius
-                    << " cvn=" << std::setprecision(2) << p.cv_normalization;
-            } else if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
-                oss << " rad=" << std::fixed << std::setprecision(1) << p.max_radius
-                    << " spr=" << std::setprecision(2) << p.min_spread_threshold;
-            } else if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
-                oss << " rad=" << std::fixed << std::setprecision(1) << p.max_radius
-                    << " lrn=" << std::setprecision(1) << p.log_ratio_normalization;
-            } else if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
-                oss << " gini=" << std::fixed << std::setprecision(2) << p.gini_chaos_baseline
-                    << "/" << p.gini_baseline_divisor;
-            } else if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
-                oss << " log=" << std::fixed << std::setprecision(1) << p.log_inverse_baseline
-                    << "/" << p.log_inverse_divisor;
-            }
-        }, config.params);
+        oss << " off=" << std::fixed << std::setprecision(2) << boom.offset_seconds;
         return oss.str();
     }
 
-    // Unique key for deduplication (params that actually matter for this metric)
-    std::string key(int N) const {
+    std::string describeFull() const {
         std::ostringstream oss;
-        oss << metric_name;
-
-        std::visit([&](auto const& p) {
-            using T = std::decay_t<decltype(p)>;
-            if constexpr (std::is_same_v<T, SectorMetricParams>) {
-                oss << "_sec" << computeEffectiveSectors(N, p);
-            } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
-                SectorMetricParams sp{p.min_sectors, p.max_sectors, p.target_per_sector, {}};
-                oss << "_sec" << computeEffectiveSectors(N, sp) << "_cvn"
-                    << static_cast<int>(p.cv_normalization * 100);
-            } else if constexpr (std::is_same_v<T, GridMetricParams>) {
-                oss << "_grid" << computeEffectiveGrid(N, p);
-            } else if constexpr (std::is_same_v<T, FoldMetricParams>) {
-                oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_cvn"
-                    << static_cast<int>(p.cv_normalization * 100);
-            } else if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
-                oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_spr"
-                    << static_cast<int>(p.min_spread_threshold * 1000);
-            } else if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
-                oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_spr"
-                    << static_cast<int>(p.min_spread_threshold * 1000) << "_lrn"
-                    << static_cast<int>(p.log_ratio_normalization * 10);
-            } else if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
-                oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_spr"
-                    << static_cast<int>(p.min_spread_threshold * 1000) << "_gb"
-                    << static_cast<int>(p.gini_chaos_baseline * 100) << "_gd"
-                    << static_cast<int>(p.gini_baseline_divisor * 100);
-            } else if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
-                oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_spr"
-                    << static_cast<int>(p.min_spread_threshold * 1000) << "_lb"
-                    << static_cast<int>(p.log_inverse_baseline * 10) << "_ld"
-                    << static_cast<int>(p.log_inverse_divisor * 10);
-            }
-        }, config.params);
+        oss << describeShort();
+        if (effective_sectors > 0) {
+            oss << " [eff_sec=" << effective_sectors << "]";
+        }
         return oss.str();
     }
 };
 
-// Helper to create SectorMetricParams with effective sector count
-SectorMetricParams makeSectorParams(int eff_sec, int N) {
-    SectorMetricParams p;
-    p.max_sectors = eff_sec;
-    p.min_sectors = std::min(8, eff_sec);
-    p.target_per_sector = std::max(1, N / (eff_sec * 2));
-    return p;
-}
+struct EvaluationResult {
+    ParameterSet params;
+    double boom_mae = 0.0;
+    double boom_stddev = 0.0;
+    double boom_median = 0.0;
+    double boom_max = 0.0;
+    double peak_mae = 0.0;
+    double combined_score = 0.0;
+    int samples_evaluated = 0;
+    std::vector<int> per_sim_errors;
+};
 
-// Helper to create CVSectorMetricParams with effective sector count and cv_normalization
-CVSectorMetricParams makeCVSectorParams(int eff_sec, double cv_norm, int N) {
-    CVSectorMetricParams p;
-    p.max_sectors = eff_sec;
-    p.min_sectors = std::min(8, eff_sec);
-    p.target_per_sector = std::max(1, N / (eff_sec * 2));
-    p.cv_normalization = cv_norm;
-    return p;
-}
+// ============================================================================
+// BOOM DETECTION PARAMETER GENERATION
+// ============================================================================
 
-// Helper to create GridMetricParams with effective grid size
-GridMetricParams makeGridParams(int eff_grid, int N) {
-    GridMetricParams p;
-    p.max_grid = eff_grid;
-    p.min_grid = std::min(4, eff_grid);
-    p.target_per_cell = std::max(1, N / (eff_grid * eff_grid * 2));
-    return p;
-}
+struct BoomMethodGrid {
+    std::vector<double> offset_vals;
+    std::vector<double> peak_pct_vals;
+    std::vector<double> prominence_vals;
+    std::vector<int> smooth_vals;
+    std::vector<double> crossing_thresh_vals;
+    std::vector<int> crossing_confirm_vals;
 
-// Helper to create a ::MetricConfig with the appropriate variant type
-::MetricConfig makeMetricConfig(std::string const& name, MetricParamsVariant const& params) {
-    ::MetricConfig config;
-    config.name = name;
-    config.params = params;
-    return config;
-}
+    static BoomMethodGrid create(int steps) {
+        BoomMethodGrid g;
 
-// Generate unique key for a metric config (for deduplication and grouping)
-std::string metricConfigKey(std::string const& metric_name, ::MetricConfig const& config, int N) {
-    std::ostringstream oss;
-    oss << metric_name;
-
-    std::visit([&](auto const& p) {
-        using T = std::decay_t<decltype(p)>;
-        if constexpr (std::is_same_v<T, SectorMetricParams>) {
-            oss << "_sec" << computeEffectiveSectors(N, p);
-        } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
-            SectorMetricParams sp{p.min_sectors, p.max_sectors, p.target_per_sector, {}};
-            oss << "_sec" << computeEffectiveSectors(N, sp) << "_cvn"
-                << static_cast<int>(p.cv_normalization * 100);
-        } else if constexpr (std::is_same_v<T, GridMetricParams>) {
-            oss << "_grid" << computeEffectiveGrid(N, p);
-        } else if constexpr (std::is_same_v<T, FoldMetricParams>) {
-            oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_cvn"
-                << static_cast<int>(p.cv_normalization * 100);
-        } else if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
-            oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_spr"
-                << static_cast<int>(p.min_spread_threshold * 1000);
-        } else if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
-            oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_spr"
-                << static_cast<int>(p.min_spread_threshold * 1000) << "_lrn"
-                << static_cast<int>(p.log_ratio_normalization * 10);
-        } else if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
-            oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_spr"
-                << static_cast<int>(p.min_spread_threshold * 1000) << "_gb"
-                << static_cast<int>(p.gini_chaos_baseline * 100) << "_gd"
-                << static_cast<int>(p.gini_baseline_divisor * 100);
-        } else if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
-            oss << "_rad" << static_cast<int>(p.max_radius * 10) << "_spr"
-                << static_cast<int>(p.min_spread_threshold * 1000) << "_lb"
-                << static_cast<int>(p.log_inverse_baseline * 10) << "_ld"
-                << static_cast<int>(p.log_inverse_divisor * 10);
+        // Offset: always use full range with good granularity
+        for (double x = -0.5; x <= 0.5001; x += 1.0 / steps) {
+            g.offset_vals.push_back(x);
         }
-    }, config.params);
-    return oss.str();
-}
 
-// Generate all parameterized metrics for comprehensive optimization
-std::vector<ParameterizedMetric> generateParameterizedMetrics(int N) {
-    std::vector<ParameterizedMetric> result;
-
-    // Parameter value ranges for each type
-    std::vector<int> sector_values = {8, 16, 24, 32, 48, 64, 80, 96};
-    std::vector<int> grid_values = {4, 8, 12, 16, 24, 32};
-    std::vector<double> cv_norm_values = {0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5};
-    std::vector<double> max_radius_values = {1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5};
-    std::vector<double> min_spread_values = {0.02, 0.04, 0.06, 0.08, 0.1};
-    std::vector<double> log_ratio_norm_values = {1.0, 1.5, 2.0, 2.5};
-    std::vector<double> gini_baseline_values = {0.1, 0.20, 0.30, 0.40, 0.50};
-    std::vector<double> gini_divisor_values = {0.5, 0.60, 0.70, 0.80};
-    std::vector<double> log_inv_baseline_values = {0.5, 1.0, 1.5};
-    std::vector<double> log_inv_divisor_values = {1.5, 2.0, 2.5, 3.0};
-
-    // ================================================================
-    // SECTOR-BASED METRICS (vary effective_sectors only)
-    // These metrics use SectorMetricParams
-    // ================================================================
-    std::vector<std::string> sector_metrics = {
-        "angular_causticness", "tip_causticness", "organization_causticness",
-        "r1_concentration", "r2_concentration", "joint_concentration"
-    };
-    for (int eff_sec : sector_values) {
-        if (eff_sec > N / 2)
-            continue;
-        SectorMetricParams params = makeSectorParams(eff_sec, N);
-        for (auto const& metric_name : sector_metrics) {
-            result.push_back({metric_name, makeMetricConfig(metric_name, params)});
+        // Peak percent threshold
+        double pct_step = 0.6 / std::max(1, steps - 1);
+        for (double x = 0.3; x <= 0.9001; x += pct_step) {
+            g.peak_pct_vals.push_back(x);
         }
+
+        // Prominence
+        double prom_step = 0.4 / std::max(1, steps - 1);
+        for (double x = 0.01; x <= 0.4001; x += prom_step) {
+            g.prominence_vals.push_back(x);
+        }
+
+        // Smoothing window (integer)
+        std::set<int> smooth_set;
+        for (int i = 0; i < steps; ++i) {
+            double t = static_cast<double>(i) / std::max(1, steps - 1);
+            int v = static_cast<int>(std::round(1 + t * 49));  // 1-50
+            smooth_set.insert(v);
+        }
+        g.smooth_vals = std::vector<int>(smooth_set.begin(), smooth_set.end());
+
+        // Crossing threshold
+        double thresh_step = 0.7 / std::max(1, steps - 1);
+        for (double x = 0.1; x <= 0.8001; x += thresh_step) {
+            g.crossing_thresh_vals.push_back(x);
+        }
+
+        // Crossing confirmation (integer)
+        std::set<int> confirm_set;
+        for (int i = 0; i < std::min(steps, 7); ++i) {
+            double t = static_cast<double>(i) / std::max(1, std::min(steps, 7) - 1);
+            int v = static_cast<int>(std::round(1 + t * 9));  // 1-10
+            confirm_set.insert(v);
+        }
+        g.crossing_confirm_vals = std::vector<int>(confirm_set.begin(), confirm_set.end());
+
+        return g;
     }
 
-    // ================================================================
-    // VARIANCE (no parameterization needed - use default SectorMetricParams)
-    // ================================================================
-    result.push_back({"variance", makeMetricConfig("variance", SectorMetricParams{})});
+    size_t totalMethods() const {
+        return offset_vals.size() +
+               (peak_pct_vals.size() * offset_vals.size() * prominence_vals.size()) +
+               (smooth_vals.size() * offset_vals.size()) +
+               (crossing_thresh_vals.size() * crossing_confirm_vals.size() * offset_vals.size()) +
+               (smooth_vals.size() * offset_vals.size());
+    }
+};
 
-    // ================================================================
-    // CV_CAUSTICNESS (vary effective_sectors × cv_normalization)
-    // Uses CVSectorMetricParams
-    // ================================================================
-    for (int eff_sec : sector_values) {
-        if (eff_sec > N / 2)
-            continue;
-        for (double cv_norm : cv_norm_values) {
-            CVSectorMetricParams params = makeCVSectorParams(eff_sec, cv_norm, N);
-            result.push_back({"cv_causticness", makeMetricConfig("cv_causticness", params)});
+// ============================================================================
+// STREAMING EVALUATION (memory-efficient)
+// ============================================================================
+
+// Compute metrics for a single parameterized metric across all simulations
+struct ComputedMetricsForConfig {
+    std::string metric_name;
+    std::vector<double> frame_durations;
+    std::vector<int> boom_frame_truths;
+    std::vector<metrics::MetricsCollector> collectors;
+};
+
+void computeMetricsForConfig(
+    ParameterizedMetric const& pm,
+    std::vector<LoadedSimulation> const& simulations,
+    ComputedMetricsForConfig& out) {
+
+    out.metric_name = pm.metric_name;
+    out.frame_durations.resize(simulations.size());
+    out.boom_frame_truths.resize(simulations.size());
+    out.collectors.resize(simulations.size());
+
+    std::unordered_map<std::string, ::MetricConfig> config_map;
+    config_map[pm.metric_name] = pm.config;
+
+    for (size_t i = 0; i < simulations.size(); ++i) {
+        auto const& sim = simulations[i];
+        auto const& header = sim.reader.header();
+
+        out.frame_durations[i] = sim.frame_duration;
+        out.boom_frame_truths[i] = sim.boom_frame_truth;
+
+        out.collectors[i].setAllMetricConfigs(config_map);
+        out.collectors[i].registerStandardMetrics();
+
+        for (int frame = 0; frame < header.frame_count; ++frame) {
+            auto const* packed = sim.reader.getFramePacked(frame);
+            if (!packed) break;
+            out.collectors[i].beginFrame(frame);
+            out.collectors[i].updateFromPackedStates(packed, header.pendulum_count);
+            out.collectors[i].endFrame();
         }
     }
+}
 
-    // ================================================================
-    // SPATIAL_CONCENTRATION (vary effective_grid)
-    // Uses GridMetricParams
-    // ================================================================
-    for (int eff_grid : grid_values) {
-        GridMetricParams params = makeGridParams(eff_grid, N);
-        result.push_back({"spatial_concentration", makeMetricConfig("spatial_concentration", params)});
-    }
+// Evaluate a single boom method configuration
+EvaluationResult evaluateBoomMethod(
+    ParameterizedMetric const& pm,
+    ComputedMetricsForConfig const& computed,
+    BoomDetectionParams const& boom_params,
+    int N) {
 
-    // ================================================================
-    // FOLD_CAUSTICNESS (vary max_radius × cv_normalization)
-    // Uses FoldMetricParams
-    // ================================================================
-    for (double max_rad : max_radius_values) {
-        for (double cv_norm : cv_norm_values) {
-            FoldMetricParams params;
-            params.max_radius = max_rad;
-            params.cv_normalization = cv_norm;
-            result.push_back({"fold_causticness", makeMetricConfig("fold_causticness", params)});
+    std::vector<int> errors;
+    errors.reserve(computed.collectors.size());
+
+    for (size_t i = 0; i < computed.collectors.size(); ++i) {
+        auto boom = metrics::findBoomFrame(
+            computed.collectors[i], computed.frame_durations[i], boom_params);
+
+        if (computed.boom_frame_truths[i] >= 0 && boom.frame >= 0) {
+            int error = std::abs(boom.frame - computed.boom_frame_truths[i]);
+            errors.push_back(error);
         }
     }
 
-    // ================================================================
-    // TRAJECTORY_SMOOTHNESS (vary max_radius × min_spread_threshold)
-    // Uses TrajectoryMetricParams
-    // ================================================================
-    for (double max_rad : max_radius_values) {
-        for (double min_spr : min_spread_values) {
-            TrajectoryMetricParams params;
-            params.max_radius = max_rad;
-            params.min_spread_threshold = min_spr;
-            result.push_back({"trajectory_smoothness", makeMetricConfig("trajectory_smoothness", params)});
-        }
-    }
+    EvaluationResult result;
+    result.params.metric_config = pm.config;
+    result.params.boom = boom_params;
 
-    // ================================================================
-    // CURVATURE (vary max_radius × min_spread × log_ratio_normalization)
-    // Uses CurvatureMetricParams
-    // ================================================================
-    for (double max_rad : max_radius_values) {
-        for (double min_spr : min_spread_values) {
-            for (double log_ratio : log_ratio_norm_values) {
-                CurvatureMetricParams params;
-                params.max_radius = max_rad;
-                params.min_spread_threshold = min_spr;
-                params.log_ratio_normalization = log_ratio;
-                result.push_back({"curvature", makeMetricConfig("curvature", params)});
+    // Compute effective sectors if applicable
+    result.params.effective_sectors = std::visit(
+        [&](auto const& p) -> int {
+            using T = std::decay_t<decltype(p)>;
+            if constexpr (std::is_same_v<T, SectorMetricParams>) {
+                return p.max_sectors;
+            } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
+                return p.max_sectors;
+            } else {
+                return 0;
             }
+        },
+        pm.config.params);
+
+    result.samples_evaluated = static_cast<int>(errors.size());
+    result.per_sim_errors = errors;
+
+    if (!errors.empty()) {
+        double sum = 0.0;
+        for (int e : errors) sum += e;
+        result.boom_mae = sum / errors.size();
+
+        double sq_sum = 0.0;
+        for (int e : errors) {
+            double diff = e - result.boom_mae;
+            sq_sum += diff * diff;
         }
+        result.boom_stddev = std::sqrt(sq_sum / errors.size());
+
+        std::vector<int> sorted_errors = errors;
+        std::sort(sorted_errors.begin(), sorted_errors.end());
+        size_t mid = sorted_errors.size() / 2;
+        if (sorted_errors.size() % 2 == 0) {
+            result.boom_median = (sorted_errors[mid - 1] + sorted_errors[mid]) / 2.0;
+        } else {
+            result.boom_median = sorted_errors[mid];
+        }
+        result.boom_max = *std::max_element(errors.begin(), errors.end());
+    } else {
+        result.boom_mae = 1e9;
+        result.boom_median = 1e9;
+        result.boom_max = 1e9;
     }
 
-    // ================================================================
-    // TRUE_FOLDS (vary max_radius × min_spread × gini params)
-    // Uses TrueFoldsMetricParams
-    // ================================================================
-    for (double max_rad : max_radius_values) {
-        for (double min_spr : min_spread_values) {
-            for (double gini_base : gini_baseline_values) {
-                for (double gini_div : gini_divisor_values) {
-                    TrueFoldsMetricParams params;
-                    params.max_radius = max_rad;
-                    params.min_spread_threshold = min_spr;
-                    params.gini_chaos_baseline = gini_base;
-                    params.gini_baseline_divisor = gini_div;
-                    result.push_back({"true_folds", makeMetricConfig("true_folds", params)});
-                }
-            }
-        }
-    }
-
-    // ================================================================
-    // LOCAL_COHERENCE (vary max_radius × min_spread × log_inverse params)
-    // Uses LocalCoherenceMetricParams
-    // ================================================================
-    for (double max_rad : max_radius_values) {
-        for (double min_spr : min_spread_values) {
-            for (double log_base : log_inv_baseline_values) {
-                for (double log_div : log_inv_divisor_values) {
-                    LocalCoherenceMetricParams params;
-                    params.max_radius = max_rad;
-                    params.min_spread_threshold = min_spr;
-                    params.log_inverse_baseline = log_base;
-                    params.log_inverse_divisor = log_div;
-                    result.push_back({"local_coherence", makeMetricConfig("local_coherence", params)});
-                }
-            }
-        }
-    }
+    result.peak_mae = 1e9;
+    result.combined_score = result.boom_mae;
 
     return result;
 }
 
-// Deduplicate parameterized metrics by their key
-std::vector<ParameterizedMetric>
-deduplicateParameterizedMetrics(std::vector<ParameterizedMetric> const& metrics, int N) {
-    std::map<std::string, ParameterizedMetric> unique;
-    for (auto const& pm : metrics) {
-        std::string k = pm.key(N);
-        if (unique.find(k) == unique.end()) {
-            unique[k] = pm;
-        }
-    }
-    std::vector<ParameterizedMetric> result;
-    for (auto const& [k, pm] : unique) {
-        result.push_back(pm);
-    }
-    return result;
-}
+// ============================================================================
+// OUTPUT HELPERS
+// ============================================================================
 
-// Generate unique key for a metric config map (for Phase 1 grouping)
-std::string metricConfigMapKey(std::unordered_map<std::string, ::MetricConfig> const& configs, int N) {
-    std::ostringstream oss;
-    // Sort keys for deterministic ordering
-    std::vector<std::string> keys;
-    for (auto const& [name, config] : configs) {
-        keys.push_back(name);
-    }
-    std::sort(keys.begin(), keys.end());
-
-    for (auto const& name : keys) {
-        auto const& config = configs.at(name);
-        oss << metricConfigKey(name, config, N) << ";";
-    }
-    return oss.str();
-}
-
-// Extract unique metric config maps from parameterized metrics (for Phase 1 computation grouping)
-// Returns a map from unique key -> metric config map
-std::map<std::string, std::unordered_map<std::string, ::MetricConfig>>
-extractUniqueMetricConfigMaps(std::vector<ParameterizedMetric> const& metrics, int N) {
-    std::map<std::string, std::unordered_map<std::string, ::MetricConfig>> result;
-
-    for (auto const& pm : metrics) {
-        // Create a metric config map with just this metric's config
-        std::unordered_map<std::string, ::MetricConfig> config_map;
-        config_map[pm.metric_name] = pm.config;
-
-        std::string key = metricConfigKey(pm.metric_name, pm.config, N);
-        if (result.find(key) == result.end()) {
-            result[key] = config_map;
-        }
-    }
-    return result;
-}
-
-// Helper to write metric params to file
-void writeMetricParams(std::ofstream& file, std::string const& /*metric_name*/,
-                       MetricParamsVariant const& params) {
+void writeMetricParams(std::ofstream& file, MetricParamsVariant const& params) {
     std::visit([&](auto const& p) {
         using T = std::decay_t<decltype(p)>;
         if constexpr (std::is_same_v<T, SectorMetricParams>) {
@@ -874,7 +792,6 @@ void writeMetricParams(std::ofstream& file, std::string const& /*metric_name*/,
     }, params);
 }
 
-// Helper to write boom params to file
 void writeBoomParams(std::ofstream& file, BoomDetectionParams const& boom) {
     switch (boom.method) {
     case BoomDetectionMethod::MaxCausticness:
@@ -901,9 +818,7 @@ void writeBoomParams(std::ofstream& file, BoomDetectionParams const& boom) {
     file << "crossing_confirmation = " << boom.crossing_confirmation << "\n";
 }
 
-// Save best parameters for ALL metrics to TOML file
-void saveAllBestParams(std::string const& path,
-                       std::vector<EvaluationResult> const& results,
+void saveAllBestParams(std::string const& path, std::vector<EvaluationResult> const& results,
                        EvaluationResult const& global_best) {
     std::ofstream file(path);
     if (!file.is_open()) {
@@ -928,52 +843,42 @@ void saveAllBestParams(std::string const& path,
     file << "# This file contains best parameters for ALL metrics.\n";
     file << "# The [boom_detection] section at the end specifies which metric to use.\n\n";
 
-    // Sort metrics by MAE for consistent output
     std::vector<std::pair<std::string, EvaluationResult const*>> sorted_metrics(
         best_per_metric.begin(), best_per_metric.end());
     std::sort(sorted_metrics.begin(), sorted_metrics.end(),
               [](auto const& a, auto const& b) { return a.second->boom_mae < b.second->boom_mae; });
 
-    // Write each metric's best configuration
     for (auto const& [metric_name, best] : sorted_metrics) {
         file << "# " << metric_name << ": MAE=" << std::fixed << std::setprecision(2)
              << best->boom_mae << " frames\n";
         file << "[metrics." << metric_name << "]\n";
-        writeMetricParams(file, metric_name, best->params.metric_config.params);
+        writeMetricParams(file, best->params.metric_config.params);
         file << "\n[metrics." << metric_name << ".boom]\n";
         writeBoomParams(file, best->params.boom);
         file << "\n";
     }
 
-    // Output global boom detection settings pointing to best metric
     file << "[boom_detection]\n";
     file << "active_metric = \"" << global_best.params.boom.metric_name << "\"\n";
 
     std::cout << "Best parameters for " << best_per_metric.size() << " metrics saved to: " << path << "\n";
 }
 
+// ============================================================================
+// MAIN
+// ============================================================================
+
 void printUsage(char const* prog) {
-    std::cerr << "Usage: " << prog << " annotations.json [options] [simulation_data.bin ...]\n\n"
-              << "Performs grid search to find optimal metric parameters.\n\n"
-              << "Options:\n"
-              << "  --save-cache <dir>   Save Phase 1 computed metrics to cache directory\n"
-              << "  --load-cache <dir>   Load Phase 1 metrics from cache (skip computation)\n"
-              << "  --output <file>      Output file for best parameters (default: best_params.toml)\n"
-              << "  --help               Show this help message\n\n"
-              << "If simulation data files are provided on command line, they override\n"
-              << "the paths in annotations.json.\n\n"
-              << "Annotation JSON format:\n"
-              << "{\n"
-              << "  \"version\": 1,\n"
-              << "  \"annotations\": [\n"
-              << "    {\n"
-              << "      \"id\": \"run_id\",\n"
-              << "      \"data_path\": \"path/to/simulation_data.bin\",\n"
-              << "      \"boom_frame\": 180,\n"
-              << "      \"peak_frame\": 245\n"
-              << "    }\n"
-              << "  ]\n"
-              << "}\n";
+    std::cerr
+        << "Usage: " << prog << " annotations.json [options] [simulation_data.bin ...]\n\n"
+        << "Performs grid search to find optimal metric parameters.\n\n"
+        << "Options:\n"
+        << "  --grid-steps <N>   Grid resolution per dimension (default: 8)\n"
+        << "                     Use 3-4 for quick tests, 12-16 for thorough search\n"
+        << "  --output <file>    Output file for best parameters (default: best_params.toml)\n"
+        << "  --help             Show this help message\n\n"
+        << "If simulation data files are provided on command line, they override\n"
+        << "the paths in annotations.json.\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -984,9 +889,8 @@ int main(int argc, char* argv[]) {
 
     // Parse command line options
     std::string annotations_path;
-    std::string save_cache_dir;
-    std::string load_cache_dir;
     std::string output_file = "best_params.toml";
+    int grid_steps = 8;  // Default resolution
     std::vector<std::string> data_paths;
 
     for (int i = 1; i < argc; ++i) {
@@ -994,10 +898,10 @@ int main(int argc, char* argv[]) {
         if (arg == "--help" || arg == "-h") {
             printUsage(argv[0]);
             return 0;
-        } else if (arg == "--save-cache" && i + 1 < argc) {
-            save_cache_dir = argv[++i];
-        } else if (arg == "--load-cache" && i + 1 < argc) {
-            load_cache_dir = argv[++i];
+        } else if (arg == "--grid-steps" && i + 1 < argc) {
+            grid_steps = std::stoi(argv[++i]);
+            if (grid_steps < 1) grid_steps = 1;
+            if (grid_steps > 64) grid_steps = 64;
         } else if (arg == "--output" && i + 1 < argc) {
             output_file = argv[++i];
         } else if (arg[0] == '-') {
@@ -1023,65 +927,41 @@ int main(int argc, char* argv[]) {
         std::cerr << "No valid annotations found.\n";
         return 1;
     }
-
     std::cout << "Loaded " << annotations.size() << " annotations\n";
 
-    // Override paths if provided on command line
+    // Override paths if provided
     for (size_t i = 0; i < data_paths.size() && i < annotations.size(); ++i) {
         annotations[i].data_path = data_paths[i];
     }
 
-    // Validate all data files exist
-    std::vector<Annotation> valid_annotations;
-    for (auto const& ann : annotations) {
-        if (std::filesystem::exists(ann.data_path)) {
-            if (ann.boom_frame >= 0 || ann.peak_frame >= 0) {
-                valid_annotations.push_back(ann);
-            } else {
-                std::cerr << "Skipping " << ann.id << ": no ground truth frames\n";
-            }
-        } else {
-            std::cerr << "Skipping " << ann.id << ": file not found: " << ann.data_path << "\n";
-        }
-    }
-
-    if (valid_annotations.empty()) {
-        std::cerr << "No valid annotations with existing data files.\n";
-        return 1;
-    }
-
-    std::cout << "Loading " << valid_annotations.size() << " simulations into memory...\n";
-
-    // Pre-load all simulation data (load once, evaluate many times)
-    auto load_start = std::chrono::steady_clock::now();
+    // Validate and load simulations
     std::vector<LoadedSimulation> simulations;
-    simulations.reserve(valid_annotations.size());
-
     size_t total_frames = 0;
     size_t total_pendulums = 0;
-    for (auto const& ann : valid_annotations) {
-        auto t0 = std::chrono::steady_clock::now();
+
+    std::cout << "Loading simulations...\n";
+    for (auto const& ann : annotations) {
+        if (!std::filesystem::exists(ann.data_path)) {
+            std::cerr << "  Skipping " << ann.id << ": file not found: " << ann.data_path << "\n";
+            continue;
+        }
+        if (ann.boom_frame < 0 && ann.peak_frame < 0) {
+            std::cerr << "  Skipping " << ann.id << ": no ground truth frames\n";
+            continue;
+        }
+
         LoadedSimulation sim;
         if (sim.load(ann)) {
-            auto t1 = std::chrono::steady_clock::now();
-            double load_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
             auto const& h = sim.reader.header();
             total_frames += h.frame_count;
-            total_pendulums = h.pendulum_count; // Same for all
-            std::cout << "  " << ann.id << ": " << h.frame_count << " frames, " << h.pendulum_count
-                      << " pendulums, boom@" << ann.boom_frame << " (" << std::fixed
-                      << std::setprecision(0) << load_ms << "ms)\n";
+            total_pendulums = h.pendulum_count;
+            std::cout << "  " << ann.id << ": " << h.frame_count << " frames, "
+                      << h.pendulum_count << " pendulums, boom@" << ann.boom_frame << "\n";
             simulations.push_back(std::move(sim));
         } else {
             std::cerr << "  FAILED: " << ann.data_path << "\n";
         }
     }
-
-    auto load_end = std::chrono::steady_clock::now();
-    double load_time = std::chrono::duration<double>(load_end - load_start).count();
-    std::cout << "Loaded " << simulations.size() << " simulations in " << std::fixed
-              << std::setprecision(2) << load_time << "s"
-              << " (" << total_frames << " total frames, " << total_pendulums << " pendulums)\n\n";
 
     if (simulations.empty()) {
         std::cerr << "No simulations loaded successfully.\n";
@@ -1090,632 +970,260 @@ int main(int argc, char* argv[]) {
 
     int N = static_cast<int>(total_pendulums);
 
-    // ============================================
-    // GENERATE PARAMETERIZED METRICS
-    // Each metric has its own set of relevant parameters.
-    // We generate all variations for each metric type.
-    // ============================================
-    auto all_param_metrics = generateParameterizedMetrics(N);
-    auto param_metrics = deduplicateParameterizedMetrics(all_param_metrics, N);
+    // Build metric schemas and generate configurations
+    auto schemas = buildMetricSchemas();
+    auto param_metrics = generateParameterizedMetrics(schemas, grid_steps, N);
 
-    std::cout << "Generated " << all_param_metrics.size() << " parameterized metrics ("
-              << param_metrics.size() << " unique after dedup)\n";
+    std::cout << "\n=== Grid Search Configuration ===\n";
+    std::cout << "Grid steps: " << grid_steps << " per dimension\n";
+    std::cout << "Simulations: " << simulations.size() << " (" << total_frames << " total frames)\n";
+    std::cout << "Pendulums: " << N << "\n\n";
 
     // Count by metric type
-    std::map<std::string, int> metric_type_counts;
+    std::map<std::string, int> metric_counts;
     for (auto const& pm : param_metrics) {
-        metric_type_counts[pm.metric_name]++;
+        metric_counts[pm.metric_name]++;
     }
-    std::cout << "By metric type:\n";
-    for (auto const& [name, count] : metric_type_counts) {
-        std::cout << "  " << name << ": " << count << " variations\n";
-    }
-    std::cout << "\n";
-
-    // Extract unique metric config maps for Phase 1 computation
-    auto unique_config_maps = extractUniqueMetricConfigMaps(param_metrics, N);
-    std::cout << "Unique metric configurations: " << unique_config_maps.size() << "\n\n";
-
-    // Generate boom method configurations (used in Phase 2)
-    std::vector<double> peak_pct_vals;
-    for (double x = 0.3; x <= 0.90; x += 0.05) {
-        peak_pct_vals.push_back(x);
-    }
-    std::vector<double> prominence_vals;
-    for (double x = 0.01; x <= 0.4; x += 0.02) {
-        prominence_vals.push_back(x);
+    std::cout << "Metric configurations (" << param_metrics.size() << " total):\n";
+    for (auto const& [name, count] : metric_counts) {
+        std::cout << "  " << name << ": " << count << "\n";
     }
 
-    std::vector<double> offset_vals;
-    for (double x = -0.5; x <= 0.5; x += 0.025) {
-        offset_vals.push_back(x);
-    }
-    std::vector<int> smooth_vals = {1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
-                                    16, 17, 18, 19, 20, 22, 24, 26, 28, 30, 35, 40, 45, 50};
-    // ThresholdCrossing parameters
-    std::vector<double> crossing_thresh_vals = {0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
-                                                 0.55, 0.6, 0.65, 0.7, 0.75, 0.8};
-    std::vector<int> crossing_confirm_vals = {1, 2, 3, 4, 5, 7, 10};
+    // Generate boom method grid
+    auto boom_grid = BoomMethodGrid::create(grid_steps);
+    size_t total_evals = param_metrics.size() * boom_grid.totalMethods();
+
+    std::cout << "\nBoom detection methods: " << boom_grid.totalMethods() << "\n";
+    std::cout << "Total evaluations: " << total_evals << "\n\n";
 
     unsigned int num_threads = std::thread::hardware_concurrency();
-    if (num_threads == 0) {
-        num_threads = 4;
-    }
-
-    // Boom method counts:
-    // MaxCausticness: offset_vals.size()
-    // FirstPeakPercent: peak_pct_vals.size() * offset_vals.size() * prominence_vals.size()
-    // DerivativePeak: smooth_vals.size() * offset_vals.size()
-    // ThresholdCrossing: crossing_thresh_vals.size() * crossing_confirm_vals.size() * offset_vals.size()
-    // SecondDerivativePeak: smooth_vals.size() * offset_vals.size()
-    size_t num_boom_methods = offset_vals.size() +
-                              (peak_pct_vals.size() * offset_vals.size() * prominence_vals.size()) +
-                              (smooth_vals.size() * offset_vals.size()) +
-                              (crossing_thresh_vals.size() * crossing_confirm_vals.size() * offset_vals.size()) +
-                              (smooth_vals.size() * offset_vals.size());
-    size_t total_phase2_evals = param_metrics.size() * num_boom_methods;
-
-    std::cout << "=== Parameterized Metrics Optimization ===\n";
-    std::cout << "Phase 1: " << unique_config_maps.size() << " unique metric configs × "
-              << simulations.size() << " simulations (expensive)\n";
-    std::cout << "Phase 2: " << param_metrics.size() << " parameterized metrics × "
-              << num_boom_methods << " boom methods = " << total_phase2_evals << " evaluations\n";
+    if (num_threads == 0) num_threads = 4;
     std::cout << "Threads: " << num_threads << "\n\n";
 
+    // ============================================
+    // STREAMING EVALUATION
+    // Process one metric config at a time to save memory
+    // ============================================
+
     auto start_time = std::chrono::steady_clock::now();
-    std::mutex print_mutex;  // Shared mutex for progress output
-
-    // ============================================
-    // PHASE 1: Compute metrics for each unique metric config
-    // ============================================
-    size_t total_phase1_work = unique_config_maps.size() * simulations.size();
-
-    // Create index from config key to computed metrics
-    // computed_by_config[config_key][sim_idx] = ComputedMetrics
-    std::map<std::string, std::vector<ComputedMetrics>> computed_by_config;
-
-    bool cache_loaded = false;
-    if (!load_cache_dir.empty()) {
-        std::cout << "Phase 1: Loading metrics from cache: " << load_cache_dir << "\n";
-        cache_loaded = loadPhase1Cache(load_cache_dir, computed_by_config, simulations.size());
-        if (cache_loaded) {
-            std::cout << "Phase 1: Loaded " << computed_by_config.size() << " configs from cache\n\n";
-        } else {
-            std::cerr << "Warning: Failed to load cache, computing from scratch\n";
-        }
-    }
-
-    auto phase1_done = std::chrono::steady_clock::now();
-    double phase1_total = 0;
-
-    if (!cache_loaded) {
-        std::cout << "Phase 1: Computing metrics (" << total_phase1_work << " work items)...\n";
-
-        // Initialize storage
-        for (auto const& [key, config_map] : unique_config_maps) {
-            computed_by_config[key].resize(simulations.size());
-        }
-
-        // Flatten work items: (config_key, sim_idx)
-        std::vector<std::pair<std::string, size_t>> work_items;
-        for (auto const& [key, config_map] : unique_config_maps) {
-            for (size_t sim = 0; sim < simulations.size(); ++sim) {
-                work_items.emplace_back(key, sim);
-            }
-        }
-
-        std::atomic<size_t> work_idx{0};
-        std::atomic<size_t> completed{0};
-        std::atomic<bool> done{false};
-
-        // Progress thread
-        std::thread progress_thread([&]() {
-            while (!done.load()) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                size_t c = completed.load();
-                auto now = std::chrono::steady_clock::now();
-                double elapsed = std::chrono::duration<double>(now - start_time).count();
-                double rate = c > 0 ? c / elapsed : 0;
-                double eta = rate > 0 ? (total_phase1_work - c) / rate : 0;
-
-                std::lock_guard<std::mutex> lock(print_mutex);
-                std::cout << "\r  Progress: " << c << "/" << total_phase1_work << " (" << std::fixed
-                          << std::setprecision(1) << (100.0 * c / total_phase1_work) << "%)"
-                          << " | " << std::setprecision(1) << elapsed << "s"
-                          << " | " << std::setprecision(0) << rate << " items/s"
-                          << " | ETA: " << eta << "s     " << std::flush;
-            }
-        });
-
-        // Worker threads
-        std::vector<std::thread> workers;
-        std::mutex computed_mutex;
-        for (unsigned int t = 0; t < num_threads; ++t) {
-            workers.emplace_back([&]() {
-                while (true) {
-                    size_t idx = work_idx.fetch_add(1);
-                    if (idx >= work_items.size()) {
-                        break;
-                    }
-
-                    auto const& [key, sim] = work_items[idx];
-                    auto const& config_map = unique_config_maps.at(key);
-
-                    ComputedMetrics cm;
-                    computeMetrics(simulations[sim], config_map, cm);
-
-                    {
-                        std::lock_guard<std::mutex> lock(computed_mutex);
-                        computed_by_config[key][sim] = std::move(cm);
-                    }
-
-                    completed.fetch_add(1);
-                }
-            });
-        }
-
-        for (auto& w : workers) {
-            w.join();
-        }
-
-        done.store(true);
-        progress_thread.join();
-
-        phase1_done = std::chrono::steady_clock::now();
-        phase1_total = std::chrono::duration<double>(phase1_done - start_time).count();
-        std::cout << "\rPhase 1 complete: " << total_phase1_work << " items in " << std::fixed
-                  << std::setprecision(2) << phase1_total << "s"
-                  << " (" << std::setprecision(0) << (total_phase1_work / phase1_total)
-                  << " items/s)                    \n\n";
-
-        // Save cache if requested
-        if (!save_cache_dir.empty()) {
-            std::cout << "Saving Phase 1 cache to: " << save_cache_dir << "\n";
-            if (savePhase1Cache(save_cache_dir, computed_by_config)) {
-                std::cout << "Cache saved successfully\n\n";
-            } else {
-                std::cerr << "Warning: Failed to save cache\n\n";
-            }
-        }
-    }
-
-    // ============================================
-    // PHASE 2: Evaluate boom detection for each ParameterizedMetric
-    // ============================================
-    std::cout << "Phase 2: Evaluating " << total_phase2_evals
-              << " (parameterized metric × boom method) combinations...\n";
-
     std::vector<EvaluationResult> results;
-    results.reserve(total_phase2_evals);
     std::mutex results_mutex;
+    std::mutex print_mutex;
 
-    // For each parameterized metric
-    std::atomic<size_t> pm_idx{0};
-    std::atomic<size_t> pm_completed{0};
-    std::atomic<bool> phase2_done{false};
+    std::atomic<size_t> metrics_completed{0};
+    std::atomic<bool> done{false};
 
-    // Progress thread for phase 2
-    std::thread phase2_progress([&]() {
-        while (!phase2_done.load()) {
+    // Progress thread
+    std::thread progress_thread([&]() {
+        while (!done.load()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
-            size_t c = pm_completed.load();
+            size_t c = metrics_completed.load();
+            auto now = std::chrono::steady_clock::now();
+            double elapsed = std::chrono::duration<double>(now - start_time).count();
+            double rate = c > 0 ? c / elapsed : 0;
+            double eta = rate > 0 ? (param_metrics.size() - c) / rate : 0;
+
             std::lock_guard<std::mutex> lock(print_mutex);
-            std::cout << "\r  Progress: " << c << "/" << param_metrics.size()
-                      << " parameterized metrics evaluated     " << std::flush;
+            std::cout << "\rProgress: " << c << "/" << param_metrics.size()
+                      << " metrics (" << std::fixed << std::setprecision(1)
+                      << (100.0 * c / param_metrics.size()) << "%)"
+                      << " | " << std::setprecision(1) << elapsed << "s"
+                      << " | ETA: " << std::setprecision(0) << eta << "s     " << std::flush;
         }
     });
 
-    std::vector<std::thread> phase2_workers;
-    for (unsigned int t = 0; t < num_threads; ++t) {
-        phase2_workers.emplace_back([&]() {
-            while (true) {
-                size_t idx = pm_idx.fetch_add(1);
-                if (idx >= param_metrics.size()) {
-                    break;
-                }
+    // Worker function for a single metric config
+    auto processMetricConfig = [&](size_t idx) {
+        auto const& pm = param_metrics[idx];
 
-                auto const& pm = param_metrics[idx];
-                std::string config_key = metricConfigKey(pm.metric_name, pm.config, N);
-                auto const& computed_for_config = computed_by_config.at(config_key);
+        // Phase 1: Compute metrics for this config
+        ComputedMetricsForConfig computed;
+        computeMetricsForConfig(pm, simulations, computed);
 
-                // Evaluate all boom methods for this parameterized metric
-                auto evaluateBoomMethod = [&](BoomDetectionParams const& boom_params) {
-                    std::vector<int> errors;
-                    errors.reserve(computed_for_config.size());
+        // Phase 2: Evaluate all boom methods
+        std::vector<EvaluationResult> local_results;
 
-                    for (auto const& computed : computed_for_config) {
-                        auto boom = evaluateBoomDetection(computed, boom_params);
+        auto evaluateMethod = [&](BoomDetectionParams const& bp) {
+            auto result = evaluateBoomMethod(pm, computed, bp, N);
+            local_results.push_back(result);
+        };
 
-                        if (computed.boom_frame_truth >= 0 && boom.frame >= 0) {
-                            int error = std::abs(boom.frame - computed.boom_frame_truth);
-                            errors.push_back(error);
-                        }
-                    }
+        // MaxCausticness
+        for (double offset : boom_grid.offset_vals) {
+            BoomDetectionParams bp;
+            bp.metric_name = pm.metric_name;
+            bp.method = BoomDetectionMethod::MaxCausticness;
+            bp.offset_seconds = offset;
+            evaluateMethod(bp);
+        }
 
-                    EvaluationResult result;
-                    result.params.metric_config = pm.config;
-                    result.params.boom = boom_params;
-                    // Compute effective sectors if applicable
-                    result.params.effective_sectors = std::visit([&](auto const& p) -> int {
-                        using T = std::decay_t<decltype(p)>;
-                        if constexpr (std::is_same_v<T, SectorMetricParams>) {
-                            return computeEffectiveSectors(N, p);
-                        } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
-                            SectorMetricParams sp{p.min_sectors, p.max_sectors, p.target_per_sector, {}};
-                            return computeEffectiveSectors(N, sp);
-                        } else {
-                            return 0;  // Non-sector metrics
-                        }
-                    }, pm.config.params);
-                    result.samples_evaluated = static_cast<int>(errors.size());
-                    result.per_sim_errors = errors;
-
-                    if (!errors.empty()) {
-                        // Compute MAE
-                        double sum = 0.0;
-                        for (int e : errors) {
-                            sum += e;
-                        }
-                        result.boom_mae = sum / errors.size();
-
-                        // Compute stddev
-                        double sq_sum = 0.0;
-                        for (int e : errors) {
-                            double diff = e - result.boom_mae;
-                            sq_sum += diff * diff;
-                        }
-                        result.boom_stddev = std::sqrt(sq_sum / errors.size());
-
-                        // Compute median
-                        std::vector<int> sorted_errors = errors;
-                        std::sort(sorted_errors.begin(), sorted_errors.end());
-                        size_t mid = sorted_errors.size() / 2;
-                        if (sorted_errors.size() % 2 == 0) {
-                            result.boom_median =
-                                (sorted_errors[mid - 1] + sorted_errors[mid]) / 2.0;
-                        } else {
-                            result.boom_median = sorted_errors[mid];
-                        }
-
-                        // Max error
-                        result.boom_max = *std::max_element(errors.begin(), errors.end());
-                    } else {
-                        result.boom_mae = 1e9;
-                        result.boom_stddev = 0;
-                        result.boom_median = 1e9;
-                        result.boom_max = 1e9;
-                    }
-
-                    result.peak_mae = 1e9;
-                    result.combined_score = result.boom_mae;
-
-                    std::lock_guard<std::mutex> lock(results_mutex);
-                    results.push_back(result);
-                };
-
-                // MaxCausticness: vary offset
-                for (double offset : offset_vals) {
+        // FirstPeakPercent
+        for (double pct : boom_grid.peak_pct_vals) {
+            for (double offset : boom_grid.offset_vals) {
+                for (double prom : boom_grid.prominence_vals) {
                     BoomDetectionParams bp;
                     bp.metric_name = pm.metric_name;
-                    bp.method = BoomDetectionMethod::MaxCausticness;
+                    bp.method = BoomDetectionMethod::FirstPeakPercent;
+                    bp.peak_percent_threshold = pct;
                     bp.offset_seconds = offset;
-                    evaluateBoomMethod(bp);
+                    bp.min_peak_prominence = prom;
+                    evaluateMethod(bp);
                 }
+            }
+        }
 
-                // FirstPeakPercent: vary peak_pct × offset × min_peak_prominence
-                for (double pct : peak_pct_vals) {
-                    for (double offset : offset_vals) {
-                        for (double prominence : prominence_vals) {
-                            BoomDetectionParams bp;
-                            bp.metric_name = pm.metric_name;
-                            bp.method = BoomDetectionMethod::FirstPeakPercent;
-                            bp.peak_percent_threshold = pct;
-                            bp.offset_seconds = offset;
-                            bp.min_peak_prominence = prominence;
-                            evaluateBoomMethod(bp);
-                        }
-                    }
+        // DerivativePeak
+        for (int smooth : boom_grid.smooth_vals) {
+            for (double offset : boom_grid.offset_vals) {
+                BoomDetectionParams bp;
+                bp.metric_name = pm.metric_name;
+                bp.method = BoomDetectionMethod::DerivativePeak;
+                bp.smoothing_window = smooth;
+                bp.offset_seconds = offset;
+                evaluateMethod(bp);
+            }
+        }
+
+        // ThresholdCrossing
+        for (double thresh : boom_grid.crossing_thresh_vals) {
+            for (int confirm : boom_grid.crossing_confirm_vals) {
+                for (double offset : boom_grid.offset_vals) {
+                    BoomDetectionParams bp;
+                    bp.metric_name = pm.metric_name;
+                    bp.method = BoomDetectionMethod::ThresholdCrossing;
+                    bp.crossing_threshold = thresh;
+                    bp.crossing_confirmation = confirm;
+                    bp.offset_seconds = offset;
+                    evaluateMethod(bp);
                 }
+            }
+        }
 
-                // DerivativePeak: vary smoothing × offset
-                for (int smooth : smooth_vals) {
-                    for (double offset : offset_vals) {
-                        BoomDetectionParams bp;
-                        bp.metric_name = pm.metric_name;
-                        bp.method = BoomDetectionMethod::DerivativePeak;
-                        bp.smoothing_window = smooth;
-                        bp.offset_seconds = offset;
-                        evaluateBoomMethod(bp);
-                    }
-                }
+        // SecondDerivativePeak
+        for (int smooth : boom_grid.smooth_vals) {
+            for (double offset : boom_grid.offset_vals) {
+                BoomDetectionParams bp;
+                bp.metric_name = pm.metric_name;
+                bp.method = BoomDetectionMethod::SecondDerivativePeak;
+                bp.smoothing_window = smooth;
+                bp.offset_seconds = offset;
+                evaluateMethod(bp);
+            }
+        }
 
-                // ThresholdCrossing: vary threshold × confirmation × offset
-                for (double thresh : crossing_thresh_vals) {
-                    for (int confirm : crossing_confirm_vals) {
-                        for (double offset : offset_vals) {
-                            BoomDetectionParams bp;
-                            bp.metric_name = pm.metric_name;
-                            bp.method = BoomDetectionMethod::ThresholdCrossing;
-                            bp.crossing_threshold = thresh;
-                            bp.crossing_confirmation = confirm;
-                            bp.offset_seconds = offset;
-                            evaluateBoomMethod(bp);
-                        }
-                    }
-                }
+        // Merge results
+        {
+            std::lock_guard<std::mutex> lock(results_mutex);
+            results.insert(results.end(), local_results.begin(), local_results.end());
+        }
 
-                // SecondDerivativePeak: vary smoothing × offset
-                for (int smooth : smooth_vals) {
-                    for (double offset : offset_vals) {
-                        BoomDetectionParams bp;
-                        bp.metric_name = pm.metric_name;
-                        bp.method = BoomDetectionMethod::SecondDerivativePeak;
-                        bp.smoothing_window = smooth;
-                        bp.offset_seconds = offset;
-                        evaluateBoomMethod(bp);
-                    }
-                }
+        metrics_completed.fetch_add(1);
+        // computed goes out of scope here, memory freed
+    };
 
-                pm_completed.fetch_add(1);
+    // Process all metric configs using thread pool
+    std::atomic<size_t> work_idx{0};
+    std::vector<std::thread> workers;
+    for (unsigned int t = 0; t < num_threads; ++t) {
+        workers.emplace_back([&]() {
+            while (true) {
+                size_t idx = work_idx.fetch_add(1);
+                if (idx >= param_metrics.size()) break;
+                processMetricConfig(idx);
             }
         });
     }
 
-    for (auto& w : phase2_workers) {
+    for (auto& w : workers) {
         w.join();
     }
 
-    phase2_done.store(true);
-    phase2_progress.join();
+    done.store(true);
+    progress_thread.join();
 
-    auto phase2_end = std::chrono::steady_clock::now();
-    double phase2_total = std::chrono::duration<double>(phase2_end - phase1_done).count();
-    double total_secs = std::chrono::duration<double>(phase2_end - start_time).count();
+    auto end_time = std::chrono::steady_clock::now();
+    double total_secs = std::chrono::duration<double>(end_time - start_time).count();
 
-    std::cout << "\nPhase 2 complete: " << std::fixed << std::setprecision(2) << phase2_total
-              << "s\n";
-    std::cout << "Total time: " << total_secs << "s for " << results.size() << " evaluations"
+    std::cout << "\nCompleted in " << std::fixed << std::setprecision(2) << total_secs << "s"
               << " (" << std::setprecision(0) << (results.size() / total_secs) << " evals/sec)\n\n";
 
-    // Sort by combined score
+    // Sort by score
     std::sort(results.begin(), results.end(),
               [](auto const& a, auto const& b) { return a.combined_score < b.combined_score; });
 
-    // ========================================
-    // RESULTS ANALYSIS
-    // ========================================
+    // ============================================
+    // RESULTS
+    // ============================================
     std::cout << std::string(100, '=') << "\n";
     std::cout << "OPTIMIZATION RESULTS\n";
     std::cout << std::string(100, '=') << "\n\n";
 
-    // ----------------------------------------
-    // Top 15 configurations (with full details)
-    // ----------------------------------------
-    std::cout << "TOP 15 CONFIGURATIONS (by Mean Absolute Error)\n";
+    // Top 15
+    std::cout << "TOP 15 CONFIGURATIONS\n";
     std::cout << std::string(100, '-') << "\n";
     std::cout << std::setw(4) << "Rank" << std::setw(8) << "MAE" << std::setw(8) << "Median"
-              << std::setw(8) << "StdDev" << std::setw(8) << "Max"
-              << "  Configuration\n";
+              << std::setw(8) << "StdDev" << std::setw(8) << "Max" << "  Configuration\n";
     std::cout << std::string(100, '-') << "\n";
 
     for (size_t i = 0; i < std::min(results.size(), size_t(15)); ++i) {
         auto const& r = results[i];
-        std::cout << std::setw(4) << (i + 1) << std::setw(8) << std::fixed << std::setprecision(1)
-                  << r.boom_mae << std::setw(8) << std::setprecision(1) << r.boom_median
-                  << std::setw(8) << std::setprecision(1) << r.boom_stddev << std::setw(8)
-                  << std::setprecision(0) << r.boom_max << "  " << r.params.describeFull() << "\n";
+        std::cout << std::setw(4) << (i + 1)
+                  << std::setw(8) << std::fixed << std::setprecision(1) << r.boom_mae
+                  << std::setw(8) << std::setprecision(1) << r.boom_median
+                  << std::setw(8) << std::setprecision(1) << r.boom_stddev
+                  << std::setw(8) << std::setprecision(0) << r.boom_max
+                  << "  " << r.params.describeFull() << "\n";
     }
     std::cout << std::string(100, '-') << "\n\n";
 
-    // ----------------------------------------
-    // Best configuration per metric type
-    // ----------------------------------------
-    std::cout << "BEST CONFIGURATION PER METRIC TYPE\n";
+    // Best per metric
+    std::cout << "BEST PER METRIC TYPE\n";
     std::cout << std::string(100, '-') << "\n";
-
-    std::vector<std::string> metric_types = {"angular_causticness",
-                                             "tip_causticness",
-                                             "organization_causticness",
-                                             "cv_causticness",
-                                             "spatial_concentration",
-                                             "fold_causticness",
-                                             "trajectory_smoothness",
-                                             "curvature",
-                                             "true_folds",
-                                             "local_coherence"};
-
-    for (auto const& metric_type : metric_types) {
-        // Find best result for this metric
-        EvaluationResult const* best = nullptr;
-        for (auto const& r : results) {
-            if (r.params.boom.metric_name == metric_type) {
-                if (!best || r.boom_mae < best->boom_mae) {
-                    best = &r;
-                }
-            }
-        }
-        if (best) {
-            // Shorten metric name
-            std::string short_name = metric_type;
-            if (short_name.length() > 20) {
-                short_name = short_name.substr(0, 17) + "...";
-            }
-            std::cout << "  " << std::left << std::setw(22) << short_name << std::right
-                      << " MAE=" << std::setw(6) << std::fixed << std::setprecision(1)
-                      << best->boom_mae << " | " << best->params.describeFull() << "\n";
-        }
-    }
-    std::cout << std::string(100, '-') << "\n\n";
-
-    // ----------------------------------------
-    // Best configuration per method type
-    // ----------------------------------------
-    std::cout << "BEST CONFIGURATION PER METHOD TYPE\n";
-    std::cout << std::string(100, '-') << "\n";
-
-    std::vector<std::pair<BoomDetectionMethod, std::string>> method_types = {
-        {BoomDetectionMethod::MaxCausticness, "MaxCausticness"},
-        {BoomDetectionMethod::FirstPeakPercent, "FirstPeakPercent"},
-        {BoomDetectionMethod::DerivativePeak, "DerivativePeak"}};
-
-    for (auto const& [method, method_name] : method_types) {
-        EvaluationResult const* best = nullptr;
-        for (auto const& r : results) {
-            if (r.params.boom.method == method) {
-                if (!best || r.boom_mae < best->boom_mae) {
-                    best = &r;
-                }
-            }
-        }
-        if (best) {
-            std::cout << "  " << std::left << std::setw(18) << method_name << std::right
-                      << " MAE=" << std::setw(6) << std::fixed << std::setprecision(1)
-                      << best->boom_mae << " | " << best->params.describeFull() << "\n";
-        }
-    }
-    std::cout << std::string(100, '-') << "\n\n";
-
-    // ----------------------------------------
-    // Best effective sector counts (aggregated across all boom methods)
-    // ----------------------------------------
-    std::cout << "BEST EFFECTIVE SECTOR COUNTS (aggregated across boom methods)\n";
-    std::cout << std::string(100, '-') << "\n";
-
-    // Group results by effective_sectors and find average MAE
-    std::map<int, std::vector<double>> eff_sector_maes;
+    std::map<std::string, EvaluationResult const*> best_per_metric;
     for (auto const& r : results) {
-        eff_sector_maes[r.params.effective_sectors].push_back(r.boom_mae);
-    }
-
-    // Compute average MAE for each effective sector count
-    std::vector<std::pair<int, double>> eff_sector_avg;
-    for (auto const& [eff_sec, maes] : eff_sector_maes) {
-        double sum = 0;
-        for (double m : maes) {
-            sum += m;
+        std::string const& m = r.params.boom.metric_name;
+        if (best_per_metric.find(m) == best_per_metric.end() ||
+            r.boom_mae < best_per_metric[m]->boom_mae) {
+            best_per_metric[m] = &r;
         }
-        eff_sector_avg.push_back({eff_sec, sum / maes.size()});
     }
-
-    // Sort by average MAE
-    std::sort(eff_sector_avg.begin(), eff_sector_avg.end(),
-              [](auto const& a, auto const& b) { return a.second < b.second; });
-
-    // Show all (there shouldn't be too many)
-    std::cout << "  " << std::setw(15) << "Eff Sectors" << std::setw(12) << "Avg MAE"
-              << std::setw(12) << "Best MAE" << std::setw(10) << "Count" << "\n";
-    for (auto const& [eff_sec, avg_mae] : eff_sector_avg) {
-        // Find best MAE for this effective sector count
-        double best_mae = 1e9;
-        for (auto const& r : results) {
-            if (r.params.effective_sectors == eff_sec) {
-                best_mae = std::min(best_mae, r.boom_mae);
-            }
-        }
-
-        std::cout << "  " << std::setw(15) << eff_sec << std::setw(12) << std::fixed
-                  << std::setprecision(1) << avg_mae << std::setw(12) << std::setprecision(1)
-                  << best_mae << std::setw(10) << eff_sector_maes[eff_sec].size() << "\n";
+    std::vector<std::pair<std::string, EvaluationResult const*>> sorted_best(
+        best_per_metric.begin(), best_per_metric.end());
+    std::sort(sorted_best.begin(), sorted_best.end(),
+              [](auto const& a, auto const& b) { return a.second->boom_mae < b.second->boom_mae; });
+    for (auto const& [name, best] : sorted_best) {
+        std::string short_name = name.length() > 22 ? name.substr(0, 19) + "..." : name;
+        std::cout << "  " << std::left << std::setw(22) << short_name << std::right
+                  << " MAE=" << std::setw(6) << std::fixed << std::setprecision(1)
+                  << best->boom_mae << " | " << best->params.describeFull() << "\n";
     }
     std::cout << std::string(100, '-') << "\n\n";
 
-    // ----------------------------------------
     // Winner details
-    // ----------------------------------------
     if (!results.empty()) {
         auto const& winner = results[0];
-        std::cout << "WINNER DETAILS\n";
+        std::cout << "WINNER\n";
         std::cout << std::string(100, '-') << "\n";
-        std::cout << "  Metric:           " << winner.params.boom.metric_name << "\n";
-        std::cout << "  Method:           ";
-        switch (winner.params.boom.method) {
-        case BoomDetectionMethod::MaxCausticness:
-            std::cout << "MaxCausticness (offset=" << winner.params.boom.offset_seconds << "s)\n";
-            break;
-        case BoomDetectionMethod::FirstPeakPercent:
-            std::cout << "FirstPeakPercent (threshold="
-                      << (int)(winner.params.boom.peak_percent_threshold * 100) << "%)\n";
-            break;
-        case BoomDetectionMethod::DerivativePeak:
-            std::cout << "DerivativePeak (window=" << winner.params.boom.smoothing_window << ")\n";
-            break;
-        case BoomDetectionMethod::ThresholdCrossing:
-            std::cout << "ThresholdCrossing (thresh="
-                      << (int)(winner.params.boom.crossing_threshold * 100) << "%, confirm="
-                      << winner.params.boom.crossing_confirmation << ")\n";
-            break;
-        case BoomDetectionMethod::SecondDerivativePeak:
-            std::cout << "SecondDerivativePeak (window=" << winner.params.boom.smoothing_window << ")\n";
-            break;
-        }
-        std::cout << "  Effective Sectors: " << winner.params.effective_sectors << "\n";
-        // Print metric-specific parameters
-        std::cout << "  Params:           ";
-        std::visit([&](auto const& p) {
-            using T = std::decay_t<decltype(p)>;
-            if constexpr (std::is_same_v<T, SectorMetricParams>) {
-                std::cout << "min_sectors=" << p.min_sectors
-                          << ", max_sectors=" << p.max_sectors
-                          << ", target=" << p.target_per_sector;
-            } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
-                std::cout << "min_sectors=" << p.min_sectors
-                          << ", max_sectors=" << p.max_sectors
-                          << ", target=" << p.target_per_sector
-                          << ", cv_norm=" << p.cv_normalization;
-            } else if constexpr (std::is_same_v<T, GridMetricParams>) {
-                std::cout << "min_grid=" << p.min_grid
-                          << ", max_grid=" << p.max_grid
-                          << ", target=" << p.target_per_cell;
-            } else if constexpr (std::is_same_v<T, FoldMetricParams>) {
-                std::cout << "max_radius=" << p.max_radius
-                          << ", cv_norm=" << p.cv_normalization;
-            } else if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
-                std::cout << "max_radius=" << p.max_radius
-                          << ", min_spread=" << p.min_spread_threshold;
-            } else if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
-                std::cout << "max_radius=" << p.max_radius
-                          << ", min_spread=" << p.min_spread_threshold
-                          << ", log_ratio_norm=" << p.log_ratio_normalization;
-            } else if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
-                std::cout << "max_radius=" << p.max_radius
-                          << ", min_spread=" << p.min_spread_threshold
-                          << ", gini_baseline=" << p.gini_chaos_baseline
-                          << ", gini_divisor=" << p.gini_baseline_divisor;
-            } else if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
-                std::cout << "max_radius=" << p.max_radius
-                          << ", min_spread=" << p.min_spread_threshold
-                          << ", log_baseline=" << p.log_inverse_baseline
-                          << ", log_divisor=" << p.log_inverse_divisor;
-            }
-        }, winner.params.metric_config.params);
-        std::cout << "\n\n";
-        std::cout << "  Statistics:\n";
-        std::cout << "    Mean Absolute Error:   " << std::fixed << std::setprecision(2)
-                  << winner.boom_mae << " frames\n";
-        std::cout << "    Median Absolute Error: " << std::setprecision(2) << winner.boom_median
-                  << " frames\n";
-        std::cout << "    Std Deviation:         " << std::setprecision(2) << winner.boom_stddev
-                  << " frames\n";
-        std::cout << "    Max Error:             " << std::setprecision(0) << winner.boom_max
-                  << " frames\n";
-        std::cout << "    Samples:               " << winner.samples_evaluated << "\n";
+        std::cout << "  Metric: " << winner.params.boom.metric_name << "\n";
+        std::cout << "  MAE: " << std::fixed << std::setprecision(2) << winner.boom_mae << " frames\n";
+        std::cout << "  Median: " << winner.boom_median << " frames\n";
+        std::cout << "  StdDev: " << winner.boom_stddev << " frames\n";
+        std::cout << "  Max: " << static_cast<int>(winner.boom_max) << " frames\n";
+        std::cout << "  Samples: " << winner.samples_evaluated << "\n";
 
-        // Per-simulation breakdown if we have the data
         if (!winner.per_sim_errors.empty() && winner.per_sim_errors.size() == simulations.size()) {
-            std::cout << "\n  Per-Simulation Errors:\n";
+            std::cout << "\n  Per-simulation errors:\n";
             for (size_t i = 0; i < simulations.size(); ++i) {
-                std::cout << "    " << std::left << std::setw(30) << simulations[i].id << std::right
-                          << " error=" << std::setw(4) << winner.per_sim_errors[i] << " frames"
+                std::cout << "    " << std::left << std::setw(30) << simulations[i].id
+                          << std::right << " error=" << std::setw(4) << winner.per_sim_errors[i]
                           << " (truth=" << simulations[i].boom_frame_truth << ")\n";
             }
         }
         std::cout << std::string(100, '-') << "\n\n";
 
-        // Save best parameters for all metrics
         saveAllBestParams(output_file, results, winner);
     }
 
     std::cout << std::string(100, '=') << "\n";
-
     return 0;
 }
