@@ -1189,11 +1189,46 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
             }
         }
 
-        // Draw boom marker
+        // Draw boom markers for all enabled metrics
+        // Primary metric = solid thick orange line
+        // Secondary metrics = faint colored lines
+        for (auto const& [metric_name, boom_state] : state.boom_metrics) {
+            if (!boom_state.enabled || boom_state.boom_frame < 0) continue;
+
+            bool is_primary = (metric_name == state.config.boom_metric);
+            double boom_x = static_cast<double>(boom_state.boom_frame);
+
+            if (is_primary) {
+                // Primary: Solid thick orange line
+                ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), 2.5f);
+            } else {
+                // Secondary: Faint purple line
+                ImPlot::SetNextLineStyle(ImVec4(0.7f, 0.5f, 0.9f, 0.5f), 1.5f);
+            }
+
+            std::string label = "##boom_" + metric_name;
+            ImPlot::PlotInfLines(label.c_str(), &boom_x, 1);
+
+            // Add annotation for primary boom
+            if (is_primary) {
+                auto limits = ImPlot::GetPlotLimits();
+                double y_top = limits.Y.Max * 0.92;
+                ImPlot::Annotation(boom_x, y_top, ImVec4(1.0f, 0.8f, 0.2f, 1.0f),
+                                   ImVec2(3, 0), true, "BOOM");
+            }
+        }
+
+        // Fallback: draw primary boom if no boom_metrics enabled (from state.boom_frame)
         if (state.boom_frame.has_value()) {
-            double boom_x = static_cast<double>(*state.boom_frame);
-            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), 2.0f);
-            ImPlot::PlotInfLines("##boom", &boom_x, 1);
+            bool any_enabled = false;
+            for (auto const& [_, bs] : state.boom_metrics) {
+                if (bs.enabled) { any_enabled = true; break; }
+            }
+            if (!any_enabled) {
+                double boom_x = static_cast<double>(*state.boom_frame);
+                ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), 2.0f);
+                ImPlot::PlotInfLines("##boom_primary", &boom_x, 1);
+            }
         }
 
         // Draw chaos marker
