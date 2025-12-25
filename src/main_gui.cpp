@@ -2157,7 +2157,9 @@ void drawMetricParametersWindow(AppState& state) {
             bool is_primary = (name == state.config.boom_metric);
             std::string short_name = shortenMetricName(name);
 
-            if (ImGui::RadioButton(short_name.c_str(), is_primary)) {
+            // Use unique ID suffix to avoid conflicts with checkboxes below
+            std::string radio_label = short_name + "##primary_" + name;
+            if (ImGui::RadioButton(radio_label.c_str(), is_primary)) {
                 state.config.boom_metric = name;
                 state.boom_metrics[name].enabled = true;
             }
@@ -2186,6 +2188,8 @@ void drawMetricParametersWindow(AppState& state) {
             if (bs.boom_frame >= 0) {
                 label += " [" + std::to_string(bs.boom_frame) + "]";
             }
+            // Use unique ID suffix to avoid conflicts with radio buttons above
+            label += "##show_" + name;
 
             ImGui::Checkbox(label.c_str(), &bs.enabled);
             if (ImGui::IsItemHovered()) {
