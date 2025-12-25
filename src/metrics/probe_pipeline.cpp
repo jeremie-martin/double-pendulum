@@ -2,6 +2,7 @@
 #include "optimize/frame_detector.h"
 #include "optimize/score_predictor.h"
 #include "optimize/target_evaluator.h"
+#include "pendulum.h"  // For PendulumState
 
 namespace metrics {
 
@@ -103,10 +104,34 @@ void ProbePipeline::setupEventDetector() {
                                       MetricNames::Variance);
 }
 
+void ProbePipeline::feedPhysicsFrame(std::vector<PendulumState> const& states,
+                                      double total_energy) {
+    collector_.beginFrame(current_frame_);
+    // Use updateFromStates for full metrics including spatial_concentration
+    collector_.updateFromStates(states);
+
+    if (total_energy > 0.0) {
+        collector_.setMetric(MetricNames::TotalEnergy, total_energy);
+    }
+
+    // Update event detection
+    event_detector_.update(collector_, frame_duration_);
+
+    collector_.endFrame();
+    current_frame_++;
+
+    // Progress callback
+    if (progress_callback_) {
+        // Note: total frames not known here, caller should track
+        progress_callback_(current_frame_, 0);
+    }
+}
+
 void ProbePipeline::feedPhysicsFrame(std::vector<double> const& angle1s,
                                       std::vector<double> const& angle2s,
                                       double total_energy) {
     collector_.beginFrame(current_frame_);
+    // Legacy angle-only version - does not compute position-based metrics
     collector_.updateFromAngles(angle1s, angle2s);
 
     if (total_energy > 0.0) {

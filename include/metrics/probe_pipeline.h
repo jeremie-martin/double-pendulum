@@ -7,6 +7,7 @@
 #include "metrics/metrics_collector.h"
 #include "metrics/probe_filter.h"
 #include "optimize/prediction_target.h"
+#include "pendulum.h"  // For PendulumState in feedPhysicsFrame
 
 #include <functional>
 #include <memory>
@@ -138,6 +139,10 @@ public:
     void beginPhase2();
 
     // Feed frame data to the pipeline
+    // Prefer the PendulumState version for full metrics including spatial_concentration
+    void feedPhysicsFrame(std::vector<PendulumState> const& states,
+                          double total_energy = 0.0);
+    // Legacy angle-only version (does not compute position-based metrics)
     void feedPhysicsFrame(std::vector<double> const& angle1s,
                           std::vector<double> const& angle2s,
                           double total_energy = 0.0);

@@ -873,17 +873,8 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
         // Begin frame for metrics collection
         metrics_collector_.beginFrame(frame);
 
-        // Extract angles for variance and spread tracking
-        std::vector<double> angle1s, angle2s;
-        angle1s.reserve(pendulum_count);
-        angle2s.reserve(pendulum_count);
-        for (auto const& state : states) {
-            angle1s.push_back(state.th1);
-            angle2s.push_back(state.th2);
-        }
-
-        // Update metrics collector with angles
-        metrics_collector_.updateFromAngles(angle1s, angle2s);
+        // Update metrics collector with full states (enables all metrics including spatial_concentration)
+        metrics_collector_.updateFromStates(states);
 
         // End frame metrics collection
         metrics_collector_.endFrame();

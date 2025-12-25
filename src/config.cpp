@@ -1,5 +1,6 @@
 #include "config.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -302,7 +303,15 @@ static void loadConfigFromTable(Config& config, toml::table const& tbl) {
                     }
                 }
 
-                config.targets.push_back(tc);
+                // Check if a target with this name already exists (from includes)
+                // If so, override it; otherwise add as new
+                auto it = std::find_if(config.targets.begin(), config.targets.end(),
+                                       [&](auto const& t) { return t.name == tc.name; });
+                if (it != config.targets.end()) {
+                    *it = tc;  // Override existing target
+                } else {
+                    config.targets.push_back(tc);  // Add new target
+                }
             }
         }
     }

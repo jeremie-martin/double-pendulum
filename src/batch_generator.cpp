@@ -227,6 +227,33 @@ BatchConfig BatchConfig::load(std::string const& path) {
         std::cerr << "Error parsing batch config: " << err.description() << "\n";
     }
 
+    // Validate that all filter target constraints reference existing targets
+    for (auto const& constraint : config.filter.target_constraints) {
+        bool found = false;
+        for (auto const& target : config.base_config.targets) {
+            if (target.name == constraint.target_name) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            std::cerr << "Warning: Filter references non-existent target '"
+                      << constraint.target_name << "'\n";
+            std::cerr << "  Add [targets." << constraint.target_name
+                      << "] to your base config or an included file.\n";
+            std::cerr << "  Available targets: ";
+            if (config.base_config.targets.empty()) {
+                std::cerr << "(none defined)";
+            } else {
+                for (size_t i = 0; i < config.base_config.targets.size(); ++i) {
+                    if (i > 0) std::cerr << ", ";
+                    std::cerr << config.base_config.targets[i].name;
+                }
+            }
+            std::cerr << "\n";
+        }
+    }
+
     return config;
 }
 
