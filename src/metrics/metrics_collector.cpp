@@ -132,7 +132,9 @@ void MetricsCollector::updateFromPendulums(
     }
 
     updateFromAngles(angle1s, angle2s);
-    setMetric(MetricNames::TotalEnergy, total_energy);
+    // Store mean energy per pendulum for N-independence
+    // (total energy would scale linearly with N)
+    setMetric(MetricNames::TotalEnergy, total_energy / pendulums.size());
 }
 
 void MetricsCollector::updateFromAngles(std::vector<double> const& angle1s,
@@ -467,7 +469,7 @@ double MetricsCollector::computeAngularCausticness(
         sector_counts[sector]++;
     }
 
-    // Compute coverage: fraction of sectors with at least one pendulum
+    // Compute coverage with birthday-problem correction for N-independence
     int occupied_sectors = 0;
     int total_count = 0;
 
@@ -478,7 +480,17 @@ double MetricsCollector::computeAngularCausticness(
 
     if (total_count == 0) return 0.0;
 
-    double coverage = static_cast<double>(occupied_sectors) / num_sectors;
+    double raw_coverage = static_cast<double>(occupied_sectors) / num_sectors;
+
+    // Birthday problem correction: compute expected coverage for uniform distribution
+    // E[occupied] = M * (1 - (1-1/M)^N), so expected_fraction = 1 - (1-1/M)^N
+    double p_empty = std::pow(1.0 - 1.0 / num_sectors, N);
+    double expected_coverage = 1.0 - p_empty;
+
+    // Normalized coverage: 1.0 means exactly as expected for uniform
+    double normalized_coverage = (expected_coverage > 0.01)
+        ? std::min(1.0, raw_coverage / expected_coverage)
+        : raw_coverage;
 
     // Compute Gini coefficient to measure inequality of distribution
     // Gini = 0: perfectly uniform, Gini = 1: maximally concentrated
@@ -492,11 +504,11 @@ double MetricsCollector::computeAngularCausticness(
     }
     double gini = gini_sum / (num_sectors * static_cast<double>(total_count));
 
-    // Causticness = coverage × gini
+    // Causticness = normalized_coverage × gini
     // - Early phase: low coverage × high gini = LOW
     // - Interesting phase: medium coverage × medium gini = HIGH
     // - Chaos: high coverage × low gini = LOW
-    return coverage * gini;
+    return normalized_coverage * gini;
 }
 
 void MetricsCollector::updateFromStates(std::vector<PendulumState> const& states) {
@@ -645,7 +657,9 @@ double MetricsCollector::computeCausticnessFromAngles(
         sector_counts[sector]++;
     }
 
-    // Compute coverage: fraction of sectors with at least one pendulum
+    // Compute coverage with birthday-problem correction for N-independence
+    // Expected coverage under uniform random: E[occupied] = M * (1 - (1-1/M)^N)
+    // By normalizing observed/expected, we get N-independent coverage measure
     int occupied_sectors = 0;
     int total_count = 0;
 
@@ -656,9 +670,19 @@ double MetricsCollector::computeCausticnessFromAngles(
 
     if (total_count == 0) return 0.0;
 
-    double coverage = static_cast<double>(occupied_sectors) / num_sectors;
+    double raw_coverage = static_cast<double>(occupied_sectors) / num_sectors;
 
-    // Compute Gini coefficient
+    // Birthday problem correction: compute expected coverage for uniform distribution
+    double p_empty = std::pow(1.0 - 1.0 / num_sectors, N);  // Prob(sector empty)
+    double expected_coverage = 1.0 - p_empty;
+
+    // Normalized coverage: 1.0 means exactly as expected for uniform, >1 means more spread
+    // Clamp to [0, 1] for the final metric
+    double normalized_coverage = (expected_coverage > 0.01)
+        ? std::min(1.0, raw_coverage / expected_coverage)
+        : raw_coverage;
+
+    // Compute Gini coefficient (inherently N-independent)
     std::sort(sector_counts.begin(), sector_counts.end());
 
     double gini_sum = 0.0;
@@ -667,7 +691,7 @@ double MetricsCollector::computeCausticnessFromAngles(
     }
     double gini = gini_sum / (num_sectors * static_cast<double>(total_count));
 
-    return coverage * gini;
+    return normalized_coverage * gini;
 }
 
 double MetricsCollector::computeTipCausticness(
@@ -787,12 +811,19 @@ double MetricsCollector::computeCVCausticness(
         sector_counts[sector]++;
     }
 
-    // Compute coverage
+    // Compute coverage with birthday-problem correction
     int occupied_sectors = 0;
     for (int count : sector_counts) {
         if (count > 0) occupied_sectors++;
     }
-    double coverage = static_cast<double>(occupied_sectors) / num_sectors;
+    double raw_coverage = static_cast<double>(occupied_sectors) / num_sectors;
+
+    // Birthday problem correction for N-independence
+    double p_empty = std::pow(1.0 - 1.0 / num_sectors, N);
+    double expected_coverage = 1.0 - p_empty;
+    double normalized_coverage = (expected_coverage > 0.01)
+        ? std::min(1.0, raw_coverage / expected_coverage)
+        : raw_coverage;
 
     // Compute coefficient of variation (CV = std_dev / mean)
     double mean = static_cast<double>(N) / num_sectors;
@@ -806,10 +837,10 @@ double MetricsCollector::computeCVCausticness(
     double cv = (mean > 1e-10) ? std_dev / mean : 0.0;
 
     // Normalize CV to roughly 0-1 range (CV can be 0-2+ for very spiky data)
-    // Then multiply by coverage for the desired low→high→low pattern
+    // Then multiply by normalized coverage for the desired low→high→low pattern
     double normalized_cv = std::min(1.0, cv / params.cv_normalization);
 
-    return coverage * normalized_cv;
+    return normalized_coverage * normalized_cv;
 }
 
 double MetricsCollector::computeOrganizationCausticness(
@@ -861,13 +892,20 @@ double MetricsCollector::computeOrganizationCausticness(
     for (bool occ : occupied) {
         if (occ) occupied_count++;
     }
-    double coverage = static_cast<double>(occupied_count) / num_sectors;
+    double raw_coverage = static_cast<double>(occupied_count) / num_sectors;
 
-    // Organization = (1 - R1*R2) × coverage
+    // Birthday problem correction for N-independence
+    double p_empty = std::pow(1.0 - 1.0 / num_sectors, N);
+    double expected_coverage = 1.0 - p_empty;
+    double normalized_coverage = (expected_coverage > 0.01)
+        ? std::min(1.0, raw_coverage / expected_coverage)
+        : raw_coverage;
+
+    // Organization = (1 - R1*R2) × normalized_coverage
     // - Early: R1≈1, R2≈1 → (1-1)=0 → LOW
     // - Caustic: R moderate → (1-R1*R2) moderate, coverage high → HIGH
-    // - Chaos: R≈0 → (1-0)=1, but also high coverage → need to check if this works
-    double organization = (1.0 - R1 * R2) * coverage;
+    // - Chaos: R≈0 → (1-0)=1, but also high coverage → HIGH (this is expected)
+    double organization = (1.0 - R1 * R2) * normalized_coverage;
 
     return organization;
 }
