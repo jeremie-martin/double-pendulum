@@ -1074,8 +1074,15 @@ void writeScoreTargetParams(std::ofstream& file, std::string const& target_name,
             file << params.weights[i].first << "=" << params.weights[i].second;
         }
         file << "\n";
-    } else if (params.method == optimize::ScoreMethod::ConstantScore) {
-        file << "constant_score = " << std::fixed << std::setprecision(3) << params.constant_score << "\n";
+    } else if (params.method == optimize::ScoreMethod::PreBoomContrast ||
+               params.method == optimize::ScoreMethod::BoomSteepness) {
+        file << "window_seconds = " << std::fixed << std::setprecision(2) << params.window_seconds << "\n";
+    } else if (params.method == optimize::ScoreMethod::DecayRate) {
+        file << "decay_window_fraction = " << std::fixed << std::setprecision(2) << params.decay_window_fraction << "\n";
+    } else if (params.method == optimize::ScoreMethod::Smoothness) {
+        file << "smoothness_scale = " << std::fixed << std::setprecision(1) << params.smoothness_scale << "\n";
+    } else if (params.method == optimize::ScoreMethod::BuildupGradient) {
+        file << "gradient_scale = " << std::fixed << std::setprecision(1) << params.gradient_scale << "\n";
     }
 }
 
@@ -1090,8 +1097,16 @@ struct ScoreEvaluationResult {
 
     std::string describeShort() const {
         std::string result = optimize::toString(params.method);
-        if (params.method == optimize::ScoreMethod::ConstantScore) {
-            result += "=" + std::to_string(params.constant_score).substr(0, 4);
+        // Add method-specific parameters
+        if (params.method == optimize::ScoreMethod::PreBoomContrast ||
+            params.method == optimize::ScoreMethod::BoomSteepness) {
+            result += " w=" + std::to_string(params.window_seconds).substr(0, 4) + "s";
+        } else if (params.method == optimize::ScoreMethod::DecayRate) {
+            result += " f=" + std::to_string(params.decay_window_fraction).substr(0, 4);
+        } else if (params.method == optimize::ScoreMethod::Smoothness) {
+            result += " s=" + std::to_string(static_cast<int>(params.smoothness_scale));
+        } else if (params.method == optimize::ScoreMethod::BuildupGradient) {
+            result += " g=" + std::to_string(static_cast<int>(params.gradient_scale));
         }
         return result;
     }
@@ -1511,16 +1526,6 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // ConstantFrame (dummy predictor for testing)
-        // Try a few representative frame values
-        for (int frame_val : {50, 100, 200, 300, 500}) {
-            optimize::FrameDetectionParams bp;
-            bp.metric_name = pm.metric_name;
-            bp.method = optimize::FrameDetectionMethod::ConstantFrame;
-            bp.constant_frame = frame_val;
-            evaluateMethod(bp);
-        }
-
         {
             std::lock_guard<std::mutex> lock(results_mutex);
             results.insert(results.end(), local_results.begin(), local_results.end());
@@ -1793,15 +1798,6 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // ConstantFrame (dummy predictor for testing)
-            for (int frame_val : {50, 100, 200, 300, 500}) {
-                optimize::FrameDetectionParams bp;
-                bp.metric_name = best_metric_name;
-                bp.method = optimize::FrameDetectionMethod::ConstantFrame;
-                bp.constant_frame = frame_val;
-                evaluateMethod(bp);
-            }
-
             // Find best result for this target
             if (!target_results.empty()) {
                 std::sort(target_results.begin(), target_results.end(),
@@ -1917,24 +1913,8 @@ int main(int argc, char* argv[]) {
 
             std::vector<ScoreEvaluationResult> target_results;
 
-            // Try all score methods from registry
-            for (auto const* pred_def : score_predictor_defs) {
-                optimize::ScoreMethod method = optimize::parseScoreMethod(pred_def->name);
-                optimize::ScoreParams sp;
-                sp.metric_name = best_metric_name;
-                sp.method = method;
-
-                // For constant_score, try a few different values
-                std::vector<double> constant_values = {0.5};  // Default
-                if (method == optimize::ScoreMethod::ConstantScore) {
-                    constant_values = {0.0, 0.25, 0.5, 0.75, 1.0};
-                }
-
-                for (double const_val : constant_values) {
-                    if (method == optimize::ScoreMethod::ConstantScore) {
-                        sp.constant_score = const_val;
-                    }
-
+            // Helper lambda to evaluate a score params configuration
+            auto evaluateScoreParams = [&](optimize::ScoreParams const& sp) {
                 optimize::ScorePredictor predictor(sp);
 
                 std::vector<double> errors;
@@ -1974,7 +1954,66 @@ int main(int argc, char* argv[]) {
 
                     target_results.push_back(result);
                 }
-                }  // for const_val
+            };
+
+            // Parameter grids for score methods
+            std::vector<double> window_vals = {0.5, 1.0, 2.0, 3.0};        // seconds
+            std::vector<double> decay_frac_vals = {0.1, 0.3, 0.5, 0.7};    // fraction of post-peak
+            std::vector<double> smooth_scale_vals = {1000.0, 5000.0, 10000.0, 50000.0};
+            std::vector<double> gradient_scale_vals = {10.0, 50.0, 100.0, 500.0};
+
+            // Try all score methods from registry
+            for (auto const* pred_def : score_predictor_defs) {
+                optimize::ScoreMethod method = optimize::parseScoreMethod(pred_def->name);
+
+                // Methods with window_seconds parameter
+                if (method == optimize::ScoreMethod::PreBoomContrast ||
+                    method == optimize::ScoreMethod::BoomSteepness) {
+                    for (double window : window_vals) {
+                        optimize::ScoreParams sp;
+                        sp.metric_name = best_metric_name;
+                        sp.method = method;
+                        sp.window_seconds = window;
+                        evaluateScoreParams(sp);
+                    }
+                }
+                // Methods with decay_window_fraction parameter
+                else if (method == optimize::ScoreMethod::DecayRate) {
+                    for (double frac : decay_frac_vals) {
+                        optimize::ScoreParams sp;
+                        sp.metric_name = best_metric_name;
+                        sp.method = method;
+                        sp.decay_window_fraction = frac;
+                        evaluateScoreParams(sp);
+                    }
+                }
+                // Methods with smoothness_scale parameter
+                else if (method == optimize::ScoreMethod::Smoothness) {
+                    for (double scale : smooth_scale_vals) {
+                        optimize::ScoreParams sp;
+                        sp.metric_name = best_metric_name;
+                        sp.method = method;
+                        sp.smoothness_scale = scale;
+                        evaluateScoreParams(sp);
+                    }
+                }
+                // Methods with gradient_scale parameter
+                else if (method == optimize::ScoreMethod::BuildupGradient) {
+                    for (double scale : gradient_scale_vals) {
+                        optimize::ScoreParams sp;
+                        sp.metric_name = best_metric_name;
+                        sp.method = method;
+                        sp.gradient_scale = scale;
+                        evaluateScoreParams(sp);
+                    }
+                }
+                // Non-parametric methods
+                else {
+                    optimize::ScoreParams sp;
+                    sp.metric_name = best_metric_name;
+                    sp.method = method;
+                    evaluateScoreParams(sp);
+                }
             }  // for pred_def
 
             // Find best result for this target

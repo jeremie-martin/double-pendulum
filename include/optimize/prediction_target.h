@@ -82,9 +82,8 @@ enum class ScoreMethod {
     BuildupGradient, // Average slope from start to peak - measures dramatic rise
     PeakDominance,   // peak / mean ratio - how much peak stands out
     DecayRate,       // How quickly signal drops after peak
-
-    // Testing
-    ConstantScore    // Always returns configured score (for testing)
+    MedianDominance, // peak / median ratio - robust version of peak_dominance
+    TailWeight       // mean / median ratio - measures skewness (heavy tail = dramatic)
 };
 
 // Parameters for score prediction
@@ -95,11 +94,20 @@ struct ScoreParams {
     // For Composite: pairs of (score_name, weight)
     std::vector<std::pair<std::string, double>> weights;
 
-    // For ConstantScore: the score to always return (for testing)
-    double constant_score = 0.5;
-
     // For boom-relative methods: window size around boom (seconds)
+    // Used by: PreBoomContrast, BoomSteepness
     double window_seconds = 1.0;
+
+    // For DecayRate: fraction of post-peak signal to analyze (0.1 = 10%, 0.5 = 50%)
+    double decay_window_fraction = 0.3;
+
+    // For Smoothness: scale factor for second derivative normalization
+    // Higher = more tolerant of noise (scores closer to 1.0)
+    double smoothness_scale = 10000.0;
+
+    // For BuildupGradient: scale factor for gradient normalization
+    // Lower = more sensitive to gradients (steeper curves score higher)
+    double gradient_scale = 100.0;
 };
 
 // ============================================================================
@@ -237,8 +245,10 @@ inline std::string toString(ScoreMethod method) {
         return "peak_dominance";
     case ScoreMethod::DecayRate:
         return "decay_rate";
-    case ScoreMethod::ConstantScore:
-        return "constant_score";
+    case ScoreMethod::MedianDominance:
+        return "median_dominance";
+    case ScoreMethod::TailWeight:
+        return "tail_weight";
     default:
         return "peak_clarity";
     }
@@ -267,8 +277,10 @@ inline ScoreMethod parseScoreMethod(std::string const& s) {
         return ScoreMethod::PeakDominance;
     if (s == "decay_rate" || s == "decay")
         return ScoreMethod::DecayRate;
-    if (s == "constant_score" || s == "constant")
-        return ScoreMethod::ConstantScore;
+    if (s == "median_dominance" || s == "median_dom")
+        return ScoreMethod::MedianDominance;
+    if (s == "tail_weight" || s == "tail")
+        return ScoreMethod::TailWeight;
     return ScoreMethod::PeakClarity;
 }
 

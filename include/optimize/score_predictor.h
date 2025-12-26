@@ -54,13 +54,7 @@ public:
         ScorePrediction result;
         result.method_used = params_.method;
 
-        // ConstantScore doesn't need any data - just return configured value
-        if (params_.method == ScoreMethod::ConstantScore) {
-            result.score = std::clamp(params_.constant_score, 0.0, 1.0);
-            return result;
-        }
-
-        // Check metric name is set for other methods
+        // Check metric name is set
         if (params_.metric_name.empty()) {
             result.score = 0.0;
             return result;
@@ -85,7 +79,7 @@ public:
             result.score = std::clamp(result.score, 0.0, 1.0);
             return result;
         case ScoreMethod::Smoothness:
-            result.score = computeSmoothness(values, frame_duration);
+            result.score = computeSmoothness(values, frame_duration, params_.smoothness_scale);
             result.score = std::clamp(result.score, 0.0, 1.0);
             return result;
         case ScoreMethod::PreBoomContrast:
@@ -97,7 +91,7 @@ public:
             result.score = std::clamp(result.score, 0.0, 1.0);
             return result;
         case ScoreMethod::BuildupGradient:
-            result.score = computeBuildupGradient(values, frame_duration);
+            result.score = computeBuildupGradient(values, frame_duration, params_.gradient_scale);
             result.score = std::clamp(result.score, 0.0, 1.0);
             return result;
         case ScoreMethod::PeakDominance:
@@ -105,7 +99,15 @@ public:
             result.score = std::clamp(result.score, 0.0, 1.0);
             return result;
         case ScoreMethod::DecayRate:
-            result.score = computeDecayRate(values, frame_duration);
+            result.score = computeDecayRate(values, frame_duration, params_.decay_window_fraction);
+            result.score = std::clamp(result.score, 0.0, 1.0);
+            return result;
+        case ScoreMethod::MedianDominance:
+            result.score = computeMedianDominance(values);
+            result.score = std::clamp(result.score, 0.0, 1.0);
+            return result;
+        case ScoreMethod::TailWeight:
+            result.score = computeTailWeight(values);
             result.score = std::clamp(result.score, 0.0, 1.0);
             return result;
         default:
@@ -159,9 +161,6 @@ private:
             return analyzer.postReferenceAreaNormalized();
         case ScoreMethod::Composite:
             return computeComposite(analyzer);
-        case ScoreMethod::ConstantScore:
-            // Constant score doesn't need analyzer - return configured value
-            return params_.constant_score;
         default:
             return analyzer.peakClarityScore();
         }
@@ -229,7 +228,10 @@ private:
 
     // Smoothness: 1 / (1 + mean_abs_second_derivative)
     // High score = smooth signal, low score = noisy/jagged
-    static double computeSmoothness(std::vector<double> const& values, double frame_duration) {
+    // smoothness_scale: higher = more tolerant of noise (default 10000)
+    static double computeSmoothness(std::vector<double> const& values,
+                                     double frame_duration,
+                                     double smoothness_scale = 10000.0) {
         if (values.size() < 3) return 1.0;  // Too short to measure
 
         // Compute second derivative (central difference)
@@ -243,9 +245,8 @@ private:
 
         double mean_abs_d2 = sum_abs_d2 / static_cast<double>(values.size() - 2);
 
-        // Normalize - empirically, values around 1000 are typical for "smooth"
-        // Scale factor makes typical smooth signals score ~0.8-0.9
-        double scaled = mean_abs_d2 / 10000.0;
+        // Normalize using configurable scale factor
+        double scaled = mean_abs_d2 / smoothness_scale;
         return 1.0 / (1.0 + scaled);
     }
 
@@ -317,13 +318,15 @@ private:
 
     // Buildup gradient: average slope from start to peak
     // High score = steep, dramatic rise to peak
+    // gradient_scale: lower = more sensitive to gradients (default 100)
     static double computeBuildupGradient(std::vector<double> const& values,
-                                          double frame_duration) {
+                                          double frame_duration,
+                                          double gradient_scale = 100.0) {
         if (values.size() < 2) return 0.0;
 
         // Find peak frame
         auto max_it = std::max_element(values.begin(), values.end());
-        size_t peak_frame = static_cast<size_t>(std::distance(values.begin(), max_it));
+        auto peak_frame = static_cast<size_t>(std::distance(values.begin(), max_it));
         double peak_value = *max_it;
 
         if (peak_frame == 0 || peak_value <= 0.0) return 0.0;
@@ -335,9 +338,8 @@ private:
 
         double gradient = rise / time_to_peak;
 
-        // Normalize: typical gradients vary widely, use sigmoid-like normalization
-        // Scale factor chosen empirically - adjust based on typical metric ranges
-        double normalized = gradient / (gradient + 100.0);  // Approaches 1 as gradient increases
+        // Normalize using configurable scale factor
+        double normalized = gradient / (gradient + gradient_scale);
         return std::clamp(normalized, 0.0, 1.0);
     }
 
@@ -367,21 +369,24 @@ private:
 
     // Decay rate: how quickly signal drops after peak
     // High score = fast, clean decay
+    // decay_window_fraction: fraction of post-peak signal to analyze (default 0.3 = 30%)
     static double computeDecayRate(std::vector<double> const& values,
-                                    double frame_duration) {
+                                    double frame_duration,
+                                    double decay_window_fraction = 0.3) {
         if (values.size() < 3) return 0.0;
 
         // Find peak frame
         auto max_it = std::max_element(values.begin(), values.end());
-        size_t peak_frame = static_cast<size_t>(std::distance(values.begin(), max_it));
+        auto peak_frame = static_cast<size_t>(std::distance(values.begin(), max_it));
         double peak_value = *max_it;
 
         if (peak_frame >= values.size() - 1 || peak_value <= 0.0) return 0.0;
 
         // Compute average negative derivative after peak
-        // Look at a window after the peak (up to 30% of remaining signal or all of it)
+        // Look at a window after the peak (configurable fraction of remaining signal)
         size_t remaining = values.size() - peak_frame - 1;
-        size_t window = std::min(remaining, std::max(size_t(10), remaining * 3 / 10));
+        size_t window_from_fraction = static_cast<size_t>(remaining * decay_window_fraction);
+        size_t window = std::min(remaining, std::max(size_t(10), window_from_fraction));
 
         double total_drop = 0.0;
         for (size_t i = peak_frame; i < peak_frame + window; ++i) {
@@ -397,6 +402,74 @@ private:
 
         // Sigmoid normalization - typical decay rates map to 0.3-0.8
         double normalized = relative_decay / (relative_decay + 0.1);
+        return std::clamp(normalized, 0.0, 1.0);
+    }
+
+    // Median dominance: peak / median ratio
+    // More robust than peak/mean - median is less affected by outliers
+    // High score = peak stands out significantly from typical values
+    static double computeMedianDominance(std::vector<double> const& values) {
+        if (values.empty()) return 0.0;
+
+        // Find peak
+        double max_val = *std::max_element(values.begin(), values.end());
+        if (max_val <= 0.0) return 0.0;
+
+        // Compute median
+        std::vector<double> sorted = values;
+        std::sort(sorted.begin(), sorted.end());
+        double median;
+        size_t n = sorted.size();
+        if (n % 2 == 0) {
+            median = (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
+        } else {
+            median = sorted[n / 2];
+        }
+
+        if (median <= 0.0) return 1.0;  // If median is 0, peak dominates completely
+
+        double ratio = max_val / median;
+
+        // Normalize: ratio of 1 = peak equals median (bad), higher = more dominant
+        // Similar to peak_dominance but with median instead of mean
+        double normalized = 1.0 - 1.0 / ratio;
+        return std::clamp(normalized, 0.0, 1.0);
+    }
+
+    // Tail weight: mean / median ratio
+    // Measures skewness - heavy right tail means dramatic events
+    // High score = heavy tail (mean >> median), indicates spikes/peaks
+    // Low score = symmetric or left-skewed distribution
+    static double computeTailWeight(std::vector<double> const& values) {
+        if (values.empty()) return 0.0;
+
+        // Compute mean
+        double sum = std::accumulate(values.begin(), values.end(), 0.0);
+        double mean = sum / static_cast<double>(values.size());
+
+        // Compute median
+        std::vector<double> sorted = values;
+        std::sort(sorted.begin(), sorted.end());
+        double median;
+        size_t n = sorted.size();
+        if (n % 2 == 0) {
+            median = (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
+        } else {
+            median = sorted[n / 2];
+        }
+
+        if (median <= 0.0) {
+            // If median is 0 but mean is positive, we have extreme skewness
+            return mean > 0.0 ? 1.0 : 0.0;
+        }
+
+        double ratio = mean / median;
+
+        // For symmetric distributions, ratio ≈ 1
+        // For right-skewed (dramatic peaks), ratio > 1
+        // Normalize: ratio=1 -> 0.5, ratio=2 -> 0.67, ratio=4 -> 0.8
+        // Using: (ratio - 1) / (ratio + 1) maps [0,inf) to [-1,1], then shift to [0,1]
+        double normalized = ratio / (ratio + 1.0);  // Maps ratio=1 to 0.5, ratio->inf to 1
         return std::clamp(normalized, 0.0, 1.0);
     }
 };

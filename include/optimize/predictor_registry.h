@@ -74,10 +74,6 @@ inline constexpr std::array<PredictorDef, 18> PREDICTOR_REGISTRY = {{
      "Maximum acceleration (d²/dt²)",
      PredictorType::Frame, PredictorCategory::Detection, false},
 
-    {"constant_frame", "ConstFrame",
-     "Always returns configured frame (for testing)",
-     PredictorType::Frame, PredictorCategory::Detection, false},
-
     // ========================================================================
     // Score Prediction Methods - Boom-dependent (require reference frame)
     // ========================================================================
@@ -138,12 +134,12 @@ inline constexpr std::array<PredictorDef, 18> PREDICTOR_REGISTRY = {{
      "Drop rate after peak (high=fast decay)",
      PredictorType::Score, PredictorCategory::Signal, false},
 
-    // ========================================================================
-    // Testing
-    // ========================================================================
+    {"median_dominance", "MedDom",
+     "Peak/median ratio (robust to outliers)",
+     PredictorType::Score, PredictorCategory::Signal, false},
 
-    {"constant_score", "ConstScore",
-     "Always returns configured score (for testing)",
+    {"tail_weight", "Tail",
+     "Mean/median ratio (high=heavy tail/spikes)",
      PredictorType::Score, PredictorCategory::Signal, false},
 }};
 
