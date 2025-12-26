@@ -847,6 +847,31 @@ struct ComputedMetricsForConfig {
     std::vector<std::string> sim_ids;  // For error reporting
     std::atomic<size_t> sims_completed{0};
 
+    // Default constructor
+    ComputedMetricsForConfig() = default;
+
+    // Move constructor (needed for vector storage)
+    ComputedMetricsForConfig(ComputedMetricsForConfig&& other) noexcept
+        : collectors(std::move(other.collectors))
+        , frame_durations(std::move(other.frame_durations))
+        , sim_ids(std::move(other.sim_ids))
+        , sims_completed(other.sims_completed.load()) {}
+
+    // Move assignment (needed for vector storage)
+    ComputedMetricsForConfig& operator=(ComputedMetricsForConfig&& other) noexcept {
+        if (this != &other) {
+            collectors = std::move(other.collectors);
+            frame_durations = std::move(other.frame_durations);
+            sim_ids = std::move(other.sim_ids);
+            sims_completed.store(other.sims_completed.load());
+        }
+        return *this;
+    }
+
+    // Delete copy operations (atomic not copyable)
+    ComputedMetricsForConfig(ComputedMetricsForConfig const&) = delete;
+    ComputedMetricsForConfig& operator=(ComputedMetricsForConfig const&) = delete;
+
     void init(size_t num_sims) {
         collectors.resize(num_sims);
         frame_durations.resize(num_sims);
@@ -1194,6 +1219,348 @@ void saveOptimizationResults(
 }
 
 // ============================================================================
+// PHASE 1 METRICS CACHING
+// ============================================================================
+// Save/load computed metrics to avoid expensive recomputation.
+// The cached data includes:
+// - All ParameterizedMetric configurations
+// - For each config, metric values for all simulations
+// - Validation data (sim IDs, frame counts, checksums)
+
+// Cache file format version - increment when format changes
+constexpr int METRICS_CACHE_VERSION = 1;
+
+// Cached metric data for one simulation
+struct CachedSimulationMetrics {
+    std::string sim_id;
+    double frame_duration;
+    int frame_count;
+    std::vector<double> metric_values;  // The actual time series
+};
+
+// Cached data for one parameter configuration
+struct CachedMetricConfig {
+    std::string metric_name;
+    nlohmann::json config_json;  // Serialized MetricConfig
+    std::vector<CachedSimulationMetrics> simulations;
+};
+
+// Full cache structure
+struct MetricsCache {
+    int version = METRICS_CACHE_VERSION;
+    int grid_steps = 0;
+    std::string annotations_path;
+    std::vector<std::string> sim_ids;  // Expected simulation IDs in order
+    std::vector<CachedMetricConfig> configs;
+};
+
+// Serialize MetricConfig to JSON
+nlohmann::json metricConfigToJson(MetricConfig const& config) {
+    nlohmann::json j;
+    j["name"] = config.name;
+    std::visit([&j](auto const& params) {
+        using T = std::decay_t<decltype(params)>;
+        if constexpr (std::is_same_v<T, SectorMetricParams>) {
+            j["type"] = "sector";
+            j["min_sectors"] = params.min_sectors;
+            j["max_sectors"] = params.max_sectors;
+            j["target_per_sector"] = params.target_per_sector;
+        } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
+            j["type"] = "cv_sector";
+            j["min_sectors"] = params.min_sectors;
+            j["max_sectors"] = params.max_sectors;
+            j["target_per_sector"] = params.target_per_sector;
+            j["cv_normalization"] = params.cv_normalization;
+        } else if constexpr (std::is_same_v<T, GridMetricParams>) {
+            j["type"] = "grid";
+            j["min_grid"] = params.min_grid;
+            j["max_grid"] = params.max_grid;
+            j["target_per_cell"] = params.target_per_cell;
+        } else if constexpr (std::is_same_v<T, FoldMetricParams>) {
+            j["type"] = "fold";
+            j["max_radius"] = params.max_radius;
+            j["cv_normalization"] = params.cv_normalization;
+        } else if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
+            j["type"] = "trajectory";
+            j["max_radius"] = params.max_radius;
+            j["min_spread_threshold"] = params.min_spread_threshold;
+        } else if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
+            j["type"] = "curvature";
+            j["max_radius"] = params.max_radius;
+            j["min_spread_threshold"] = params.min_spread_threshold;
+            j["log_ratio_normalization"] = params.log_ratio_normalization;
+        } else if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
+            j["type"] = "true_folds";
+            j["max_radius"] = params.max_radius;
+            j["min_spread_threshold"] = params.min_spread_threshold;
+            j["gini_chaos_baseline"] = params.gini_chaos_baseline;
+            j["gini_baseline_divisor"] = params.gini_baseline_divisor;
+        } else if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
+            j["type"] = "local_coherence";
+            j["max_radius"] = params.max_radius;
+            j["min_spread_threshold"] = params.min_spread_threshold;
+            j["log_inverse_baseline"] = params.log_inverse_baseline;
+            j["log_inverse_divisor"] = params.log_inverse_divisor;
+        }
+    }, config.params);
+    return j;
+}
+
+// Deserialize MetricConfig from JSON
+MetricConfig metricConfigFromJson(nlohmann::json const& j) {
+    MetricConfig config;
+    config.name = j.value("name", "");
+    std::string type = j.value("type", "");
+
+    if (type == "sector") {
+        SectorMetricParams p;
+        p.min_sectors = j.value("min_sectors", 8);
+        p.max_sectors = j.value("max_sectors", 72);
+        p.target_per_sector = j.value("target_per_sector", 40);
+        config.params = p;
+    } else if (type == "cv_sector") {
+        CVSectorMetricParams p;
+        p.min_sectors = j.value("min_sectors", 8);
+        p.max_sectors = j.value("max_sectors", 72);
+        p.target_per_sector = j.value("target_per_sector", 40);
+        p.cv_normalization = j.value("cv_normalization", 1.5);
+        config.params = p;
+    } else if (type == "grid") {
+        GridMetricParams p;
+        p.min_grid = j.value("min_grid", 4);
+        p.max_grid = j.value("max_grid", 32);
+        p.target_per_cell = j.value("target_per_cell", 40);
+        config.params = p;
+    } else if (type == "fold") {
+        FoldMetricParams p;
+        p.max_radius = j.value("max_radius", 2.0);
+        p.cv_normalization = j.value("cv_normalization", 1.5);
+        config.params = p;
+    } else if (type == "trajectory") {
+        TrajectoryMetricParams p;
+        p.max_radius = j.value("max_radius", 2.0);
+        p.min_spread_threshold = j.value("min_spread_threshold", 0.05);
+        config.params = p;
+    } else if (type == "curvature") {
+        CurvatureMetricParams p;
+        p.max_radius = j.value("max_radius", 2.0);
+        p.min_spread_threshold = j.value("min_spread_threshold", 0.05);
+        p.log_ratio_normalization = j.value("log_ratio_normalization", 2.0);
+        config.params = p;
+    } else if (type == "true_folds") {
+        TrueFoldsMetricParams p;
+        p.max_radius = j.value("max_radius", 2.0);
+        p.min_spread_threshold = j.value("min_spread_threshold", 0.05);
+        p.gini_chaos_baseline = j.value("gini_chaos_baseline", 0.35);
+        p.gini_baseline_divisor = j.value("gini_baseline_divisor", 0.65);
+        config.params = p;
+    } else if (type == "local_coherence") {
+        LocalCoherenceMetricParams p;
+        p.max_radius = j.value("max_radius", 2.0);
+        p.min_spread_threshold = j.value("min_spread_threshold", 0.05);
+        p.log_inverse_baseline = j.value("log_inverse_baseline", 1.0);
+        p.log_inverse_divisor = j.value("log_inverse_divisor", 2.5);
+        config.params = p;
+    } else {
+        // Default to SectorMetricParams for unknown types
+        config.params = SectorMetricParams{};
+    }
+
+    return config;
+}
+
+// Save computed metrics to JSON file
+bool saveMetricsCache(
+    std::string const& path,
+    std::vector<ParameterizedMetric> const& param_metrics,
+    std::vector<ComputedMetricsForConfig> const& computed_configs,
+    std::vector<LoadedSimulation> const& simulations,
+    std::string const& annotations_path,
+    int grid_steps) {
+
+    std::cout << "Saving metrics cache to: " << path << "\n";
+
+    nlohmann::json cache;
+    cache["version"] = METRICS_CACHE_VERSION;
+    cache["grid_steps"] = grid_steps;
+    cache["annotations_path"] = annotations_path;
+
+    // Save simulation IDs for validation
+    nlohmann::json sim_ids = nlohmann::json::array();
+    for (auto const& sim : simulations) {
+        sim_ids.push_back(sim.id);
+    }
+    cache["sim_ids"] = sim_ids;
+
+    // Save each config's computed metrics
+    nlohmann::json configs = nlohmann::json::array();
+    for (size_t cfg_idx = 0; cfg_idx < param_metrics.size(); ++cfg_idx) {
+        auto const& pm = param_metrics[cfg_idx];
+        auto const& computed = computed_configs[cfg_idx];
+
+        nlohmann::json cfg_json;
+        cfg_json["metric_name"] = pm.metric_name;
+        cfg_json["config"] = metricConfigToJson(pm.config);
+
+        // Save per-simulation data
+        nlohmann::json sims = nlohmann::json::array();
+        for (size_t sim_idx = 0; sim_idx < computed.collectors.size(); ++sim_idx) {
+            auto const& collector = computed.collectors[sim_idx];
+            auto const* series = collector.getMetric(pm.metric_name);
+
+            nlohmann::json sim_json;
+            sim_json["sim_id"] = computed.sim_ids[sim_idx];
+            sim_json["frame_duration"] = computed.frame_durations[sim_idx];
+
+            if (series != nullptr) {
+                sim_json["frame_count"] = static_cast<int>(series->values().size());
+                sim_json["values"] = series->values();
+            } else {
+                sim_json["frame_count"] = 0;
+                sim_json["values"] = nlohmann::json::array();
+            }
+
+            sims.push_back(sim_json);
+        }
+        cfg_json["simulations"] = sims;
+
+        configs.push_back(cfg_json);
+    }
+    cache["configs"] = configs;
+
+    // Write to file
+    std::ofstream file(path);
+    if (!file) {
+        std::cerr << "Error: Cannot write to " << path << "\n";
+        return false;
+    }
+
+    // Use compact format to save space, but still readable
+    file << cache.dump(2);
+    file.close();
+
+    std::cout << "  Saved " << param_metrics.size() << " metric configs x "
+              << simulations.size() << " simulations\n";
+    return true;
+}
+
+// Load metrics cache from JSON file
+// Returns true if successful and populates output parameters
+bool loadMetricsCache(
+    std::string const& path,
+    std::vector<ParameterizedMetric>& param_metrics_out,
+    std::vector<ComputedMetricsForConfig>& computed_configs_out,
+    std::vector<LoadedSimulation> const& simulations,
+    std::string const& annotations_path,
+    int grid_steps) {
+
+    std::cout << "Loading metrics cache from: " << path << "\n";
+
+    std::ifstream file(path);
+    if (!file) {
+        std::cerr << "Error: Cannot read " << path << "\n";
+        return false;
+    }
+
+    nlohmann::json cache;
+    try {
+        file >> cache;
+    } catch (nlohmann::json::parse_error const& e) {
+        std::cerr << "Error: Invalid JSON in " << path << ": " << e.what() << "\n";
+        return false;
+    }
+
+    // Version check
+    int file_version = cache.value("version", 0);
+    if (file_version != METRICS_CACHE_VERSION) {
+        std::cerr << "Error: Cache version mismatch (file=" << file_version
+                  << ", expected=" << METRICS_CACHE_VERSION << ")\n";
+        return false;
+    }
+
+    // Grid steps check
+    int file_grid_steps = cache.value("grid_steps", 0);
+    if (file_grid_steps != grid_steps) {
+        std::cerr << "Error: Grid steps mismatch (file=" << file_grid_steps
+                  << ", expected=" << grid_steps << ")\n";
+        return false;
+    }
+
+    // Annotations path check (informational, not strict - allow using same metrics with different annotations)
+    std::string file_annotations_path = cache.value("annotations_path", "");
+    if (file_annotations_path != annotations_path) {
+        std::cerr << "Warning: Annotations path differs (file=" << file_annotations_path
+                  << ", current=" << annotations_path << ")\n";
+        // Don't fail, just warn - user may want to reuse metrics computation
+    }
+
+    // Validate simulation IDs match
+    auto const& file_sim_ids = cache["sim_ids"];
+    if (file_sim_ids.size() != simulations.size()) {
+        std::cerr << "Error: Simulation count mismatch (file=" << file_sim_ids.size()
+                  << ", expected=" << simulations.size() << ")\n";
+        return false;
+    }
+
+    for (size_t i = 0; i < simulations.size(); ++i) {
+        if (file_sim_ids[i].get<std::string>() != simulations[i].id) {
+            std::cerr << "Error: Simulation ID mismatch at index " << i
+                      << " (file=" << file_sim_ids[i].get<std::string>()
+                      << ", expected=" << simulations[i].id << ")\n";
+            return false;
+        }
+    }
+
+    // Load configs
+    auto const& configs = cache["configs"];
+    param_metrics_out.clear();
+    computed_configs_out.clear();
+    param_metrics_out.reserve(configs.size());
+    computed_configs_out.reserve(configs.size());
+
+    for (auto const& cfg_json : configs) {
+        // Reconstruct ParameterizedMetric
+        ParameterizedMetric pm;
+        pm.metric_name = cfg_json["metric_name"].get<std::string>();
+        pm.config = metricConfigFromJson(cfg_json["config"]);
+        param_metrics_out.push_back(pm);
+
+        // Reconstruct ComputedMetricsForConfig
+        ComputedMetricsForConfig computed;
+        computed.init(simulations.size());
+
+        auto const& sims_json = cfg_json["simulations"];
+        for (size_t sim_idx = 0; sim_idx < sims_json.size(); ++sim_idx) {
+            auto const& sim_json = sims_json[sim_idx];
+
+            computed.sim_ids[sim_idx] = sim_json["sim_id"].get<std::string>();
+            computed.frame_durations[sim_idx] = sim_json["frame_duration"].get<double>();
+
+            // Reconstruct MetricsCollector with the metric series
+            std::unordered_map<std::string, MetricConfig> config_map;
+            config_map[pm.metric_name] = pm.config;
+            computed.collectors[sim_idx].setAllMetricConfigs(config_map);
+            computed.collectors[sim_idx].registerStandardMetrics();
+
+            // Load metric values frame by frame
+            auto const& values = sim_json["values"];
+            for (size_t frame = 0; frame < values.size(); ++frame) {
+                computed.collectors[sim_idx].beginFrame(static_cast<int>(frame));
+                computed.collectors[sim_idx].setMetric(pm.metric_name, values[frame].get<double>());
+                computed.collectors[sim_idx].endFrame();
+            }
+        }
+        computed.sims_completed.store(simulations.size());
+
+        computed_configs_out.push_back(std::move(computed));
+    }
+
+    std::cout << "  Loaded " << param_metrics_out.size() << " metric configs x "
+              << simulations.size() << " simulations\n";
+    return true;
+}
+
+// ============================================================================
 // MAIN
 // ============================================================================
 
@@ -1206,11 +1573,17 @@ void printUsage(char const* prog) {
         << "                       Use 3-4 for quick tests, 12-16 for thorough search\n"
         << "  --primary <target>   Primary target for metric optimization (default: first frame target)\n"
         << "  --output <file>      Output file for best parameters (default: best_params.toml)\n"
+        << "  --save-metrics <file>  Save Phase 1 computed metrics to JSON file\n"
+        << "  --load-metrics <file>  Load Phase 1 metrics from file (skips computation)\n"
         << "  --help               Show this help message\n\n"
         << "Optimization Phases:\n"
         << "  Phase 1: Compute metrics for all parameter configurations\n"
         << "  Phase 2: Optimize primary target to find best metric parameters\n"
-        << "  Phase 3: Optimize secondary targets using primary's metric parameters\n";
+        << "  Phase 3: Optimize secondary targets using primary's metric parameters\n\n"
+        << "Metric Caching:\n"
+        << "  Phase 1 is expensive (computes metrics for all configs x simulations).\n"
+        << "  Use --save-metrics to cache results, then --load-metrics to reuse them.\n"
+        << "  This allows fast iteration on detection methods without recomputing metrics.\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -1223,6 +1596,8 @@ int main(int argc, char* argv[]) {
     std::string annotations_path;
     std::string output_file = "best_params.toml";
     std::string primary_target_arg;  // Empty = auto-detect
+    std::string save_metrics_path;   // Path to save Phase 1 metrics
+    std::string load_metrics_path;   // Path to load Phase 1 metrics
     int grid_steps = 8;
 
     for (int i = 1; i < argc; ++i) {
@@ -1238,6 +1613,10 @@ int main(int argc, char* argv[]) {
             primary_target_arg = argv[++i];
         } else if (arg == "--output" && i + 1 < argc) {
             output_file = argv[++i];
+        } else if (arg == "--save-metrics" && i + 1 < argc) {
+            save_metrics_path = argv[++i];
+        } else if (arg == "--load-metrics" && i + 1 < argc) {
+            load_metrics_path = argv[++i];
         } else if (arg[0] == '-') {
             std::cerr << "Unknown option: " << arg << "\n";
             printUsage(argv[0]);
@@ -1423,37 +1802,123 @@ int main(int argc, char* argv[]) {
 
     auto start_time = std::chrono::steady_clock::now();
     std::vector<EvaluationResult> results;
+    size_t num_sims = simulations.size();
+    std::vector<ComputedMetricsForConfig> config_states(param_metrics.size());
+    bool metrics_loaded_from_cache = false;
 
-    std::atomic<size_t> metrics_completed{0};
-    std::atomic<bool> done{false};
+    // Try loading from cache if requested
+    if (!load_metrics_path.empty()) {
+        std::cout << "\n--- Attempting to load metrics from cache ---\n";
+        if (loadMetricsCache(load_metrics_path, param_metrics, config_states, simulations, annotations_path, grid_steps)) {
+            metrics_loaded_from_cache = true;
+            std::cout << "Successfully loaded metrics from cache.\n";
+        } else {
+            std::cerr << "Failed to load from cache, will compute fresh.\n";
+            // Reinitialize config_states since load may have partially modified them
+            config_states.clear();
+            config_states.resize(param_metrics.size());
+        }
+    }
 
-    std::thread progress_thread([&]() {
-        while (!done.load()) {
+    // Compute metrics if not loaded from cache
+    if (!metrics_loaded_from_cache) {
+        std::cout << "\n--- Computing metrics ---\n";
+
+        for (size_t i = 0; i < param_metrics.size(); ++i) {
+            config_states[i].init(num_sims);
+        }
+
+        std::atomic<size_t> metrics_completed{0};
+        std::atomic<bool> done{false};
+
+        std::thread progress_thread([&]() {
+            while (!done.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                size_t c = metrics_completed.load();
+                auto now = std::chrono::steady_clock::now();
+                double elapsed = std::chrono::duration<double>(now - start_time).count();
+                double rate = c > 0 ? c / elapsed : 0;
+                double eta = rate > 0 ? (param_metrics.size() - c) / rate : 0;
+
+                std::cout << "\rComputing: " << c << "/" << param_metrics.size()
+                          << " metrics (" << std::fixed << std::setprecision(1)
+                          << (100.0 * c / param_metrics.size()) << "%)"
+                          << " | " << std::setprecision(1) << elapsed << "s"
+                          << " | ETA: " << std::setprecision(0) << eta << "s     " << std::flush;
+            }
+        });
+
+        size_t total_work_items = param_metrics.size() * num_sims;
+        std::atomic<size_t> work_idx{0};
+
+        std::vector<std::thread> workers;
+        for (unsigned int t = 0; t < num_threads; ++t) {
+            workers.emplace_back([&]() {
+                while (true) {
+                    size_t idx = work_idx.fetch_add(1);
+                    if (idx >= total_work_items) break;
+
+                    size_t config_idx = idx / num_sims;
+                    size_t sim_idx = idx % num_sims;
+
+                    auto const& pm = param_metrics[config_idx];
+                    auto const& sim = simulations[sim_idx];
+                    auto& state = config_states[config_idx];
+
+                    computeMetricsForSim(
+                        pm, sim,
+                        state.collectors[sim_idx],
+                        state.frame_durations[sim_idx],
+                        state.sim_ids[sim_idx]);
+
+                    if (state.sims_completed.fetch_add(1) + 1 == num_sims) {
+                        metrics_completed.fetch_add(1);
+                    }
+                }
+            });
+        }
+
+        for (auto& w : workers) {
+            w.join();
+        }
+
+        done.store(true);
+        progress_thread.join();
+        std::cout << "\n";
+
+        // Save metrics cache if requested
+        if (!save_metrics_path.empty()) {
+            std::cout << "\n--- Saving metrics to cache ---\n";
+            saveMetricsCache(save_metrics_path, param_metrics, config_states, simulations, annotations_path, grid_steps);
+        }
+    }
+
+    // Evaluate all detection methods
+    std::cout << "\n--- Evaluating detection methods ---\n";
+    std::atomic<size_t> eval_completed{0};
+    std::atomic<bool> eval_done{false};
+    auto eval_start = std::chrono::steady_clock::now();
+
+    std::thread eval_progress([&]() {
+        while (!eval_done.load()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
-            size_t c = metrics_completed.load();
+            size_t c = eval_completed.load();
             auto now = std::chrono::steady_clock::now();
-            double elapsed = std::chrono::duration<double>(now - start_time).count();
+            double elapsed = std::chrono::duration<double>(now - eval_start).count();
             double rate = c > 0 ? c / elapsed : 0;
             double eta = rate > 0 ? (param_metrics.size() - c) / rate : 0;
 
-            std::cout << "\rProgress: " << c << "/" << param_metrics.size()
-                      << " metrics (" << std::fixed << std::setprecision(1)
+            std::cout << "\rEvaluating: " << c << "/" << param_metrics.size()
+                      << " configs (" << std::fixed << std::setprecision(1)
                       << (100.0 * c / param_metrics.size()) << "%)"
                       << " | " << std::setprecision(1) << elapsed << "s"
                       << " | ETA: " << std::setprecision(0) << eta << "s     " << std::flush;
         }
     });
 
-    size_t num_sims = simulations.size();
-    std::vector<ComputedMetricsForConfig> config_states(param_metrics.size());
-    for (size_t i = 0; i < param_metrics.size(); ++i) {
-        config_states[i].init(num_sims);
-    }
-
     std::mutex results_mutex;
-    std::mutex eval_mutex;
 
-    auto evaluateCompletedConfig = [&](size_t config_idx) {
+    auto evaluateConfig = [&](size_t config_idx) {
         auto const& pm = param_metrics[config_idx];
         auto const& computed = config_states[config_idx];
         std::vector<EvaluationResult> local_results;
@@ -1531,47 +1996,29 @@ int main(int argc, char* argv[]) {
             results.insert(results.end(), local_results.begin(), local_results.end());
         }
         config_states[config_idx].reset();
-        metrics_completed.fetch_add(1);
+        eval_completed.fetch_add(1);
     };
 
-    size_t total_work_items = param_metrics.size() * num_sims;
-    std::atomic<size_t> work_idx{0};
-
-    std::vector<std::thread> workers;
+    // Parallel evaluation
+    std::atomic<size_t> eval_idx{0};
+    std::vector<std::thread> eval_workers;
     for (unsigned int t = 0; t < num_threads; ++t) {
-        workers.emplace_back([&]() {
+        eval_workers.emplace_back([&]() {
             while (true) {
-                size_t idx = work_idx.fetch_add(1);
-                if (idx >= total_work_items) break;
-
-                size_t config_idx = idx / num_sims;
-                size_t sim_idx = idx % num_sims;
-
-                auto const& pm = param_metrics[config_idx];
-                auto const& sim = simulations[sim_idx];
-                auto& state = config_states[config_idx];
-
-                computeMetricsForSim(
-                    pm, sim,
-                    state.collectors[sim_idx],
-                    state.frame_durations[sim_idx],
-                    state.sim_ids[sim_idx]);
-
-                size_t completed = state.sims_completed.fetch_add(1) + 1;
-                if (completed == num_sims) {
-                    std::lock_guard<std::mutex> lock(eval_mutex);
-                    evaluateCompletedConfig(config_idx);
-                }
+                size_t idx = eval_idx.fetch_add(1);
+                if (idx >= param_metrics.size()) break;
+                evaluateConfig(idx);
             }
         });
     }
 
-    for (auto& w : workers) {
+    for (auto& w : eval_workers) {
         w.join();
     }
 
-    done.store(true);
-    progress_thread.join();
+    eval_done.store(true);
+    eval_progress.join();
+    std::cout << "\n";
 
     auto end_time = std::chrono::steady_clock::now();
     double total_secs = std::chrono::duration<double>(end_time - start_time).count();
