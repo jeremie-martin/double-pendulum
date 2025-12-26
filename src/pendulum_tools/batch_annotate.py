@@ -343,6 +343,11 @@ class MainWindow(QMainWindow):
         self.title_edit = QLineEdit()
         self.title_edit.setReadOnly(True)
         title_row.addWidget(self.title_edit)
+        self.regen_title_btn = QPushButton("↻")
+        self.regen_title_btn.setFixedWidth(30)
+        self.regen_title_btn.setToolTip("Regenerate title")
+        self.regen_title_btn.clicked.connect(lambda: self._regenerate("title"))
+        title_row.addWidget(self.regen_title_btn)
         self.copy_title_btn = QPushButton("Copy")
         self.copy_title_btn.setFixedWidth(50)
         self.copy_title_btn.clicked.connect(lambda: self._copy_to_clipboard(self.title_edit.text()))
@@ -353,6 +358,11 @@ class MainWindow(QMainWindow):
         desc_header = QHBoxLayout()
         desc_header.addWidget(QLabel("Description:"))
         desc_header.addStretch()
+        self.regen_desc_btn = QPushButton("↻")
+        self.regen_desc_btn.setFixedWidth(30)
+        self.regen_desc_btn.setToolTip("Regenerate description")
+        self.regen_desc_btn.clicked.connect(lambda: self._regenerate("description"))
+        desc_header.addWidget(self.regen_desc_btn)
         self.copy_desc_btn = QPushButton("Copy")
         self.copy_desc_btn.setFixedWidth(50)
         self.copy_desc_btn.clicked.connect(lambda: self._copy_to_clipboard(self.desc_edit.toPlainText()))
@@ -577,6 +587,22 @@ Processed: {'Yes' if video.has_processed else 'No'} | Music: {music_str}{extra_i
         clipboard = QApplication.clipboard()
         clipboard.setText(text)
         self.statusBar().showMessage("Copied to clipboard", 1500)
+
+    def _regenerate(self, field: str) -> None:
+        """Regenerate title or description from templates."""
+        if not self.current_video or not self.current_video.has_metadata:
+            return
+
+        try:
+            metadata = VideoMetadata.from_file(self.current_video.metadata_path)
+            if field == "title":
+                self.title_edit.setText(generate_title(metadata))
+                self.statusBar().showMessage("Title regenerated", 1500)
+            elif field == "description":
+                self.desc_edit.setText(generate_description(metadata))
+                self.statusBar().showMessage("Description regenerated", 1500)
+        except Exception as e:
+            self.statusBar().showMessage(f"Error: {e}", 3000)
 
     def _update_music_combo(self) -> None:
         """Update music dropdown with valid tracks."""
