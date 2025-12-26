@@ -85,6 +85,7 @@ class VideoInfo:
     # Processing state
     has_processed: bool = False
     has_music: bool = False
+    music_title: Optional[str] = None
 
 
 def load_video_info(video_dir: Path) -> Optional[VideoInfo]:
@@ -109,6 +110,7 @@ def load_video_info(video_dir: Path) -> Optional[VideoInfo]:
     boom_seconds = None
     video_fps = 60
     duration_seconds = 30.0
+    music_title = None
 
     if has_metadata:
         try:
@@ -120,6 +122,10 @@ def load_video_info(video_dir: Path) -> Optional[VideoInfo]:
             output = data.get("output", {})
             video_fps = output.get("video_fps", 60)
             duration_seconds = output.get("video_duration", 30.0)
+
+            # Get music info
+            music = data.get("music", {})
+            music_title = music.get("title")
         except Exception:
             pass
 
@@ -136,6 +142,7 @@ def load_video_info(video_dir: Path) -> Optional[VideoInfo]:
         best_video_path=best_video,
         has_processed=has_processed,
         has_music=has_music,
+        music_title=music_title,
     )
 
 
@@ -383,10 +390,10 @@ class MainWindow(QMainWindow):
         """Get status indicator for video."""
         if video.boom_frame is None:
             return "?"  # No boom set
+        elif video.has_processed:
+            return "P"  # Processed (highest priority)
         elif video.has_music:
             return "M"  # Has music
-        elif video.has_processed:
-            return "P"  # Processed
         else:
             return "+"  # Has boom set
 
@@ -422,13 +429,15 @@ class MainWindow(QMainWindow):
         # Update info
         boom_str = f"{video.boom_seconds:.2f}s" if video.boom_seconds else "N/A"
         video_file = video.best_video_path.name if video.best_video_path else "None"
+        music_str = video.music_title if video.music_title else "None"
 
         info_text = f"""<b>{video.name}</b><br>
 FPS: {video.video_fps} | Duration: {video.duration_seconds:.1f}s<br>
 Video: {video_file}<br>
 Boom Frame: {video.boom_frame if video.boom_frame else 'Not set'}<br>
 Boom Time: {boom_str}<br>
-Processed: {'Yes' if video.has_processed else 'No'} | Music: {'Yes' if video.has_music else 'No'}"""
+Processed: {'Yes' if video.has_processed else 'No'}<br>
+Music: {music_str}"""
 
         self.info_label.setText(info_text)
 
