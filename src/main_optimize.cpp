@@ -41,6 +41,7 @@
 #include "metrics/metrics_init.h"
 #include "optimize/frame_detector.h"
 #include "optimize/prediction_target.h"
+#include "optimize/predictor_registry.h"
 #include "optimize/score_predictor.h"
 #include "pendulum.h"
 #include "simulation_data.h"
@@ -1088,7 +1089,11 @@ struct ScoreEvaluationResult {
     std::vector<double> per_sim_errors;
 
     std::string describeShort() const {
-        return optimize::toString(params.method);
+        std::string result = optimize::toString(params.method);
+        if (params.method == optimize::ScoreMethod::ConstantScore) {
+            result += "=" + std::to_string(params.constant_score).substr(0, 4);
+        }
+        return result;
     }
 };
 
@@ -1506,6 +1511,16 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // ConstantFrame (dummy predictor for testing)
+        // Try a few representative frame values
+        for (int frame_val : {50, 100, 200, 300, 500}) {
+            optimize::FrameDetectionParams bp;
+            bp.metric_name = pm.metric_name;
+            bp.method = optimize::FrameDetectionMethod::ConstantFrame;
+            bp.constant_frame = frame_val;
+            evaluateMehod(bp);
+        }
+
         {
             std::lock_guard<std::mutex> lock(results_mutex);
             results.insert(results.end(), local_results.begin(), local_results.end());
@@ -1778,6 +1793,15 @@ int main(int argc, char* argv[]) {
                 }
             }
 
+            // ConstantFrame (dummy predictor for testing)
+            for (int frame_val : {50, 100, 200, 300, 500}) {
+                optimize::FrameDetectionParams bp;
+                bp.metric_name = best_metric_name;
+                bp.method = optimize::FrameDetectionMethod::ConstantFrame;
+                bp.constant_frame = frame_val;
+                evaluateMethod(bp);
+            }
+
             // Find best result for this target
             if (!target_results.empty()) {
                 std::sort(target_results.begin(), target_results.end(),
@@ -1843,7 +1867,15 @@ int main(int argc, char* argv[]) {
     if (!score_targets.empty()) {
         std::cout << "=== Phase 4: Optimizing Score Targets ===\n";
         std::cout << "Using metric: " << best_metric_name << " (from primary)\n";
-        std::cout << "Score methods: peak_clarity, post_boom_sustain, composite\n\n";
+
+        // Get score methods from registry
+        auto score_predictor_defs = optimize::getScorePredictors();
+        std::cout << "Score methods (" << score_predictor_defs.size() << " from registry): ";
+        for (size_t i = 0; i < score_predictor_defs.size(); ++i) {
+            if (i > 0) std::cout << ", ";
+            std::cout << score_predictor_defs[i]->name;
+        }
+        std::cout << "\n\n";
 
         // Use the same computed metrics from Phase 3
         ParameterizedMetric best_pm;
@@ -1875,13 +1907,6 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Score methods to try
-        std::vector<optimize::ScoreMethod> score_methods = {
-            optimize::ScoreMethod::PeakClarity,
-            optimize::ScoreMethod::PostBoomSustain,
-            optimize::ScoreMethod::Composite
-        };
-
         for (auto const& td : score_targets) {
             int sim_count = 0;
             for (auto const& sim : simulations) {
@@ -1892,10 +1917,23 @@ int main(int argc, char* argv[]) {
 
             std::vector<ScoreEvaluationResult> target_results;
 
-            for (auto method : score_methods) {
+            // Try all score methods from registry
+            for (auto const* pred_def : score_predictor_defs) {
+                optimize::ScoreMethod method = optimize::parseScoreMethod(pred_def->name);
                 optimize::ScoreParams sp;
                 sp.metric_name = best_metric_name;
                 sp.method = method;
+
+                // For constant_score, try a few different values
+                std::vector<double> constant_values = {0.5};  // Default
+                if (method == optimize::ScoreMethod::ConstantScore) {
+                    constant_values = {0.0, 0.25, 0.5, 0.75, 1.0};
+                }
+
+                for (double const_val : constant_values) {
+                    if (method == optimize::ScoreMethod::ConstantScore) {
+                        sp.constant_score = const_val;
+                    }
 
                 optimize::ScorePredictor predictor(sp);
 
@@ -1936,7 +1974,8 @@ int main(int argc, char* argv[]) {
 
                     target_results.push_back(result);
                 }
-            }
+                }  // for const_val
+            }  // for pred_def
 
             // Find best result for this target
             if (!target_results.empty()) {
