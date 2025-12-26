@@ -518,8 +518,8 @@ class MainWindow(QMainWindow):
             extra_info = f"""<br><b>--- Simulation ---</b><br>
 Pendulums: {meta.simulation.pendulum_count:,}<br>
 Date: {date_str}<br>
-<b>--- Color ---</b><br>
-Scheme: {meta.color.scheme}{color_preset}<br>
+<b>--- Color ---</b>{color_preset}<br>
+Scheme: {meta.color.scheme} | Start: {meta.color.start} | End: {meta.color.end}<br>
 <b>--- Post-Process ---</b>{pp_preset}<br>
 Tone Map: {meta.post_process.tone_map}<br>
 Exposure: {meta.post_process.exposure} | Contrast: {meta.post_process.contrast} | Gamma: {meta.post_process.gamma}"""
