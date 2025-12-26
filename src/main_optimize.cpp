@@ -1107,8 +1107,10 @@ void saveOptimizationResults(
     }
 
     // Write all optimized frame targets
+    // TODO: Add score target optimization - compare predicted scores to annotated truths
+    //       using ScorePredictor::predict(collector, ref_frame, frame_duration)
     for (auto const& [target_name, opt] : optimized_targets) {
-        if (!opt.isFrame()) continue;  // Skip score targets (not supported yet)
+        if (!opt.isFrame()) continue;  // Score target optimization not yet implemented
 
         file << "# " << target_name << ": MAE=" << std::fixed << std::setprecision(2)
              << opt.frame_result.boom_mae << " frames"

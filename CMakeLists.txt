@@ -30,7 +30,7 @@ set(METRICS_SOURCES
     src/metrics/metric_series.cpp
     src/metrics/metrics_collector.cpp
     src/metrics/event_detector.cpp
-    src/metrics/causticness_analyzer.cpp
+    src/metrics/signal_analyzer.cpp
     src/metrics/metrics_view.cpp
     src/metrics/probe_filter.cpp
     src/metrics/probe_pipeline.cpp

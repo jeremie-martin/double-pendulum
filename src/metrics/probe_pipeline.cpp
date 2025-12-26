@@ -7,7 +7,7 @@
 namespace metrics {
 
 ProbePipeline::ProbePipeline()
-    : causticness_analyzer_(std::make_unique<CausticnessAnalyzer>()) {
+    : signal_analyzer_(std::make_unique<SignalAnalyzer>()) {
 
     // Default phase 1 config (physics-only)
     phase1_config_.enabled = true;
@@ -55,8 +55,8 @@ void ProbePipeline::setBoomParams(optimize::FrameDetectionParams const& params) 
     boom_params_ = params;
 }
 
-void ProbePipeline::enableCausticnessAnalyzer(bool enable) {
-    causticness_analyzer_enabled_ = enable;
+void ProbePipeline::enableSignalAnalyzer(bool enable) {
+    signal_analyzer_enabled_ = enable;
 }
 
 void ProbePipeline::setProgressCallback(ProgressCallback callback) {
@@ -70,7 +70,7 @@ void ProbePipeline::setTerminationCheck(TerminationCheck callback) {
 void ProbePipeline::reset() {
     collector_.reset();
     event_detector_.reset();
-    causticness_analyzer_->reset();
+    signal_analyzer_->reset();
     current_phase_ = 0;
     current_frame_ = 0;
 }
@@ -86,7 +86,7 @@ void ProbePipeline::beginPhase2() {
     // But do reset the collector for fresh metrics
     collector_.reset();
     event_detector_.reset();
-    causticness_analyzer_->reset();
+    signal_analyzer_->reset();
 
     // Register GPU metrics for Phase 2
     collector_.registerGPUMetrics();
@@ -158,24 +158,28 @@ void ProbePipeline::feedGPUFrame(GPUMetricsBundle const& gpu_metrics) {
 }
 
 void ProbePipeline::runAnalyzers() {
-    if (causticness_analyzer_enabled_) {
+    if (signal_analyzer_enabled_) {
         // Set frame duration if available
         if (frame_duration_ > 0.0) {
-            causticness_analyzer_->setFrameDuration(frame_duration_);
+            signal_analyzer_->setFrameDuration(frame_duration_);
         }
-        causticness_analyzer_->analyze(collector_, event_detector_);
+        // Use boom_params_.metric_name for signal analysis
+        if (!boom_params_.metric_name.empty()) {
+            signal_analyzer_->setMetricName(boom_params_.metric_name);
+        }
+        signal_analyzer_->analyze(collector_, event_detector_);
     }
 }
 
 SimulationScore ProbePipeline::getScores() const {
     SimulationScore scores;
 
-    if (causticness_analyzer_enabled_ && causticness_analyzer_->hasResults()) {
-        scores.set(ScoreNames::Causticness, causticness_analyzer_->score());
+    if (signal_analyzer_enabled_ && signal_analyzer_->hasResults()) {
+        scores.set(ScoreNames::Causticness, signal_analyzer_->score());
         // Add peak clarity and post-boom sustain scores for filtering
-        scores.set(ScoreNames::PeakClarity, causticness_analyzer_->peakClarityScore());
+        scores.set(ScoreNames::PeakClarity, signal_analyzer_->peakClarityScore());
         scores.set(ScoreNames::PostBoomSustain,
-                   causticness_analyzer_->postBoomAreaNormalized());
+                   signal_analyzer_->postBoomAreaNormalized());
     }
 
     return scores;
@@ -237,14 +241,13 @@ ProbePhaseResults ProbePipeline::buildResults(ProbeFilter const& filter) {
     results.score = getScores();
 
     // Populate predictions BEFORE filter evaluation (filter needs predictions)
-    if (!prediction_targets_.empty() && causticness_analyzer_) {
-        // Use explicit targets
+    if (!prediction_targets_.empty()) {
+        // Use explicit targets with new generic API
         optimize::TargetEvaluator evaluator;
         for (auto const& target : prediction_targets_) {
             evaluator.addTarget(target);
         }
-        results.predictions = evaluator.evaluate(
-            collector_, event_detector_, *causticness_analyzer_, frame_duration_);
+        results.predictions = evaluator.evaluate(collector_, frame_duration_);
     } else {
         // Default predictions based on events and scores
         // Boom prediction from event

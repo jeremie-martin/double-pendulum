@@ -196,9 +196,9 @@ int computePhysicsMetrics(Options const& opts,
         std::cout << "\n";
 
         std::cout << "  Post-boom sustain: " << std::fixed << std::setprecision(3)
-                  << metrics.post_boom_area_normalized
-                  << " (area=" << std::setprecision(1) << metrics.post_boom_area
-                  << " over " << std::setprecision(1) << metrics.post_boom_duration << "s)\n";
+                  << metrics.post_boom_area_normalized()
+                  << " (area=" << std::setprecision(1) << metrics.post_ref_area
+                  << " over " << std::setprecision(1) << metrics.post_ref_duration << "s)\n";
 
         // Show detected peaks
         auto const& peaks = causticness_analyzer.getDetectedPeaks();
@@ -360,7 +360,7 @@ int computeGPUMetrics(Options const& opts,
         std::cout << "  Peak clarity: " << std::fixed << std::setprecision(3)
                   << metrics.peak_clarity_score << "\n";
         std::cout << "  Post-boom sustain: " << std::fixed << std::setprecision(3)
-                  << metrics.post_boom_area_normalized << "\n";
+                  << metrics.post_boom_area_normalized() << "\n";
     }
 
     // Export metrics with canonical column order (matches simulation.cpp)

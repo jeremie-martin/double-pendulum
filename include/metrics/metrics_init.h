@@ -1,7 +1,7 @@
 #pragma once
 
 #include "metrics/boom_detection.h"
-#include "metrics/causticness_analyzer.h"
+#include "metrics/signal_analyzer.h"
 #include "metrics/event_detector.h"
 #include "metrics/metrics_collector.h"
 #include "optimize/prediction_target.h"
@@ -12,24 +12,26 @@ namespace metrics {
 // This helper ensures consistent setup across all executables.
 //
 // Usage:
-//   metrics::initializeMetricsSystem(collector, detector, causticness_analyzer,
+//   metrics::initializeMetricsSystem(collector, detector, signal_analyzer,
 //                                    frame_duration, with_gpu);
 //
 // Parameters:
 //   collector: MetricsCollector to register metrics on
 //   detector: EventDetector (cleared, events added post-hoc via boom detection)
-//   causticness_analyzer: CausticnessAnalyzer to set frame duration
+//   signal_analyzer: SignalAnalyzer to configure
 //   frame_duration: Seconds per frame (simulation.duration / total_frames)
 //   with_gpu: If true, also register GPU metrics (for rendering modes)
+//   analyzer_metric: Which metric the analyzer should use (default: angular_causticness)
 //
 // Note: Boom and chaos are both detected post-simulation using FrameDetector
 // via [targets.X] configuration. The EventDetector is used only for storing
 // detected events, not for real-time threshold detection.
 inline void initializeMetricsSystem(MetricsCollector& collector,
                                     EventDetector& detector,
-                                    CausticnessAnalyzer& causticness_analyzer,
+                                    SignalAnalyzer& signal_analyzer,
                                     double frame_duration,
-                                    bool with_gpu = false) {
+                                    bool with_gpu = false,
+                                    std::string const& analyzer_metric = MetricNames::AngularCausticness) {
     // Register metrics
     collector.registerStandardMetrics();
     if (with_gpu) {
@@ -39,17 +41,18 @@ inline void initializeMetricsSystem(MetricsCollector& collector,
     // Clear event detector (events are added post-simulation)
     detector.clearCriteria();
 
-    // Set frame duration for time-based calculations
-    causticness_analyzer.setFrameDuration(frame_duration);
+    // Configure signal analyzer
+    signal_analyzer.setMetricName(analyzer_metric);
+    signal_analyzer.setFrameDuration(frame_duration);
 }
 
 // Reset all metrics components for a new simulation run
 inline void resetMetricsSystem(MetricsCollector& collector,
                                EventDetector& detector,
-                               CausticnessAnalyzer& causticness_analyzer) {
+                               SignalAnalyzer& signal_analyzer) {
     collector.reset();
     detector.reset();
-    causticness_analyzer.reset();
+    signal_analyzer.reset();
 }
 
 // Run boom detection and analyzers after simulation completes.
@@ -61,7 +64,7 @@ inline void resetMetricsSystem(MetricsCollector& collector,
 // Returns the BoomDetection result (frame may be -1 if no boom found or no target configured)
 inline BoomDetection runPostSimulationAnalysis(MetricsCollector const& collector,
                                                EventDetector& detector,
-                                               CausticnessAnalyzer& causticness_analyzer,
+                                               SignalAnalyzer& signal_analyzer,
                                                double frame_duration,
                                                optimize::FrameDetectionParams const& boom_params) {
     // Skip boom detection if no metric specified (target not configured)
@@ -83,8 +86,8 @@ inline BoomDetection runPostSimulationAnalysis(MetricsCollector const& collector
         forceBoomEvent(detector, boom, variance_at_boom);
     }
 
-    // Run analyzer
-    causticness_analyzer.analyze(collector, detector);
+    // Run analyzer (metric name should already be set via initializeMetricsSystem)
+    signal_analyzer.analyze(collector, detector);
 
     return boom;
 }

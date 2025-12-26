@@ -5,8 +5,9 @@
 #include "optimize/score_predictor.h"
 #include "metrics/metrics_collector.h"
 #include "metrics/event_detector.h"
-#include "metrics/causticness_analyzer.h"
+#include "metrics/signal_analyzer.h"
 
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -15,6 +16,10 @@ namespace optimize {
 
 // Multi-target evaluation orchestrator
 // Coordinates prediction for multiple targets using shared metrics
+//
+// The evaluator processes targets in two phases:
+// 1. Frame targets (boom, chaos) - evaluated first
+// 2. Score targets (boom_quality) - evaluated second, using boom frame as reference
 class TargetEvaluator {
 public:
     TargetEvaluator() = default;
@@ -40,18 +45,73 @@ public:
     }
 
     // Evaluate all targets and return predictions
+    // This is the new preferred API - does not require pre-built analyzer
     std::vector<PredictionResult> evaluate(
         metrics::MetricsCollector const& collector,
-        metrics::EventDetector const& events,
-        metrics::CausticnessAnalyzer const& analyzer,
         double frame_duration) const {
 
         std::vector<PredictionResult> results;
         results.reserve(targets_.size());
 
+        // Phase 1: Evaluate all frame targets first
+        std::optional<int> boom_frame;
         for (auto const& target : targets_) {
-            PredictionResult result = evaluateTarget(
-                target, collector, events, analyzer, frame_duration);
+            if (target.isFrame()) {
+                PredictionResult result = evaluateFrameTarget(target, collector, frame_duration);
+                results.push_back(result);
+
+                // Track boom frame for score targets
+                if (target.name == "boom" && result.valid()) {
+                    boom_frame = result.predicted_frame;
+                }
+            }
+        }
+
+        // Phase 2: Evaluate score targets using boom frame as reference
+        for (auto const& target : targets_) {
+            if (target.isScore()) {
+                PredictionResult result = evaluateScoreTarget(
+                    target, collector, boom_frame, frame_duration);
+                results.push_back(result);
+            }
+        }
+
+        return results;
+    }
+
+    // Legacy API for backward compatibility
+    // DEPRECATED: Use evaluate(collector, frame_duration) instead
+    std::vector<PredictionResult> evaluate(
+        metrics::MetricsCollector const& collector,
+        metrics::EventDetector const& events,
+        metrics::SignalAnalyzer const& analyzer,
+        double frame_duration) const {
+
+        std::vector<PredictionResult> results;
+        results.reserve(targets_.size());
+
+        // Get boom frame from analyzer or events
+        std::optional<int> boom_frame;
+        if (analyzer.hasResults()) {
+            boom_frame = analyzer.getMetrics().peak_frame;
+        } else {
+            auto boom_event = events.getEvent(metrics::EventNames::Boom);
+            if (boom_event && boom_event->detected()) {
+                boom_frame = boom_event->frame;
+            }
+        }
+
+        for (auto const& target : targets_) {
+            PredictionResult result;
+            if (target.isFrame()) {
+                result = evaluateFrameTarget(target, collector, frame_duration);
+                // Update boom_frame if this is the boom target
+                if (target.name == "boom" && result.valid()) {
+                    boom_frame = result.predicted_frame;
+                }
+            } else {
+                result = evaluateScoreTarget(target, collector, boom_frame, frame_duration);
+            }
             results.push_back(result);
         }
 
@@ -62,16 +122,34 @@ public:
     std::optional<PredictionResult> evaluateByName(
         std::string const& name,
         metrics::MetricsCollector const& collector,
-        metrics::EventDetector const& events,
-        metrics::CausticnessAnalyzer const& analyzer,
+        std::optional<int> reference_frame,
         double frame_duration) const {
 
         for (auto const& target : targets_) {
             if (target.name == name) {
-                return evaluateTarget(target, collector, events, analyzer, frame_duration);
+                if (target.isFrame()) {
+                    return evaluateFrameTarget(target, collector, frame_duration);
+                } else {
+                    return evaluateScoreTarget(target, collector, reference_frame, frame_duration);
+                }
             }
         }
         return std::nullopt;
+    }
+
+    // Legacy version for backward compatibility
+    std::optional<PredictionResult> evaluateByName(
+        std::string const& name,
+        metrics::MetricsCollector const& collector,
+        metrics::EventDetector const& events,
+        metrics::SignalAnalyzer const& analyzer,
+        double frame_duration) const {
+
+        std::optional<int> ref_frame;
+        if (analyzer.hasResults()) {
+            ref_frame = analyzer.getMetrics().peak_frame;
+        }
+        return evaluateByName(name, collector, ref_frame, frame_duration);
     }
 
     // Get prediction result by target name from results vector
@@ -117,21 +195,6 @@ public:
 private:
     std::vector<PredictionTarget> targets_;
 
-    // Evaluate a single target
-    PredictionResult evaluateTarget(
-        PredictionTarget const& target,
-        metrics::MetricsCollector const& collector,
-        metrics::EventDetector const& events,
-        metrics::CausticnessAnalyzer const& analyzer,
-        double frame_duration) const {
-
-        if (target.isFrame()) {
-            return evaluateFrameTarget(target, collector, frame_duration);
-        } else {
-            return evaluateScoreTarget(target, analyzer);
-        }
-    }
-
     // Evaluate frame-type target
     PredictionResult evaluateFrameTarget(
         PredictionTarget const& target,
@@ -144,15 +207,20 @@ private:
         return toPredictionResult(target.name, detection);
     }
 
-    // Evaluate score-type target
+    // Evaluate score-type target using the new generic API
     PredictionResult evaluateScoreTarget(
         PredictionTarget const& target,
-        metrics::CausticnessAnalyzer const& analyzer) const {
+        metrics::MetricsCollector const& collector,
+        std::optional<int> reference_frame,
+        double frame_duration) const {
 
         auto const& params = target.scoreParams();
         ScorePredictor predictor(params);
-        ScorePrediction prediction = predictor.predict(analyzer);
-        return optimize::toPredictionResult(target.name, prediction);
+
+        // Use reference frame if available, otherwise -1 (will use peak frame)
+        int ref = reference_frame.value_or(-1);
+        ScorePrediction prediction = predictor.predict(collector, ref, frame_duration);
+        return toPredictionResult(target.name, prediction);
     }
 };
 

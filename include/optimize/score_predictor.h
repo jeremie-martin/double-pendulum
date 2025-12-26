@@ -1,8 +1,9 @@
 #pragma once
 
 #include "optimize/prediction_target.h"
-#include "metrics/causticness_analyzer.h"
+#include "metrics/signal_analyzer.h"
 #include "metrics/metrics_collector.h"
+#include "metrics/event_detector.h"
 
 #include <algorithm>
 #include <cmath>
@@ -18,7 +19,14 @@ struct ScorePrediction {
     bool valid() const { return score >= 0.0 && score <= 1.0; }
 };
 
-// Generic score predictor that works with analyzers
+// Generic score predictor that works with any metric
+//
+// Usage:
+//   ScorePredictor predictor(params);
+//   auto result = predictor.predict(collector, reference_frame, frame_duration);
+//
+// The predictor creates a SignalAnalyzer internally and uses the metric
+// specified in params.metric_name for analysis.
 class ScorePredictor {
 public:
     ScorePredictor() = default;
@@ -27,9 +35,51 @@ public:
     void setParams(ScoreParams const& params) { params_ = params; }
     ScoreParams const& getParams() const { return params_; }
 
-    // Main prediction entry point
-    // Note: CausticnessAnalyzer must have already been run with analyze()
-    ScorePrediction predict(metrics::CausticnessAnalyzer const& analyzer) const {
+    // Main prediction entry point - uses configured metric from params
+    //
+    // Parameters:
+    //   collector: The MetricsCollector containing computed metrics
+    //   reference_frame: Reference frame for post-reference analysis (typically boom frame)
+    //   frame_duration: Duration of each frame in seconds
+    //
+    // Returns:
+    //   ScorePrediction with score in [0,1] range
+    ScorePrediction predict(
+        metrics::MetricsCollector const& collector,
+        int reference_frame,
+        double frame_duration) const {
+
+        ScorePrediction result;
+        result.method_used = params_.method;
+
+        // Check metric name is set
+        if (params_.metric_name.empty()) {
+            result.score = 0.0;
+            return result;
+        }
+
+        // Create and configure analyzer
+        metrics::SignalAnalyzer analyzer;
+        analyzer.setMetricName(params_.metric_name);
+        analyzer.setReferenceFrame(reference_frame);
+        analyzer.setFrameDuration(frame_duration);
+
+        // Run analysis (empty EventDetector since we have explicit reference frame)
+        analyzer.analyze(collector, metrics::EventDetector{});
+
+        if (!analyzer.hasResults()) {
+            result.score = 0.0;
+            return result;
+        }
+
+        result.score = computeScore(analyzer);
+        result.score = std::clamp(result.score, 0.0, 1.0);
+        return result;
+    }
+
+    // Legacy prediction entry point - uses pre-configured analyzer
+    // DEPRECATED: Use predict(collector, reference_frame, frame_duration) instead
+    ScorePrediction predict(metrics::SignalAnalyzer const& analyzer) const {
         ScorePrediction result;
         result.method_used = params_.method;
 
@@ -38,22 +88,7 @@ public:
             return result;
         }
 
-        switch (params_.method) {
-        case ScoreMethod::PeakClarity:
-            result.score = predictPeakClarity(analyzer);
-            break;
-        case ScoreMethod::PostBoomSustain:
-            result.score = predictPostBoomSustain(analyzer);
-            break;
-        case ScoreMethod::Composite:
-            result.score = predictComposite(analyzer);
-            break;
-        default:
-            result.score = predictPeakClarity(analyzer);
-            break;
-        }
-
-        // Clamp to valid range
+        result.score = computeScore(analyzer);
         result.score = std::clamp(result.score, 0.0, 1.0);
         return result;
     }
@@ -61,21 +96,23 @@ public:
 private:
     ScoreParams params_;
 
-    // Method 1: Peak clarity score
-    // Higher = cleaner single peak, lower = competing peaks
-    double predictPeakClarity(metrics::CausticnessAnalyzer const& analyzer) const {
-        return analyzer.peakClarityScore();
+    // Compute score from analyzer based on configured method
+    double computeScore(metrics::SignalAnalyzer const& analyzer) const {
+        switch (params_.method) {
+        case ScoreMethod::PeakClarity:
+            return analyzer.peakClarityScore();
+        case ScoreMethod::PostBoomSustain:
+            return analyzer.postReferenceAreaNormalized();
+        case ScoreMethod::Composite:
+            return computeComposite(analyzer);
+        default:
+            return analyzer.peakClarityScore();
+        }
     }
 
-    // Method 2: Post-boom sustain
-    // Higher = causticness remains high after boom
-    double predictPostBoomSustain(metrics::CausticnessAnalyzer const& analyzer) const {
-        return analyzer.postBoomAreaNormalized();
-    }
-
-    // Method 3: Composite weighted score
+    // Composite weighted score
     // Uses weights from params, or defaults to analyzer's qualityScore()
-    double predictComposite(metrics::CausticnessAnalyzer const& analyzer) const {
+    double computeComposite(metrics::SignalAnalyzer const& analyzer) const {
         if (params_.weights.empty()) {
             // Default: use analyzer's built-in quality score
             return analyzer.score();
@@ -89,10 +126,10 @@ private:
             double value = 0.0;
             if (name == "peak_clarity") {
                 value = analyzer.peakClarityScore();
-            } else if (name == "post_boom_sustain") {
-                value = analyzer.postBoomAreaNormalized();
-            } else if (name == "peak_causticness") {
-                value = std::min(1.0, analyzer.getMetrics().peak_causticness);
+            } else if (name == "post_boom_sustain" || name == "post_ref_sustain") {
+                value = analyzer.postReferenceAreaNormalized();
+            } else if (name == "peak_causticness" || name == "peak_value") {
+                value = std::min(1.0, analyzer.getMetrics().peak_value);
             }
             total += value * weight;
             weight_sum += weight;
@@ -102,16 +139,26 @@ private:
     }
 };
 
-// Convenience function: predict score using params
-inline ScorePrediction predictScore(metrics::CausticnessAnalyzer const& analyzer,
-                                     ScoreParams const& params) {
+// Convenience function: predict score using params (new API)
+inline ScorePrediction predictScore(
+    metrics::MetricsCollector const& collector,
+    ScoreParams const& params,
+    int reference_frame,
+    double frame_duration) {
+    ScorePredictor predictor(params);
+    return predictor.predict(collector, reference_frame, frame_duration);
+}
+
+// Legacy convenience function (deprecated)
+inline ScorePrediction predictScore(metrics::SignalAnalyzer const& analyzer,
+                                    ScoreParams const& params) {
     ScorePredictor predictor(params);
     return predictor.predict(analyzer);
 }
 
 // Convert ScorePrediction to PredictionResult
 inline PredictionResult toPredictionResult(std::string const& target_name,
-                                            ScorePrediction const& prediction) {
+                                           ScorePrediction const& prediction) {
     PredictionResult result;
     result.target_name = target_name;
     result.type = PredictionType::Score;

@@ -2,7 +2,7 @@
 
 #include "metrics/analyzer.h"
 #include "metrics/boom_detection.h"
-#include "metrics/causticness_analyzer.h"
+#include "metrics/signal_analyzer.h"
 #include "metrics/event_detector.h"
 #include "metrics/metrics_collector.h"
 #include "metrics/probe_filter.h"
@@ -105,7 +105,9 @@ public:
     }
 
     // Configure analyzers
-    void enableCausticnessAnalyzer(bool enable = true);
+    void enableSignalAnalyzer(bool enable = true);
+    // Legacy alias
+    void enableCausticnessAnalyzer(bool enable = true) { enableSignalAnalyzer(enable); }
     // Set frame duration for time-based calculations.
     // Must be positive for boom detection to work in finalizePhase().
     void setFrameDuration(double seconds) {
@@ -176,8 +178,8 @@ private:
     EventDetector event_detector_;
 
     // Analyzers
-    bool causticness_analyzer_enabled_ = true;
-    std::unique_ptr<CausticnessAnalyzer> causticness_analyzer_;
+    bool signal_analyzer_enabled_ = true;
+    std::unique_ptr<SignalAnalyzer> signal_analyzer_;
 
     // Callbacks
     ProgressCallback progress_callback_;
