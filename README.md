@@ -1,91 +1,43 @@
 # Double Pendulum Simulation
 
-A high-performance C++ simulation of chaotic double pendulum dynamics with GPU-accelerated rendering and beautiful spectral coloring.
+A high-performance C++ simulation of chaotic double pendulum dynamics with GPU-accelerated rendering.
 
 ## Features
 
 - **GPU Rendering**: Hardware-accelerated line rendering with anti-aliased quads
-- **RK4 Integration**: Accurate 4th-order Runge-Kutta physics simulation
+- **RK4 Physics**: 4th-order Runge-Kutta integration with Lagrangian mechanics
 - **Parallel Processing**: Multi-threaded physics, GPU-accelerated rendering
 - **HDR Pipeline**: Float32 accumulation with tone mapping (Reinhard, ACES, Logarithmic)
-- **Multiple Color Schemes**: Spectrum, Rainbow, Heat, Cool, Monochrome
-- **Batch Generation**: Automated generation of multiple videos with randomized parameters
-- **Music Sync**: Automatic music muxing with beat-drop alignment to chaos onset
+- **Batch Generation**: Automated video generation with quality filtering
 - **GUI Preview**: Real-time interactive preview with ImGui
 - **Headless Mode**: EGL-based rendering for servers without display
-- **Metrics System**: Real-time quality analysis with pluggable analyzers
-
-## Metrics & Quality Scoring
-
-The simulation tracks metrics for quality assessment and batch filtering:
-
-| Metric | Description |
-|--------|-------------|
-| **Variance** | Angular spread of pendulums (triggers boom/chaos events) |
-| **Uniformity** | Distribution uniformity on disk (0=concentrated, 1=uniform) |
-| **Causticness** | Visual quality from edge sharpness and color variation |
-| **Brightness/Contrast** | GPU-computed frame statistics |
-
-**Events detected:**
-- **Boom**: Chaos onset (pendulums start diverging)
-- **Chaos**: Full chaotic state (high variance plateau)
-
-**Quality scores** (0-1) from pluggable analyzers:
-- **Boom Analyzer**: Sharpness, peak timing, type classification
-- **Causticness Analyzer**: Peak/average causticness, time above threshold
-
-See `CLAUDE.md` for detailed architecture and developer documentation.
 
 ## Building
 
-### CLI (required)
-
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
-```
+# CLI only
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
 
-### GUI (optional)
-
-```bash
-cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_GUI=ON
-make -j$(nproc)
+# With GUI
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_GUI=ON && cmake --build build -j
 ```
 
 ## Dependencies
 
 - C++20 compiler (GCC 10+, Clang 12+)
 - CMake 3.16+
-- OpenGL 3.3+
-- GLEW
-- libpng
-- EGL (for headless rendering)
-- FFmpeg (for video output)
-- SDL2, ImGui (for GUI, included in external/)
+- OpenGL 3.3+, GLEW, EGL, libpng, zstd
+- FFmpeg (video output)
+- SDL2 (GUI only)
 
 ## Usage
 
 ```bash
-# Run with default config
-./pendulum
-
-# Run with custom config
-./pendulum config/my_config.toml
-
-# Run with music (syncs to boom frame)
-./pendulum config/default.toml --music random
-./pendulum config/default.toml --music petrunko
+# Run simulation
+./pendulum config/default.toml
 
 # Batch generation
 ./pendulum --batch config/batch.toml
-./pendulum --batch config/batch.toml --resume
-
-# Add music to existing video
-./pendulum --add-music output/video.mp4 petrunko 32 60
-
-# List available music tracks
-./pendulum --list-tracks
 
 # GUI preview
 ./pendulum-gui
@@ -107,40 +59,25 @@ initial_angle2_deg = 200.0
 pendulum_count = 100000
 angle_variation_deg = 0.1
 duration_seconds = 11.0
-total_frames = 660
-physics_quality = "high"  # low, medium, high, ultra (or use max_dt)
+physics_quality = "high"
 
 [render]
 width = 2160
 height = 2160
 
-[post_process]
-tone_map = "none"  # none, reinhard, reinhard_extended, aces, logarithmic
-exposure = 0.0     # stops (+/- brightness)
-contrast = 1.0
-gamma = 2.2
-
 [color]
-scheme = "spectrum"  # spectrum, rainbow, heat, cool, monochrome
+scheme = "spectrum"
 start = 0.0
 end = 1.0
 
 [output]
-format = "video"  # video or png
-directory = "output"
+format = "video"
 video_fps = 60
 ```
 
-## Project Structure
+## Documentation
 
-```
-├── src/           # Source files
-├── include/       # Header files
-├── config/        # TOML configuration files
-├── external/      # Third-party (toml++, nlohmann/json, imgui, stb)
-├── music/         # Music tracks for muxing
-└── output/        # Generated videos/frames
-```
+See `CLAUDE.md` for detailed architecture, metrics system, and developer documentation.
 
 ## License
 
