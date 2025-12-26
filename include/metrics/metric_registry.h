@@ -30,7 +30,7 @@ enum class MetricSource {
 enum class MetricCategory {
     Basic,           // variance, spread_ratio, circular_spread, angular_range
     Caustic,         // angular_causticness, tip_causticness, cv, etc.
-    LocalCoherence,  // trajectory_smoothness, curvature, true_folds, local_coherence
+    LocalCoherence,  // local_coherence
     Velocity,        // velocity_dispersion, velocity_bimodality, etc.
     GPU,             // brightness, coverage, max_value
     Other            // total_energy
@@ -40,7 +40,7 @@ enum class MetricCategory {
 enum class PlotAxis {
     Y1_Large,      // Large scale values (variance, energy)
     Y2_Normalized, // 0-1 range (most metrics)
-    Y3_Medium      // Medium scale (spatial_concentration)
+    Y3_Medium      // Medium scale
 };
 
 // Parameter type for metrics with configurable parameters
@@ -49,11 +49,6 @@ enum class ParamType {
     None,            // No configurable params
     Sector,          // SectorMetricParams (min_sectors, max_sectors, target_per_sector)
     CVSector,        // CVSectorMetricParams (adds cv_normalization)
-    Grid,            // GridMetricParams (min_grid, max_grid, target_per_cell)
-    Fold,            // FoldMetricParams (max_radius, cv_normalization)
-    Trajectory,      // TrajectoryMetricParams
-    Curvature,       // CurvatureMetricParams
-    TrueFolds,       // TrueFoldsMetricParams
     LocalCoherence   // LocalCoherenceMetricParams
 };
 
@@ -99,7 +94,7 @@ struct MetricDef {
 // THE REGISTRY - Single Source of Truth for All Metrics
 // ============================================================================
 
-inline constexpr std::array<MetricDef, 26> METRIC_REGISTRY = {{
+inline constexpr std::array<MetricDef, 21> METRIC_REGISTRY = {{
     // === BASIC STATISTICS ===
     {"variance", "Var", "Variance of angle2 distribution",
      MetricSource::Physics, MetricCategory::Basic, PlotAxis::Y1_Large,
@@ -138,68 +133,48 @@ inline constexpr std::array<MetricDef, 26> METRIC_REGISTRY = {{
      MetricSource::Physics, MetricCategory::Caustic, PlotAxis::Y2_Normalized,
      ParamType::Sector, {0.6f, 1.0f, 0.4f, 1.0f}, false, true, 9},
 
-    {"spatial_concentration", "Spatial", "2D coverage x gini on tip positions",
-     MetricSource::Physics, MetricCategory::Caustic, PlotAxis::Y3_Medium,
-     ParamType::Grid, {1.0f, 0.6f, 0.6f, 1.0f}, false, true, 10},
-
     {"cv_causticness", "CV", "CV-based causticness (coefficient of variation)",
      MetricSource::Physics, MetricCategory::Caustic, PlotAxis::Y2_Normalized,
-     ParamType::CVSector, {1.0f, 0.5f, 0.0f, 1.0f}, false, true, 11},
+     ParamType::CVSector, {1.0f, 0.5f, 0.0f, 1.0f}, false, true, 10},
 
     {"organization_causticness", "Org", "(1-R1*R2) x coverage organization",
      MetricSource::Physics, MetricCategory::Caustic, PlotAxis::Y2_Normalized,
-     ParamType::Sector, {0.5f, 1.0f, 1.0f, 1.0f}, false, true, 12},
-
-    {"fold_causticness", "Fold", "Adjacent-pair distance CV x spread",
-     MetricSource::Physics, MetricCategory::Caustic, PlotAxis::Y2_Normalized,
-     ParamType::Fold, {1.0f, 1.0f, 0.3f, 1.0f}, false, true, 13},
+     ParamType::Sector, {0.5f, 1.0f, 1.0f, 1.0f}, false, true, 11},
 
     // === LOCAL COHERENCE METRICS ===
-    {"trajectory_smoothness", "Traj", "Predictability of pos[i+1] from pos[i]",
-     MetricSource::Physics, MetricCategory::LocalCoherence, PlotAxis::Y2_Normalized,
-     ParamType::Trajectory, {0.3f, 0.9f, 0.3f, 1.0f}, false, true, 14},
-
-    {"curvature", "Curve", "Mean curvature of theta->xy mapping",
-     MetricSource::Physics, MetricCategory::LocalCoherence, PlotAxis::Y2_Normalized,
-     ParamType::Curvature, {0.9f, 0.3f, 0.9f, 1.0f}, false, true, 15},
-
-    {"true_folds", "Folds", "Count of trajectory crossings",
-     MetricSource::Physics, MetricCategory::LocalCoherence, PlotAxis::Y2_Normalized,
-     ParamType::TrueFolds, {1.0f, 0.6f, 0.0f, 1.0f}, false, true, 16},
-
     {"local_coherence", "Local", "Index-neighbors vs spatial-neighbors correlation",
      MetricSource::Physics, MetricCategory::LocalCoherence, PlotAxis::Y2_Normalized,
-     ParamType::LocalCoherence, {0.3f, 0.7f, 1.0f, 1.0f}, false, true, 17},
+     ParamType::LocalCoherence, {0.3f, 0.7f, 1.0f, 1.0f}, false, true, 12},
 
     // === VELOCITY-BASED METRICS ===
     {"velocity_dispersion", "VelDisp", "Velocity direction spread (circular stats)",
      MetricSource::Physics, MetricCategory::Velocity, PlotAxis::Y2_Normalized,
-     ParamType::None, {1.0f, 0.3f, 0.3f, 1.0f}, false, true, 18},
+     ParamType::None, {1.0f, 0.3f, 0.3f, 1.0f}, false, true, 13},
 
     {"speed_variance", "SpdVar", "Normalized variance of tip speeds",
      MetricSource::Physics, MetricCategory::Velocity, PlotAxis::Y2_Normalized,
-     ParamType::None, {0.8f, 0.5f, 0.2f, 1.0f}, false, true, 19},
+     ParamType::None, {0.8f, 0.5f, 0.2f, 1.0f}, false, true, 14},
 
     {"velocity_bimodality", "VelBimod", "Half left / half right pattern detection",
      MetricSource::Physics, MetricCategory::Velocity, PlotAxis::Y2_Normalized,
-     ParamType::None, {1.0f, 0.8f, 0.2f, 1.0f}, false, true, 20},
+     ParamType::None, {1.0f, 0.8f, 0.2f, 1.0f}, false, true, 15},
 
     {"angular_momentum_spread", "AngMom", "Spread of angular momenta directions",
      MetricSource::Physics, MetricCategory::Velocity, PlotAxis::Y2_Normalized,
-     ParamType::None, {0.6f, 0.2f, 0.8f, 1.0f}, false, true, 21},
+     ParamType::None, {0.6f, 0.2f, 0.8f, 1.0f}, false, true, 16},
 
     {"acceleration_dispersion", "AccelDisp", "Tip acceleration direction spread",
      MetricSource::Physics, MetricCategory::Velocity, PlotAxis::Y2_Normalized,
-     ParamType::None, {0.2f, 0.8f, 0.6f, 1.0f}, false, true, 22},
+     ParamType::None, {0.2f, 0.8f, 0.6f, 1.0f}, false, true, 17},
 
     // === GPU METRICS ===
     {"brightness", "Bright", "Mean pixel intensity (0-1)",
      MetricSource::GPU, MetricCategory::GPU, PlotAxis::Y2_Normalized,
-     ParamType::None, {0.8f, 0.8f, 0.4f, 1.0f}, false, false, 23},
+     ParamType::None, {0.8f, 0.8f, 0.4f, 1.0f}, false, false, 18},
 
     {"coverage", "Cover", "Fraction of non-zero pixels",
      MetricSource::GPU, MetricCategory::GPU, PlotAxis::Y2_Normalized,
-     ParamType::None, {1.0f, 0.8f, 0.4f, 1.0f}, false, false, 24},
+     ParamType::None, {1.0f, 0.8f, 0.4f, 1.0f}, false, false, 19},
 
     {"max_value", "MaxVal", "Peak pixel intensity (before post-processing)",
      MetricSource::GPU, MetricCategory::GPU, PlotAxis::Y1_Large,
@@ -208,7 +183,7 @@ inline constexpr std::array<MetricDef, 26> METRIC_REGISTRY = {{
     // === OTHER ===
     {"total_energy", "Energy", "Mean total energy per pendulum",
      MetricSource::Physics, MetricCategory::Other, PlotAxis::Y1_Large,
-     ParamType::None, {0.4f, 0.6f, 1.0f, 1.0f}, false, false, 25},
+     ParamType::None, {0.4f, 0.6f, 1.0f, 1.0f}, false, false, 20},
 }};
 
 // Total metric count

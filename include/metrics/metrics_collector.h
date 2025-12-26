@@ -192,11 +192,6 @@ private:
     double computeTipCausticness(std::vector<double> const& x2s,
                                  std::vector<double> const& y2s) const;
 
-    // Compute spatial concentration from 2D histogram of tip positions
-    // Returns: coverage × gini on 2D histogram
-    double computeSpatialConcentration(std::vector<double> const& x2s,
-                                       std::vector<double> const& y2s) const;
-
     // Helper: compute causticness from any angle vector (shared by angular and tip)
     double computeCausticnessFromAngles(std::vector<double> const& angles,
                                         SectorMetricParams const& params) const;
@@ -209,28 +204,6 @@ private:
     // High when spread out but not fully random
     double computeOrganizationCausticness(std::vector<double> const& angle1s,
                                           std::vector<double> const& angle2s) const;
-
-    // Fold causticness: leverages natural ordering of pendulums
-    // Measures CV of adjacent-pair distances × spatial spread
-    double computeFoldCausticness(std::vector<double> const& x2s,
-                                  std::vector<double> const& y2s) const;
-
-    // === New paradigm metrics (local coherence based) ===
-
-    // Trajectory smoothness: how predictable is pos[i+1] from pos[i]?
-    // High when curves are smooth (start, caustic), low in chaos
-    double computeTrajectorySmoothness(std::vector<double> const& x2s,
-                                       std::vector<double> const& y2s) const;
-
-    // Curvature: mean curvature of the θ→(x,y) parametric curve
-    // Peaks at folds where the curve bends sharply
-    double computeCurvature(std::vector<double> const& x2s,
-                            std::vector<double> const& y2s) const;
-
-    // True folds: count of trajectory crossings (pos[i] ≈ pos[j] for non-adjacent i,j)
-    // Directly detects caustic envelope intersections
-    double computeTrueFolds(std::vector<double> const& x2s,
-                            std::vector<double> const& y2s) const;
 
     // Local coherence: are index-neighbors also spatial-neighbors?
     // High at caustics (local structure), low in chaos (random)
@@ -304,17 +277,12 @@ constexpr const char* JointConcentration = "joint_concentration";  // R1 × R2
 
 // Caustic metrics - position-based (use tip x2,y2 coordinates)
 constexpr const char* TipCausticness = "tip_causticness";  // Causticness using atan2(x2,y2)
-constexpr const char* SpatialConcentration = "spatial_concentration";  // 2D coverage × gini
 
 // Alternative caustic metrics (experimental)
 constexpr const char* CVCausticness = "cv_causticness";  // CV instead of Gini on sectors
 constexpr const char* OrganizationCausticness = "organization_causticness";  // (1-R1*R2) × coverage
-constexpr const char* FoldCausticness = "fold_causticness";  // Adjacent-pair distance CV × spread
 
-// New paradigm metrics (local coherence based)
-constexpr const char* TrajectorySmoothness = "trajectory_smoothness";  // Predictability of pos[i+1] from pos[i]
-constexpr const char* Curvature = "curvature";  // Mean curvature of θ→(x,y) mapping
-constexpr const char* TrueFolds = "true_folds";  // Count of actual trajectory crossings
+// Local coherence metric
 constexpr const char* LocalCoherence = "local_coherence";  // Neighbor distance vs random distance
 
 // Velocity-based metrics (for boom detection)

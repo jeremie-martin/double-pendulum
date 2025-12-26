@@ -1640,41 +1640,6 @@ void drawMetricParametersWindow(AppState& state) {
                     params_changed = true;
                 }
             }
-            if constexpr (std::is_same_v<T, GridMetricParams>) {
-                if (ImGui::SliderInt("Min Grid", &p.min_grid, 2, 16)) params_changed = true;
-                if (ImGui::SliderInt("Max Grid", &p.max_grid, 16, 64)) params_changed = true;
-                if (ImGui::SliderInt("Target/Cell", &p.target_per_cell, 1, 50)) params_changed = true;
-            }
-            if constexpr (std::is_same_v<T, FoldMetricParams>) {
-                auto r = static_cast<float>(p.max_radius);
-                if (ImGui::SliderFloat("Max Radius", &r, 0.5f, 4.0f)) { p.max_radius = r; params_changed = true; }
-                auto cv = static_cast<float>(p.cv_normalization);
-                if (ImGui::SliderFloat("CV Norm", &cv, 0.5f, 4.0f)) { p.cv_normalization = cv; params_changed = true; }
-            }
-            if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
-                auto r = static_cast<float>(p.max_radius);
-                if (ImGui::SliderFloat("Max Radius", &r, 0.5f, 4.0f)) { p.max_radius = r; params_changed = true; }
-                auto s = static_cast<float>(p.min_spread_threshold);
-                if (ImGui::SliderFloat("Min Spread", &s, 0.01f, 0.2f, "%.3f")) { p.min_spread_threshold = s; params_changed = true; }
-            }
-            if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
-                auto r = static_cast<float>(p.max_radius);
-                if (ImGui::SliderFloat("Max Radius", &r, 0.5f, 4.0f)) { p.max_radius = r; params_changed = true; }
-                auto s = static_cast<float>(p.min_spread_threshold);
-                if (ImGui::SliderFloat("Min Spread", &s, 0.01f, 0.2f, "%.3f")) { p.min_spread_threshold = s; params_changed = true; }
-                auto ln = static_cast<float>(p.log_ratio_normalization);
-                if (ImGui::SliderFloat("Log Norm", &ln, 0.5f, 3.0f)) { p.log_ratio_normalization = ln; params_changed = true; }
-            }
-            if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
-                auto r = static_cast<float>(p.max_radius);
-                if (ImGui::SliderFloat("Max Radius", &r, 0.5f, 4.0f)) { p.max_radius = r; params_changed = true; }
-                auto s = static_cast<float>(p.min_spread_threshold);
-                if (ImGui::SliderFloat("Min Spread", &s, 0.01f, 0.2f, "%.3f")) { p.min_spread_threshold = s; params_changed = true; }
-                auto gb = static_cast<float>(p.gini_chaos_baseline);
-                if (ImGui::SliderFloat("Gini Baseline", &gb, 0.0f, 0.5f)) { p.gini_chaos_baseline = gb; params_changed = true; }
-                auto gd = static_cast<float>(p.gini_baseline_divisor);
-                if (ImGui::SliderFloat("Gini Divisor", &gd, 0.1f, 2.0f)) { p.gini_baseline_divisor = gd; params_changed = true; }
-            }
             if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
                 auto r = static_cast<float>(p.max_radius);
                 if (ImGui::SliderFloat("Max Radius", &r, 0.5f, 4.0f)) { p.max_radius = r; params_changed = true; }

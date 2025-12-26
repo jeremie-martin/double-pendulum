@@ -151,14 +151,6 @@ SectorMetricParams makeSectorParams(int eff_sec, int N) {
     return p;
 }
 
-// Helper to create grid params from effective grid size
-GridMetricParams makeGridParams(int eff_grid, int N) {
-    GridMetricParams p;
-    p.max_grid = eff_grid;
-    p.min_grid = std::min(4, eff_grid);
-    p.target_per_cell = std::max(1, N / (eff_grid * eff_grid * 2));
-    return p;
-}
 
 // Build all metric schemas
 std::vector<MetricSchema> buildMetricSchemas() {
@@ -208,83 +200,34 @@ std::vector<MetricSchema> buildMetricSchemas() {
             return cfg;
         }});
 
-    // Spatial concentration: grid
-    schemas.push_back({"spatial_concentration",
-        {{"grid", 4, 64, 1, true}},
-        [](std::vector<double> const& vals, int N) -> ::MetricConfig {
-            int eff_grid = static_cast<int>(vals[0]);
-            auto params = makeGridParams(eff_grid, N);
+    // Velocity-based metrics (no real parameters, but we include them for optimization)
+    schemas.push_back({"velocity_dispersion", {},
+        [](std::vector<double> const&, int) -> ::MetricConfig {
             ::MetricConfig cfg;
-            cfg.name = "spatial_concentration";
-            cfg.params = params;
+            cfg.name = "velocity_dispersion";
+            cfg.params = SectorMetricParams{};
             return cfg;
         }});
 
-    // Fold causticness: max_radius × cv_normalization
-    schemas.push_back({"fold_causticness",
-        {{"max_radius", 1.0, 2.5, 1, false}, {"cv_norm", 0.5, 3.0, 1, false}},
-        [](std::vector<double> const& vals, int) -> ::MetricConfig {
-            FoldMetricParams params;
-            params.max_radius = vals[0];
-            params.cv_normalization = vals[1];
+    schemas.push_back({"acceleration_dispersion", {},
+        [](std::vector<double> const&, int) -> ::MetricConfig {
             ::MetricConfig cfg;
-            cfg.name = "fold_causticness";
-            cfg.params = params;
+            cfg.name = "acceleration_dispersion";
+            cfg.params = SectorMetricParams{};
             return cfg;
         }});
 
-    // Trajectory smoothness: max_radius × min_spread
-    schemas.push_back({"trajectory_smoothness",
-        {{"max_radius", 1.0, 2.5, 1, false}, {"min_spread", 0.01, 0.1, 1, false}},
-        [](std::vector<double> const& vals, int) -> ::MetricConfig {
-            TrajectoryMetricParams params;
-            params.max_radius = vals[0];
-            params.min_spread_threshold = vals[1];
+    schemas.push_back({"angular_momentum_spread", {},
+        [](std::vector<double> const&, int) -> ::MetricConfig {
             ::MetricConfig cfg;
-            cfg.name = "trajectory_smoothness";
-            cfg.params = params;
+            cfg.name = "angular_momentum_spread";
+            cfg.params = SectorMetricParams{};
             return cfg;
         }});
 
-    // NOTE: The following 3-4 parameter metrics are disabled for now because they
-    // create too many configurations (8^3=512 or 8^4=4096 per metric).
-    // Uncomment when doing thorough optimization with more time/compute.
-
+    // NOTE: local_coherence has 4 parameters (max_radius × min_spread × log_baseline × log_divisor)
+    // which creates 8^4 = 4096 configurations. Disabled by default.
 #if 0
-    // Curvature: max_radius × min_spread × log_ratio_normalization (8^3 = 512 configs)
-    schemas.push_back({"curvature",
-        {{"max_radius", 1.0, 2.5, 1, false},
-         {"min_spread", 0.01, 0.1, 1, false},
-         {"log_ratio_norm", 1.0, 2.5, 1, false}},
-        [](std::vector<double> const& vals, int) -> ::MetricConfig {
-            CurvatureMetricParams params;
-            params.max_radius = vals[0];
-            params.min_spread_threshold = vals[1];
-            params.log_ratio_normalization = vals[2];
-            ::MetricConfig cfg;
-            cfg.name = "curvature";
-            cfg.params = params;
-            return cfg;
-        }});
-
-    // True folds: max_radius × min_spread × gini_baseline × gini_divisor (8^4 = 4096 configs)
-    schemas.push_back({"true_folds",
-        {{"max_radius", 1.0, 2.5, 1, false},
-         {"min_spread", 0.01, 0.1, 1, false},
-         {"gini_baseline", 0.1, 0.5, 1, false},
-         {"gini_divisor", 0.5, 0.8, 1, false}},
-        [](std::vector<double> const& vals, int) -> ::MetricConfig {
-            TrueFoldsMetricParams params;
-            params.max_radius = vals[0];
-            params.min_spread_threshold = vals[1];
-            params.gini_chaos_baseline = vals[2];
-            params.gini_baseline_divisor = vals[3];
-            ::MetricConfig cfg;
-            cfg.name = "true_folds";
-            cfg.params = params;
-            return cfg;
-        }});
-
     // Local coherence: max_radius × min_spread × log_baseline × log_divisor (8^4 = 4096 configs)
     schemas.push_back({"local_coherence",
         {{"max_radius", 1.0, 2.5, 1, false},
@@ -322,23 +265,6 @@ struct ParameterizedMetric {
                 oss << "_sec" << p.max_sectors;
             } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
                 oss << "_sec" << p.max_sectors << "_cvn" << static_cast<int>(p.cv_normalization * 100);
-            } else if constexpr (std::is_same_v<T, GridMetricParams>) {
-                oss << "_grid" << p.max_grid;
-            } else if constexpr (std::is_same_v<T, FoldMetricParams>) {
-                oss << "_rad" << static_cast<int>(p.max_radius * 100)
-                    << "_cvn" << static_cast<int>(p.cv_normalization * 100);
-            } else if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
-                oss << "_rad" << static_cast<int>(p.max_radius * 100)
-                    << "_spr" << static_cast<int>(p.min_spread_threshold * 1000);
-            } else if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
-                oss << "_rad" << static_cast<int>(p.max_radius * 100)
-                    << "_spr" << static_cast<int>(p.min_spread_threshold * 1000)
-                    << "_lrn" << static_cast<int>(p.log_ratio_normalization * 100);
-            } else if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
-                oss << "_rad" << static_cast<int>(p.max_radius * 100)
-                    << "_spr" << static_cast<int>(p.min_spread_threshold * 1000)
-                    << "_gb" << static_cast<int>(p.gini_chaos_baseline * 100)
-                    << "_gd" << static_cast<int>(p.gini_baseline_divisor * 100);
             } else if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
                 oss << "_rad" << static_cast<int>(p.max_radius * 100)
                     << "_spr" << static_cast<int>(p.min_spread_threshold * 1000)
@@ -354,7 +280,7 @@ struct ParameterizedMetric {
         std::ostringstream oss;
         std::string short_name = metric_name;
         // Shorten common suffixes
-        for (auto const& suffix : {"_causticness", "_concentration", "_coherence", "_smoothness"}) {
+        for (auto const& suffix : {"_causticness", "_concentration", "_coherence", "_dispersion", "_spread"}) {
             auto pos = short_name.find(suffix);
             if (pos != std::string::npos) {
                 short_name = short_name.substr(0, pos);
@@ -369,20 +295,6 @@ struct ParameterizedMetric {
                 oss << " sec=" << p.max_sectors;
             } else if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
                 oss << " sec=" << p.max_sectors << " cvn=" << std::fixed << std::setprecision(2) << p.cv_normalization;
-            } else if constexpr (std::is_same_v<T, GridMetricParams>) {
-                oss << " grid=" << p.max_grid;
-            } else if constexpr (std::is_same_v<T, FoldMetricParams>) {
-                oss << " rad=" << std::fixed << std::setprecision(2) << p.max_radius
-                    << " cvn=" << p.cv_normalization;
-            } else if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
-                oss << " rad=" << std::fixed << std::setprecision(2) << p.max_radius
-                    << " spr=" << p.min_spread_threshold;
-            } else if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
-                oss << " rad=" << std::fixed << std::setprecision(2) << p.max_radius
-                    << " lrn=" << p.log_ratio_normalization;
-            } else if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
-                oss << " gini=" << std::fixed << std::setprecision(2) << p.gini_chaos_baseline
-                    << "/" << p.gini_baseline_divisor;
             } else if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
                 oss << " log=" << std::fixed << std::setprecision(2) << p.log_inverse_baseline
                     << "/" << p.log_inverse_divisor;
@@ -1010,25 +922,6 @@ void writeMetricParams(std::ofstream& file, MetricParamsVariant const& params) {
             file << "max_sectors = " << p.max_sectors << "\n";
             file << "target_per_sector = " << p.target_per_sector << "\n";
             file << "cv_normalization = " << std::fixed << std::setprecision(2) << p.cv_normalization << "\n";
-        } else if constexpr (std::is_same_v<T, GridMetricParams>) {
-            file << "min_grid = " << p.min_grid << "\n";
-            file << "max_grid = " << p.max_grid << "\n";
-            file << "target_per_cell = " << p.target_per_cell << "\n";
-        } else if constexpr (std::is_same_v<T, FoldMetricParams>) {
-            file << "max_radius = " << std::fixed << std::setprecision(2) << p.max_radius << "\n";
-            file << "cv_normalization = " << std::fixed << std::setprecision(2) << p.cv_normalization << "\n";
-        } else if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
-            file << "max_radius = " << std::fixed << std::setprecision(2) << p.max_radius << "\n";
-            file << "min_spread_threshold = " << std::fixed << std::setprecision(3) << p.min_spread_threshold << "\n";
-        } else if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
-            file << "max_radius = " << std::fixed << std::setprecision(2) << p.max_radius << "\n";
-            file << "min_spread_threshold = " << std::fixed << std::setprecision(3) << p.min_spread_threshold << "\n";
-            file << "log_ratio_normalization = " << std::fixed << std::setprecision(2) << p.log_ratio_normalization << "\n";
-        } else if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
-            file << "max_radius = " << std::fixed << std::setprecision(2) << p.max_radius << "\n";
-            file << "min_spread_threshold = " << std::fixed << std::setprecision(3) << p.min_spread_threshold << "\n";
-            file << "gini_chaos_baseline = " << std::fixed << std::setprecision(2) << p.gini_chaos_baseline << "\n";
-            file << "gini_baseline_divisor = " << std::fixed << std::setprecision(2) << p.gini_baseline_divisor << "\n";
         } else if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
             file << "max_radius = " << std::fixed << std::setprecision(2) << p.max_radius << "\n";
             file << "min_spread_threshold = " << std::fixed << std::setprecision(3) << p.min_spread_threshold << "\n";
@@ -1271,30 +1164,6 @@ nlohmann::json metricConfigToJson(MetricConfig const& config) {
             j["max_sectors"] = params.max_sectors;
             j["target_per_sector"] = params.target_per_sector;
             j["cv_normalization"] = params.cv_normalization;
-        } else if constexpr (std::is_same_v<T, GridMetricParams>) {
-            j["type"] = "grid";
-            j["min_grid"] = params.min_grid;
-            j["max_grid"] = params.max_grid;
-            j["target_per_cell"] = params.target_per_cell;
-        } else if constexpr (std::is_same_v<T, FoldMetricParams>) {
-            j["type"] = "fold";
-            j["max_radius"] = params.max_radius;
-            j["cv_normalization"] = params.cv_normalization;
-        } else if constexpr (std::is_same_v<T, TrajectoryMetricParams>) {
-            j["type"] = "trajectory";
-            j["max_radius"] = params.max_radius;
-            j["min_spread_threshold"] = params.min_spread_threshold;
-        } else if constexpr (std::is_same_v<T, CurvatureMetricParams>) {
-            j["type"] = "curvature";
-            j["max_radius"] = params.max_radius;
-            j["min_spread_threshold"] = params.min_spread_threshold;
-            j["log_ratio_normalization"] = params.log_ratio_normalization;
-        } else if constexpr (std::is_same_v<T, TrueFoldsMetricParams>) {
-            j["type"] = "true_folds";
-            j["max_radius"] = params.max_radius;
-            j["min_spread_threshold"] = params.min_spread_threshold;
-            j["gini_chaos_baseline"] = params.gini_chaos_baseline;
-            j["gini_baseline_divisor"] = params.gini_baseline_divisor;
         } else if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
             j["type"] = "local_coherence";
             j["max_radius"] = params.max_radius;
@@ -1324,35 +1193,6 @@ MetricConfig metricConfigFromJson(nlohmann::json const& j) {
         p.max_sectors = j.value("max_sectors", 72);
         p.target_per_sector = j.value("target_per_sector", 40);
         p.cv_normalization = j.value("cv_normalization", 1.5);
-        config.params = p;
-    } else if (type == "grid") {
-        GridMetricParams p;
-        p.min_grid = j.value("min_grid", 4);
-        p.max_grid = j.value("max_grid", 32);
-        p.target_per_cell = j.value("target_per_cell", 40);
-        config.params = p;
-    } else if (type == "fold") {
-        FoldMetricParams p;
-        p.max_radius = j.value("max_radius", 2.0);
-        p.cv_normalization = j.value("cv_normalization", 1.5);
-        config.params = p;
-    } else if (type == "trajectory") {
-        TrajectoryMetricParams p;
-        p.max_radius = j.value("max_radius", 2.0);
-        p.min_spread_threshold = j.value("min_spread_threshold", 0.05);
-        config.params = p;
-    } else if (type == "curvature") {
-        CurvatureMetricParams p;
-        p.max_radius = j.value("max_radius", 2.0);
-        p.min_spread_threshold = j.value("min_spread_threshold", 0.05);
-        p.log_ratio_normalization = j.value("log_ratio_normalization", 2.0);
-        config.params = p;
-    } else if (type == "true_folds") {
-        TrueFoldsMetricParams p;
-        p.max_radius = j.value("max_radius", 2.0);
-        p.min_spread_threshold = j.value("min_spread_threshold", 0.05);
-        p.gini_chaos_baseline = j.value("gini_chaos_baseline", 0.35);
-        p.gini_baseline_divisor = j.value("gini_baseline_divisor", 0.65);
         config.params = p;
     } else if (type == "local_coherence") {
         LocalCoherenceMetricParams p;

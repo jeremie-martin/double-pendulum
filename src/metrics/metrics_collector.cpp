@@ -568,9 +568,6 @@ void MetricsCollector::updateFromStates(std::vector<PendulumState> const& states
     double tip_causticness = computeTipCausticness(x2s, y2s);
     setMetric(MetricNames::TipCausticness, tip_causticness);
 
-    double spatial_concentration = computeSpatialConcentration(x2s, y2s);
-    setMetric(MetricNames::SpatialConcentration, spatial_concentration);
-
     // Alternative caustic metrics (experimental)
     double cv_causticness = computeCVCausticness(angle1s, angle2s);
     setMetric(MetricNames::CVCausticness, cv_causticness);
@@ -578,19 +575,7 @@ void MetricsCollector::updateFromStates(std::vector<PendulumState> const& states
     double organization = computeOrganizationCausticness(angle1s, angle2s);
     setMetric(MetricNames::OrganizationCausticness, organization);
 
-    double fold_causticness = computeFoldCausticness(x2s, y2s);
-    setMetric(MetricNames::FoldCausticness, fold_causticness);
-
-    // New paradigm metrics (local coherence based)
-    double smoothness = computeTrajectorySmoothness(x2s, y2s);
-    setMetric(MetricNames::TrajectorySmoothness, smoothness);
-
-    double curvature = computeCurvature(x2s, y2s);
-    setMetric(MetricNames::Curvature, curvature);
-
-    double true_folds = computeTrueFolds(x2s, y2s);
-    setMetric(MetricNames::TrueFolds, true_folds);
-
+    // Local coherence metric
     double local_coherence = computeLocalCoherence(x2s, y2s);
     setMetric(MetricNames::LocalCoherence, local_coherence);
 
@@ -657,9 +642,6 @@ void MetricsCollector::updateFromPackedStates(
     double tip_causticness = computeTipCausticness(x2_buf_, y2_buf_);
     setMetric(MetricNames::TipCausticness, tip_causticness);
 
-    double spatial_concentration = computeSpatialConcentration(x2_buf_, y2_buf_);
-    setMetric(MetricNames::SpatialConcentration, spatial_concentration);
-
     // Alternative caustic metrics (experimental)
     double cv_causticness = computeCVCausticness(angle1_buf_, angle2_buf_);
     setMetric(MetricNames::CVCausticness, cv_causticness);
@@ -667,19 +649,7 @@ void MetricsCollector::updateFromPackedStates(
     double organization = computeOrganizationCausticness(angle1_buf_, angle2_buf_);
     setMetric(MetricNames::OrganizationCausticness, organization);
 
-    double fold_causticness = computeFoldCausticness(x2_buf_, y2_buf_);
-    setMetric(MetricNames::FoldCausticness, fold_causticness);
-
-    // New paradigm metrics (local coherence based)
-    double smoothness = computeTrajectorySmoothness(x2_buf_, y2_buf_);
-    setMetric(MetricNames::TrajectorySmoothness, smoothness);
-
-    double curvature = computeCurvature(x2_buf_, y2_buf_);
-    setMetric(MetricNames::Curvature, curvature);
-
-    double true_folds = computeTrueFolds(x2_buf_, y2_buf_);
-    setMetric(MetricNames::TrueFolds, true_folds);
-
+    // Local coherence metric
     double local_coherence = computeLocalCoherence(x2_buf_, y2_buf_);
     setMetric(MetricNames::LocalCoherence, local_coherence);
 
@@ -779,71 +749,6 @@ double MetricsCollector::computeTipCausticness(
 
     // Use same causticness algorithm as angular_causticness
     return computeCausticnessFromAngles(tip_angles, params);
-}
-
-double MetricsCollector::computeSpatialConcentration(
-    std::vector<double> const& x2s,
-    std::vector<double> const& y2s) const {
-    if (x2s.empty() || x2s.size() != y2s.size()) return 0.0;
-
-    // Get per-metric params
-    auto params = getMetricParams<GridMetricParams>(MetricNames::SpatialConcentration);
-
-    int N = static_cast<int>(x2s.size());
-
-    // FIXED PHYSICAL GRID for N-independence
-    // The pendulum tip can reach anywhere within [-max_reach, max_reach] for both x and y
-    // where max_reach = L1 + L2 (typically 2.0 for unit lengths)
-    // Using a fixed grid over this physical space makes the metric truly N-independent
-    constexpr double MAX_REACH = 2.1;  // L1 + L2 + small margin
-    constexpr double GRID_MIN = -MAX_REACH;
-    constexpr double GRID_MAX = MAX_REACH;
-    constexpr double GRID_RANGE = GRID_MAX - GRID_MIN;
-
-    // Use fixed grid size from params (not adaptive to N)
-    // A 20x20 grid gives 400 cells over the 4.2x4.2 physical space
-    int grid_size = params.max_grid;  // Use max_grid as fixed size
-    double cell_size = GRID_RANGE / grid_size;
-
-    // Build 2D histogram over fixed physical grid
-    int num_cells = grid_size * grid_size;
-    std::vector<int> histogram(num_cells, 0);
-
-    for (size_t i = 0; i < x2s.size(); ++i) {
-        // Map to grid coordinates (clamp to grid bounds)
-        int xi = static_cast<int>((x2s[i] - GRID_MIN) / cell_size);
-        int yi = static_cast<int>((y2s[i] - GRID_MIN) / cell_size);
-        xi = std::max(0, std::min(grid_size - 1, xi));
-        yi = std::max(0, std::min(grid_size - 1, yi));
-        histogram[yi * grid_size + xi]++;
-    }
-
-    // Instead of raw coverage (which follows birthday-problem statistics),
-    // use spatial extent which is inherently N-independent
-    // Compute bounding box of tips as fraction of max possible area
-    double min_x = *std::min_element(x2s.begin(), x2s.end());
-    double max_x = *std::max_element(x2s.begin(), x2s.end());
-    double min_y = *std::min_element(y2s.begin(), y2s.end());
-    double max_y = *std::max_element(y2s.begin(), y2s.end());
-    double extent_x = (max_x - min_x) / GRID_RANGE;
-    double extent_y = (max_y - min_y) / GRID_RANGE;
-    double spatial_extent = std::sqrt(extent_x * extent_y);  // Geometric mean
-
-    // Compute Gini coefficient on histogram (inherently N-independent)
-    // Gini measures concentration: 0 = uniform, 1 = all in one cell
-    std::sort(histogram.begin(), histogram.end());
-
-    double gini_sum = 0.0;
-    for (int i = 0; i < num_cells; ++i) {
-        gini_sum += (2.0 * (i + 1) - num_cells - 1) * histogram[i];
-    }
-    double gini = gini_sum / (num_cells * static_cast<double>(N));
-
-    // Combine spatial extent (N-independent) with Gini (N-independent)
-    // - Early: small extent × high gini = LOW
-    // - Caustic: medium extent × medium gini = HIGH (structured spread)
-    // - Chaos: large extent × low gini = LOW (uniform spread)
-    return spatial_extent * gini;
 }
 
 double MetricsCollector::computeCVCausticness(
@@ -972,288 +877,6 @@ double MetricsCollector::computeOrganizationCausticness(
     double organization = (1.0 - R1 * R2) * normalized_coverage;
 
     return organization;
-}
-
-double MetricsCollector::computeFoldCausticness(
-    std::vector<double> const& x2s,
-    std::vector<double> const& y2s) const {
-    // Fold causticness: leverages natural ordering of pendulums by initial angle
-    // At caustics, adjacent pendulums (i and i+1) have highly variable distances:
-    // - Some are very close (at "folds" where trajectories bunch)
-    // - Some are far apart (between folds)
-    // This creates high coefficient of variation in adjacent-pair distances
-
-    if (x2s.size() < 2 || x2s.size() != y2s.size()) return 0.0;
-
-    // Get per-metric params
-    auto params = getMetricParams<FoldMetricParams>(MetricNames::FoldCausticness);
-
-    int N = static_cast<int>(x2s.size());
-
-    // 1. Compute spatial spread (how far tips are from center)
-    double sum_r = 0.0;
-    for (int i = 0; i < N; ++i) {
-        sum_r += std::sqrt(x2s[i] * x2s[i] + y2s[i] * y2s[i]);
-    }
-    double mean_radius = sum_r / N;
-    double spread = std::min(1.0, mean_radius / params.max_radius);
-
-    // 2. Compute adjacent-pair distance statistics
-    // Pendulums are ordered by initial angle, so adjacent pairs started nearly identical
-    double sum_d = 0.0, sum_d2 = 0.0;
-    for (int i = 0; i < N - 1; ++i) {
-        double dx = x2s[i + 1] - x2s[i];
-        double dy = y2s[i + 1] - y2s[i];
-        double d = std::sqrt(dx * dx + dy * dy);
-        sum_d += d;
-        sum_d2 += d * d;
-    }
-    double mean_d = sum_d / (N - 1);
-    double var_d = sum_d2 / (N - 1) - mean_d * mean_d;
-    double std_d = std::sqrt(std::max(0.0, var_d));
-
-    // Coefficient of variation: high when some pairs close, others far
-    double cv = (mean_d > 1e-10) ? std_d / mean_d : 0.0;
-
-    // Normalize CV to roughly 0-1 range
-    double clustering = std::min(1.0, cv / params.cv_normalization);
-
-    // 3. Combine: need high spread AND high CV
-    // - Start: spread≈0 → metric≈0 (all tips at same spot)
-    // - Caustic: spread high, CV high → metric high (folds visible)
-    // - Chaos: spread high, CV low → metric low (uniform spacing)
-    return spread * clustering;
-}
-
-// === NEW PARADIGM METRICS ===
-// Based on neighbor distance statistics and their autocorrelation
-
-double MetricsCollector::computeTrajectorySmoothness(
-    std::vector<double> const& x2s,
-    std::vector<double> const& y2s) const {
-    // RENAMED PURPOSE: Neighbor Distance Autocorrelation
-    //
-    // Key insight: At caustics, small neighbor distances CLUSTER together
-    // (contiguous fold regions), while in chaos they're scattered randomly.
-    //
-    // Lag-1 autocorrelation of neighbor distances:
-    // - Caustic: d[i] small implies d[i+1] likely small (same fold) → positive autocorr
-    // - Chaos: d[i] and d[i+1] are independent → autocorr ≈ 0
-    //
-    // This directly measures the "coherent structure" that defines caustics.
-
-    if (x2s.size() < 4 || x2s.size() != y2s.size()) return 0.0;
-
-    // Get per-metric params
-    auto params = getMetricParams<TrajectoryMetricParams>(MetricNames::TrajectorySmoothness);
-
-    int N = static_cast<int>(x2s.size());
-
-    // Compute spread (circular_spread from angle data is better, but use spatial as fallback)
-    auto const* spread_metric = getMetric(MetricNames::CircularSpread);
-    double spread = 0.0;
-    if (spread_metric && spread_metric->size() > 0) {
-        spread = spread_metric->current();
-    } else {
-        // Fallback: spatial spread
-        double sum_r = 0.0;
-        for (int i = 0; i < N; ++i) {
-            sum_r += std::sqrt(x2s[i] * x2s[i] + y2s[i] * y2s[i]);
-        }
-        spread = std::min(1.0, (sum_r / N) / params.max_radius);
-    }
-
-    if (spread < params.min_spread_threshold) return 0.0;  // Not spread enough yet
-
-    // Compute neighbor distances
-    std::vector<double> distances;
-    distances.reserve(N - 1);
-    for (int i = 0; i < N - 1; ++i) {
-        double dx = x2s[i + 1] - x2s[i];
-        double dy = y2s[i + 1] - y2s[i];
-        distances.push_back(std::sqrt(dx * dx + dy * dy));
-    }
-
-    // Compute mean and variance of distances
-    double sum_d = 0.0, sum_d2 = 0.0;
-    for (double d : distances) {
-        sum_d += d;
-        sum_d2 += d * d;
-    }
-    double mean_d = sum_d / distances.size();
-    double var_d = sum_d2 / distances.size() - mean_d * mean_d;
-
-    if (var_d < 1e-12) return 0.0;  // All same distance (start or perfect chaos)
-
-    // Compute lag-1 autocovariance
-    double autocovar = 0.0;
-    for (size_t i = 0; i + 1 < distances.size(); ++i) {
-        autocovar += (distances[i] - mean_d) * (distances[i + 1] - mean_d);
-    }
-    autocovar /= (distances.size() - 1);
-
-    // Autocorrelation = autocovariance / variance
-    double autocorr = autocovar / var_d;
-
-    // autocorr ranges roughly -1 to 1
-    // Positive = clustering (caustics), Near-zero = random (chaos), Negative = alternating
-    // We only care about positive autocorrelation
-    double positive_autocorr = std::max(0.0, autocorr);
-
-    // Combine with spread: need both spread AND clustering for caustic
-    return spread * positive_autocorr;
-}
-
-double MetricsCollector::computeCurvature(
-    std::vector<double> const& x2s,
-    std::vector<double> const& y2s) const {
-    // RENAMED PURPOSE: Distance Bimodality (P90/P10 ratio)
-    //
-    // At caustics, neighbor distances are BIMODAL:
-    // - Fold regions: very small distances (many θ → same pos)
-    // - Between folds: normal distances
-    //
-    // In chaos, distances follow a continuous (Rayleigh-like) distribution.
-    //
-    // P90/P10 ratio captures this bimodality:
-    // - Caustic: P10 is tiny (folds), P90 is normal → HIGH ratio
-    // - Chaos: continuous distribution → moderate ratio
-    // - Start: all same → P90 ≈ P10 → ratio ≈ 1
-
-    if (x2s.size() < 10 || x2s.size() != y2s.size()) return 0.0;
-
-    // Get per-metric params
-    auto params = getMetricParams<CurvatureMetricParams>(MetricNames::Curvature);
-
-    int N = static_cast<int>(x2s.size());
-
-    // Compute spread
-    auto const* spread_metric = getMetric(MetricNames::CircularSpread);
-    double spread = 0.0;
-    if (spread_metric && spread_metric->size() > 0) {
-        spread = spread_metric->current();
-    } else {
-        double sum_r = 0.0;
-        for (int i = 0; i < N; ++i) {
-            sum_r += std::sqrt(x2s[i] * x2s[i] + y2s[i] * y2s[i]);
-        }
-        spread = std::min(1.0, (sum_r / N) / params.max_radius);
-    }
-
-    if (spread < params.min_spread_threshold) return 0.0;
-
-    // Compute neighbor distances
-    std::vector<double> distances;
-    distances.reserve(N - 1);
-    for (int i = 0; i < N - 1; ++i) {
-        double dx = x2s[i + 1] - x2s[i];
-        double dy = y2s[i + 1] - y2s[i];
-        distances.push_back(std::sqrt(dx * dx + dy * dy));
-    }
-
-    // Sort to get percentiles
-    std::sort(distances.begin(), distances.end());
-
-    size_t n = distances.size();
-    size_t p10_idx = n / 10;
-    size_t p90_idx = (n * 9) / 10;
-
-    double p10 = distances[p10_idx];
-    double p90 = distances[p90_idx];
-
-    if (p10 < 1e-12) {
-        // Very small P10 means strong fold (or numerical issues)
-        // Use median as fallback denominator
-        double median = distances[n / 2];
-        if (median < 1e-12) return 0.0;
-        p10 = median * 0.01;  // Treat as very small
-    }
-
-    double ratio = p90 / p10;
-
-    // Ratio typically ranges from ~1 (start/uniform) to ~100+ (strong folds)
-    // Normalize: log scale works well for ratios
-    // ratio=1 → 0, ratio=10 → 1, ratio=100 → 2
-    double log_ratio = std::log10(std::max(1.0, ratio));
-
-    // Normalize to 0-1 range (ratio of 10-50 is typical for good caustics)
-    double normalized = std::min(1.0, log_ratio / params.log_ratio_normalization);
-
-    // Combine with spread
-    return spread * normalized;
-}
-
-double MetricsCollector::computeTrueFolds(
-    std::vector<double> const& x2s,
-    std::vector<double> const& y2s) const {
-    // RENAMED PURPOSE: Neighbor Distance Gini
-    //
-    // Gini coefficient measures inequality in distribution.
-    // At caustics: highly unequal distances (some tiny at folds, some normal)
-    // In chaos: more uniform distribution (random but similar scale)
-    // At start: all same distance → Gini = 0
-    //
-    // Unlike CV which is also high for random distributions,
-    // Gini specifically measures "some values much smaller than others",
-    // which is exactly what folds produce.
-
-    if (x2s.size() < 10 || x2s.size() != y2s.size()) return 0.0;
-
-    // Get per-metric params
-    auto params = getMetricParams<TrueFoldsMetricParams>(MetricNames::TrueFolds);
-
-    int N = static_cast<int>(x2s.size());
-
-    // Compute spread
-    auto const* spread_metric = getMetric(MetricNames::CircularSpread);
-    double spread = 0.0;
-    if (spread_metric && spread_metric->size() > 0) {
-        spread = spread_metric->current();
-    } else {
-        double sum_r = 0.0;
-        for (int i = 0; i < N; ++i) {
-            sum_r += std::sqrt(x2s[i] * x2s[i] + y2s[i] * y2s[i]);
-        }
-        spread = std::min(1.0, (sum_r / N) / params.max_radius);
-    }
-
-    if (spread < params.min_spread_threshold) return 0.0;
-
-    // Compute neighbor distances
-    std::vector<double> distances;
-    distances.reserve(N - 1);
-    double sum_d = 0.0;
-    for (int i = 0; i < N - 1; ++i) {
-        double dx = x2s[i + 1] - x2s[i];
-        double dy = y2s[i + 1] - y2s[i];
-        double d = std::sqrt(dx * dx + dy * dy);
-        distances.push_back(d);
-        sum_d += d;
-    }
-
-    if (sum_d < 1e-12) return 0.0;
-
-    // Sort for Gini calculation
-    std::sort(distances.begin(), distances.end());
-
-    // Compute Gini coefficient
-    // Gini = (2 * sum(i * x[i]) - (n+1) * sum(x[i])) / (n * sum(x[i]))
-    double weighted_sum = 0.0;
-    for (size_t i = 0; i < distances.size(); ++i) {
-        weighted_sum += (i + 1) * distances[i];
-    }
-    size_t n = distances.size();
-    double gini = (2.0 * weighted_sum - (n + 1) * sum_d) / (n * sum_d);
-
-    // Gini ranges 0 (perfect equality) to 1 (maximal inequality)
-    // For random distributions (exponential/Rayleigh), Gini is typically 0.3-0.5
-    // For fold distributions, Gini should be higher (0.6-0.8)
-    //
-    // Subtract the "chaos baseline"
-    double adjusted_gini = std::max(0.0,
-        (gini - params.gini_chaos_baseline) / params.gini_baseline_divisor);
-
-    return spread * adjusted_gini;
 }
 
 double MetricsCollector::computeLocalCoherence(

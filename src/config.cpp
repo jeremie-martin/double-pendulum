@@ -207,40 +207,6 @@ static void loadConfigFromTable(Config& config, toml::table const& tbl) {
                     p.cv_normalization = get_or(*metric_tbl, "cv_normalization", p.cv_normalization);
                     break;
                 }
-                case MetricType::Grid: {
-                    auto& p = std::get<GridMetricParams>(mc.params);
-                    p.min_grid = get_or(*metric_tbl, "min_grid", p.min_grid);
-                    p.max_grid = get_or(*metric_tbl, "max_grid", p.max_grid);
-                    p.target_per_cell = get_or(*metric_tbl, "target_per_cell", p.target_per_cell);
-                    break;
-                }
-                case MetricType::Fold: {
-                    auto& p = std::get<FoldMetricParams>(mc.params);
-                    p.max_radius = get_or(*metric_tbl, "max_radius", p.max_radius);
-                    p.cv_normalization = get_or(*metric_tbl, "cv_normalization", p.cv_normalization);
-                    break;
-                }
-                case MetricType::Trajectory: {
-                    auto& p = std::get<TrajectoryMetricParams>(mc.params);
-                    p.max_radius = get_or(*metric_tbl, "max_radius", p.max_radius);
-                    p.min_spread_threshold = get_or(*metric_tbl, "min_spread_threshold", p.min_spread_threshold);
-                    break;
-                }
-                case MetricType::Curvature: {
-                    auto& p = std::get<CurvatureMetricParams>(mc.params);
-                    p.max_radius = get_or(*metric_tbl, "max_radius", p.max_radius);
-                    p.min_spread_threshold = get_or(*metric_tbl, "min_spread_threshold", p.min_spread_threshold);
-                    p.log_ratio_normalization = get_or(*metric_tbl, "log_ratio_normalization", p.log_ratio_normalization);
-                    break;
-                }
-                case MetricType::TrueFolds: {
-                    auto& p = std::get<TrueFoldsMetricParams>(mc.params);
-                    p.max_radius = get_or(*metric_tbl, "max_radius", p.max_radius);
-                    p.min_spread_threshold = get_or(*metric_tbl, "min_spread_threshold", p.min_spread_threshold);
-                    p.gini_chaos_baseline = get_or(*metric_tbl, "gini_chaos_baseline", p.gini_chaos_baseline);
-                    p.gini_baseline_divisor = get_or(*metric_tbl, "gini_baseline_divisor", p.gini_baseline_divisor);
-                    break;
-                }
                 case MetricType::LocalCoherence: {
                     auto& p = std::get<LocalCoherenceMetricParams>(mc.params);
                     p.max_radius = get_or(*metric_tbl, "max_radius", p.max_radius);
@@ -624,40 +590,6 @@ bool Config::applyOverride(std::string const& key, std::string const& value) {
                     else if (rest == "cv_normalization") { p.cv_normalization = std::stod(value); handled = true; }
                     break;
                 }
-                case MetricType::Grid: {
-                    auto& p = std::get<GridMetricParams>(mc.params);
-                    if (rest == "min_grid") { p.min_grid = std::stoi(value); handled = true; }
-                    else if (rest == "max_grid") { p.max_grid = std::stoi(value); handled = true; }
-                    else if (rest == "target_per_cell") { p.target_per_cell = std::stoi(value); handled = true; }
-                    break;
-                }
-                case MetricType::Fold: {
-                    auto& p = std::get<FoldMetricParams>(mc.params);
-                    if (rest == "max_radius") { p.max_radius = std::stod(value); handled = true; }
-                    else if (rest == "cv_normalization") { p.cv_normalization = std::stod(value); handled = true; }
-                    break;
-                }
-                case MetricType::Trajectory: {
-                    auto& p = std::get<TrajectoryMetricParams>(mc.params);
-                    if (rest == "max_radius") { p.max_radius = std::stod(value); handled = true; }
-                    else if (rest == "min_spread_threshold") { p.min_spread_threshold = std::stod(value); handled = true; }
-                    break;
-                }
-                case MetricType::Curvature: {
-                    auto& p = std::get<CurvatureMetricParams>(mc.params);
-                    if (rest == "max_radius") { p.max_radius = std::stod(value); handled = true; }
-                    else if (rest == "min_spread_threshold") { p.min_spread_threshold = std::stod(value); handled = true; }
-                    else if (rest == "log_ratio_normalization") { p.log_ratio_normalization = std::stod(value); handled = true; }
-                    break;
-                }
-                case MetricType::TrueFolds: {
-                    auto& p = std::get<TrueFoldsMetricParams>(mc.params);
-                    if (rest == "max_radius") { p.max_radius = std::stod(value); handled = true; }
-                    else if (rest == "min_spread_threshold") { p.min_spread_threshold = std::stod(value); handled = true; }
-                    else if (rest == "gini_chaos_baseline") { p.gini_chaos_baseline = std::stod(value); handled = true; }
-                    else if (rest == "gini_baseline_divisor") { p.gini_baseline_divisor = std::stod(value); handled = true; }
-                    break;
-                }
                 case MetricType::LocalCoherence: {
                     auto& p = std::get<LocalCoherenceMetricParams>(mc.params);
                     if (rest == "max_radius") { p.max_radius = std::stod(value); handled = true; }
@@ -828,40 +760,6 @@ void Config::save(std::string const& path) const {
             file << "max_sectors = " << p.max_sectors << "\n";
             file << "target_per_sector = " << p.target_per_sector << "\n";
             file << "cv_normalization = " << p.cv_normalization << "\n";
-            break;
-        }
-        case MetricType::Grid: {
-            auto const& p = std::get<GridMetricParams>(mc.params);
-            file << "min_grid = " << p.min_grid << "\n";
-            file << "max_grid = " << p.max_grid << "\n";
-            file << "target_per_cell = " << p.target_per_cell << "\n";
-            break;
-        }
-        case MetricType::Fold: {
-            auto const& p = std::get<FoldMetricParams>(mc.params);
-            file << "max_radius = " << p.max_radius << "\n";
-            file << "cv_normalization = " << p.cv_normalization << "\n";
-            break;
-        }
-        case MetricType::Trajectory: {
-            auto const& p = std::get<TrajectoryMetricParams>(mc.params);
-            file << "max_radius = " << p.max_radius << "\n";
-            file << "min_spread_threshold = " << p.min_spread_threshold << "\n";
-            break;
-        }
-        case MetricType::Curvature: {
-            auto const& p = std::get<CurvatureMetricParams>(mc.params);
-            file << "max_radius = " << p.max_radius << "\n";
-            file << "min_spread_threshold = " << p.min_spread_threshold << "\n";
-            file << "log_ratio_normalization = " << p.log_ratio_normalization << "\n";
-            break;
-        }
-        case MetricType::TrueFolds: {
-            auto const& p = std::get<TrueFoldsMetricParams>(mc.params);
-            file << "max_radius = " << p.max_radius << "\n";
-            file << "min_spread_threshold = " << p.min_spread_threshold << "\n";
-            file << "gini_chaos_baseline = " << p.gini_chaos_baseline << "\n";
-            file << "gini_baseline_divisor = " << p.gini_baseline_divisor << "\n";
             break;
         }
         case MetricType::LocalCoherence: {

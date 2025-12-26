@@ -137,40 +137,6 @@ struct CVSectorMetricParams {
     double cv_normalization = 1.5;
 };
 
-// For grid-based metrics: spatial_concentration
-struct GridMetricParams {
-    int min_grid = 4;
-    int max_grid = 32;
-    int target_per_cell = 40;
-};
-
-// For fold detection: fold_causticness
-struct FoldMetricParams {
-    double max_radius = 2.0;
-    double cv_normalization = 1.5;
-};
-
-// For trajectory analysis: trajectory_smoothness
-struct TrajectoryMetricParams {
-    double max_radius = 2.0;
-    double min_spread_threshold = 0.05;
-};
-
-// For curvature metric
-struct CurvatureMetricParams {
-    double max_radius = 2.0;
-    double min_spread_threshold = 0.05;
-    double log_ratio_normalization = 2.0;
-};
-
-// For true_folds metric
-struct TrueFoldsMetricParams {
-    double max_radius = 2.0;
-    double min_spread_threshold = 0.05;
-    double gini_chaos_baseline = 0.35;
-    double gini_baseline_divisor = 0.65;
-};
-
 // For local_coherence metric
 struct LocalCoherenceMetricParams {
     double max_radius = 2.0;
@@ -183,11 +149,6 @@ struct LocalCoherenceMetricParams {
 using MetricParamsVariant = std::variant<
     SectorMetricParams,
     CVSectorMetricParams,
-    GridMetricParams,
-    FoldMetricParams,
-    TrajectoryMetricParams,
-    CurvatureMetricParams,
-    TrueFoldsMetricParams,
     LocalCoherenceMetricParams
 >;
 
@@ -201,11 +162,6 @@ struct MetricConfig {
 enum class MetricType {
     Sector,         // angular_causticness, tip_causticness, etc.
     CVSector,       // cv_causticness
-    Grid,           // spatial_concentration
-    Fold,           // fold_causticness
-    Trajectory,     // trajectory_smoothness
-    Curvature,      // curvature
-    TrueFolds,      // true_folds
     LocalCoherence, // local_coherence
     None            // variance, spread_ratio, etc. (no configurable params)
 };
@@ -218,16 +174,6 @@ inline MetricType getMetricType(std::string const& name) {
         return MetricType::Sector;
     } else if (name == "cv_causticness") {
         return MetricType::CVSector;
-    } else if (name == "spatial_concentration") {
-        return MetricType::Grid;
-    } else if (name == "fold_causticness") {
-        return MetricType::Fold;
-    } else if (name == "trajectory_smoothness") {
-        return MetricType::Trajectory;
-    } else if (name == "curvature") {
-        return MetricType::Curvature;
-    } else if (name == "true_folds") {
-        return MetricType::TrueFolds;
     } else if (name == "local_coherence") {
         return MetricType::LocalCoherence;
     }
@@ -246,21 +192,6 @@ inline MetricConfig createDefaultMetricConfig(std::string const& name) {
         break;
     case MetricType::CVSector:
         config.params = CVSectorMetricParams{};
-        break;
-    case MetricType::Grid:
-        config.params = GridMetricParams{};
-        break;
-    case MetricType::Fold:
-        config.params = FoldMetricParams{};
-        break;
-    case MetricType::Trajectory:
-        config.params = TrajectoryMetricParams{};
-        break;
-    case MetricType::Curvature:
-        config.params = CurvatureMetricParams{};
-        break;
-    case MetricType::TrueFolds:
-        config.params = TrueFoldsMetricParams{};
         break;
     case MetricType::LocalCoherence:
         config.params = LocalCoherenceMetricParams{};

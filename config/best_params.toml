@@ -1,79 +1,67 @@
 # Best parameters found by pendulum-optimize
-# Global best: spatial_concentration with MAE=19.90 frames
-# Samples evaluated: 29
-# This file contains best parameters for ALL metrics.
-# The [boom_detection] section at the end specifies which metric to use.
+# Primary target: boom
+# Best metric: tip_causticness with MAE=27.22 frames
+# Samples evaluated: 50
 
-# spatial_concentration: MAE=19.90 frames
-[metrics.spatial_concentration]
-min_grid = 4
-max_grid = 30
-target_per_cell = 4
-
-# organization_causticness: MAE=19.97 frames
-[metrics.organization_causticness]
-min_sectors = 8
-max_sectors = 60
-target_per_sector = 62
-
-# tip_causticness: MAE=21.45 frames
+# tip_causticness: MAE=27.22 frames
 [metrics.tip_causticness]
 min_sectors = 8
-max_sectors = 94
-target_per_sector = 39
+max_sectors = 8
+target_per_sector = 1248
 
-# cv_causticness: MAE=22.07 frames
-[metrics.cv_causticness]
+# angular_causticness: MAE=30.14 frames
+[metrics.angular_causticness]
 min_sectors = 8
-max_sectors = 128
-target_per_sector = 29
-cv_normalization = 0.50
+max_sectors = 8
+target_per_sector = 1248
 
-# joint_concentration: MAE=22.10 frames
-[metrics.joint_concentration]
-min_sectors = 8
-max_sectors = 26
-target_per_sector = 144
-
-# r1_concentration: MAE=23.72 frames
+# r1_concentration: MAE=30.36 frames
 [metrics.r1_concentration]
 min_sectors = 8
 max_sectors = 8
-target_per_sector = 468
+target_per_sector = 1248
 
-# r2_concentration: MAE=24.69 frames
+# joint_concentration: MAE=30.56 frames
+[metrics.joint_concentration]
+min_sectors = 8
+max_sectors = 8
+target_per_sector = 1248
+
+# organization_causticness: MAE=30.68 frames
+[metrics.organization_causticness]
+min_sectors = 8
+max_sectors = 8
+target_per_sector = 1248
+
+# r2_concentration: MAE=33.30 frames
 [metrics.r2_concentration]
 min_sectors = 8
-max_sectors = 26
-target_per_sector = 144
+max_sectors = 8
+target_per_sector = 1248
 
-# angular_causticness: MAE=25.66 frames
-[metrics.angular_causticness]
+# cv_causticness: MAE=35.74 frames
+[metrics.cv_causticness]
 min_sectors = 8
-max_sectors = 60
-target_per_sector = 62
+max_sectors = 8
+target_per_sector = 1248
+cv_normalization = 0.50
 
-# fold_causticness: MAE=33.28 frames
-[metrics.fold_causticness]
-max_radius = 1.00
-cv_normalization = 2.64
-
-# trajectory_smoothness: MAE=35.10 frames
-[metrics.trajectory_smoothness]
-max_radius = 1.43
-min_spread_threshold = 0.010
-
-# variance: MAE=138.59 frames
+# variance: MAE=89.18 frames
 [metrics.variance]
 min_sectors = 8
 max_sectors = 72
 target_per_sector = 40
 
-# Best boom detection target (using spatial_concentration)
+# boom: MAE=27.22 frames (50 samples)
 [targets.boom]
 type = "frame"
-metric = "spatial_concentration"
-method = "threshold_crossing"
-offset_seconds = 0.38
-crossing_threshold = 0.40
-crossing_confirmation = 1
+metric = "tip_causticness"
+method = "max_value"
+offset_seconds = -0.50
+
+# boom_quality: MAE=0.2248 (score units, 0-1 scale) (50 samples)
+[targets.boom_quality]
+type = "score"
+metric = "tip_causticness"
+method = "rise_time"
+
