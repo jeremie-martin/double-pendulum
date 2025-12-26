@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Optional
 
 from .ffmpeg import extract_frame
+from ..constants import PRE_BOOM_OFFSET_SECONDS
+
+logger = logging.getLogger(__name__)
 
 
 def extract_thumbnails(
@@ -18,7 +22,7 @@ def extract_thumbnails(
     """Extract key frames as thumbnail images.
 
     Extracts thumbnails at significant moments:
-    - pre_boom: 0.5 seconds before boom (tension moment)
+    - pre_boom: PRE_BOOM_OFFSET_SECONDS before boom (tension moment)
     - boom: Exact moment of chaos emergence
     - best_caustic: Frame with peak causticness (if score available)
 
@@ -39,8 +43,8 @@ def extract_thumbnails(
     extractions: list[tuple[str, Optional[float]]] = []
 
     if boom_seconds is not None:
-        # Pre-boom: 0.5s before (but not negative)
-        pre_boom_time = max(0.0, boom_seconds - 0.5)
+        # Pre-boom: offset before (but not negative)
+        pre_boom_time = max(0.0, boom_seconds - PRE_BOOM_OFFSET_SECONDS)
         extractions.append(("pre_boom", pre_boom_time))
 
         # Boom moment
@@ -70,7 +74,7 @@ def extract_thumbnails(
             thumbnails.append(output_path)
         except Exception as e:
             # Log but don't fail on individual thumbnail errors
-            print(f"Warning: Failed to extract {name} thumbnail: {e}")
+            logger.warning(f"Failed to extract {name} thumbnail: {e}")
 
     return thumbnails
 

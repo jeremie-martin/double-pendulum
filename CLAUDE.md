@@ -376,8 +376,23 @@ pendulum-tools upload /path/to/video        # Upload to YouTube
 |------|---------|
 | `src/pendulum_tools/cli.py` | Click CLI commands |
 | `src/pendulum_tools/models.py` | Pydantic models for metadata.json |
+| `src/pendulum_tools/config.py` | User config file support |
+| `src/pendulum_tools/constants.py` | Centralized magic numbers |
+| `src/pendulum_tools/exceptions.py` | Custom exceptions with FFmpeg error extraction |
 | `src/pendulum_tools/music/manager.py` | Music selection and FFmpeg muxing |
 | `src/pendulum_tools/processing/pipeline.py` | Video effects pipeline |
+
+### User Config
+
+Optional config file at `~/.config/pendulum-tools/config.toml`:
+```toml
+music_dir = "/path/to/music"
+credentials_dir = "/path/to/credentials"
+use_nvenc = true
+nvenc_cq = 23
+```
+
+CLI flags override config file values.
 
 ### Music Sync
 

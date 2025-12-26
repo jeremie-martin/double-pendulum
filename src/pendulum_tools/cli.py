@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import logging
+import sys
+from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import click
 from rich.console import Console
+from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+from .config import get_config
+from .constants import DEFAULT_NVENC_CQ, DEFAULT_CRF_QUALITY, FALLBACK_BOOM_SECONDS
 from .models import VideoMetadata
 from .templates import (
     generate_all_titles,
@@ -27,6 +34,35 @@ from .processing import (
 from .processing.thumbnails import extract_thumbnails
 
 console = Console()
+logger = logging.getLogger(__name__)
+
+
+def setup_logging(log_file: Optional[Path] = None, verbose: bool = False) -> None:
+    """Configure logging for CLI operations.
+
+    Args:
+        log_file: Optional path to write logs to file
+        verbose: If True, show DEBUG level messages
+    """
+    level = logging.DEBUG if verbose else logging.INFO
+
+    handlers: list[logging.Handler] = [
+        RichHandler(console=console, show_time=False, show_path=False)
+    ]
+
+    if log_file:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(
+            logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        )
+        handlers.append(file_handler)
+
+    logging.basicConfig(
+        level=level,
+        handlers=handlers,
+        force=True,
+    )
 
 
 def get_video_path(video_dir: Path) -> Path:
@@ -78,17 +114,22 @@ def music():
     "--music-dir",
     "-d",
     type=click.Path(exists=True, path_type=Path),
-    default=Path("music"),
-    help="Music database directory",
+    default=None,
+    help="Music database directory (default: from config or ./music)",
 )
-def music_list(music_dir: Path):
+def music_list(music_dir: Optional[Path]):
     """List all available music tracks."""
     from .music import MusicManager
 
+    # Resolve music directory from config
+    config = get_config()
+    resolved_music_dir = config.get_music_dir(music_dir)
+
     try:
-        manager = MusicManager(music_dir)
+        manager = MusicManager(resolved_music_dir)
     except FileNotFoundError as e:
         console.print(f"[red]Error:[/red] {e}")
+        console.print(f"[dim]Searched: {resolved_music_dir}[/dim]")
         raise SystemExit(1)
 
     console.print()
@@ -126,8 +167,8 @@ def music_list(music_dir: Path):
     "--music-dir",
     "-d",
     type=click.Path(exists=True, path_type=Path),
-    default=Path("music"),
-    help="Music database directory",
+    default=None,
+    help="Music database directory (default: from config or ./music)",
 )
 @click.option(
     "--output",
@@ -137,15 +178,21 @@ def music_list(music_dir: Path):
     help="Output path (default: video_dir/video.mp4)",
 )
 @click.option(
+    "--force-random",
+    is_flag=True,
+    help="Skip confirmation when falling back to random track",
+)
+@click.option(
     "--dry-run",
     is_flag=True,
     help="Show what would be done without executing",
 )
 def music_add(
     video_dir: Path,
-    track: str | None,
-    music_dir: Path,
-    output: Path | None,
+    track: Optional[str],
+    music_dir: Optional[Path],
+    output: Optional[Path],
+    force_random: bool,
     dry_run: bool,
 ):
     """Add music to video (lossless mux).
@@ -157,6 +204,10 @@ def music_add(
     the music drop happens after the visual boom.
     """
     from .music import MusicManager
+
+    # Resolve music directory from config
+    user_config = get_config()
+    resolved_music_dir = user_config.get_music_dir(music_dir)
 
     # Load metadata
     metadata_path = video_dir / "metadata.json"
@@ -181,9 +232,10 @@ def music_add(
 
     # Load music manager
     try:
-        manager = MusicManager(music_dir)
+        manager = MusicManager(resolved_music_dir)
     except FileNotFoundError as e:
         console.print(f"[red]Error:[/red] {e}")
+        console.print(f"[dim]Searched: {resolved_music_dir}[/dim]")
         raise SystemExit(1)
 
     # Get boom info
@@ -206,10 +258,19 @@ def music_add(
         selected_track = manager.pick_track_for_boom(boom_seconds)
         if not selected_track:
             console.print(
-                f"[yellow]Warning:[/yellow] No tracks with drop > {boom_seconds:.1f}s"
+                f"[yellow]Warning:[/yellow] No tracks with drop time > {boom_seconds:.1f}s"
             )
-            console.print("Using random track (sync may not be optimal)")
+            console.print(
+                "[dim]Music drop will happen before the visual boom (sync will be off)[/dim]"
+            )
+
+            if not force_random:
+                if not click.confirm("Use a random track anyway?"):
+                    console.print("[red]Aborted.[/red] Use --track to specify a track manually.")
+                    raise SystemExit(1)
+
             selected_track = manager.random_track()
+            console.print(f"[yellow]Selected random track:[/yellow] {selected_track.title}")
 
     # Determine output path
     output_path = output or (video_dir / "video.mp4")
@@ -263,16 +324,20 @@ def music_add(
     "--music-dir",
     "-d",
     type=click.Path(exists=True, path_type=Path),
-    default=Path("music"),
-    help="Music database directory",
+    default=None,
+    help="Music database directory (default: from config or ./music)",
 )
-def music_sync(video_dir: Path, music_dir: Path):
+def music_sync(video_dir: Path, music_dir: Optional[Path]):
     """Show which tracks are valid for this video's boom timing.
 
     Lists all tracks and indicates which ones have their drop
     after the visual boom (suitable for sync).
     """
     from .music import MusicManager
+
+    # Resolve music directory from config
+    user_config = get_config()
+    resolved_music_dir = user_config.get_music_dir(music_dir)
 
     # Load metadata
     metadata_path = video_dir / "metadata.json"
@@ -288,9 +353,10 @@ def music_sync(video_dir: Path, music_dir: Path):
 
     # Load music manager
     try:
-        manager = MusicManager(music_dir)
+        manager = MusicManager(resolved_music_dir)
     except FileNotFoundError as e:
         console.print(f"[red]Error:[/red] {e}")
+        console.print(f"[dim]Searched: {resolved_music_dir}[/dim]")
         raise SystemExit(1)
 
     boom_seconds = metadata.boom_seconds or 0
@@ -329,8 +395,8 @@ def music_sync(video_dir: Path, music_dir: Path):
     "--credentials",
     "-c",
     type=click.Path(path_type=Path),
-    default=Path("credentials"),
-    help="Directory containing client_secrets.json",
+    default=None,
+    help="Directory containing client_secrets.json (default: from config or ./credentials)",
 )
 @click.option(
     "--privacy",
@@ -344,11 +410,15 @@ def music_sync(video_dir: Path, music_dir: Path):
     is_flag=True,
     help="Show what would be uploaded without actually uploading",
 )
-def upload(video_dir: Path, credentials: Path, privacy: str, dry_run: bool):
+def upload(video_dir: Path, credentials: Optional[Path], privacy: str, dry_run: bool):
     """Upload a single video from VIDEO_DIR.
 
     VIDEO_DIR must contain metadata.json and video.mp4.
     """
+    # Resolve credentials directory from config
+    user_config = get_config()
+    resolved_credentials = user_config.get_credentials_dir(credentials)
+
     metadata_path = video_dir / "metadata.json"
     video_path = video_dir / "video.mp4"
 
@@ -389,10 +459,11 @@ def upload(video_dir: Path, credentials: Path, privacy: str, dry_run: bool):
 
     # Upload
     try:
-        uploader = YouTubeUploader(credentials)
+        uploader = YouTubeUploader(resolved_credentials)
         uploader.authenticate()
     except FileNotFoundError as e:
         console.print(f"\n[red]Error:[/red] {e}")
+        console.print(f"[dim]Searched: {resolved_credentials}[/dim]")
         raise SystemExit(1)
 
     console.print()
@@ -433,8 +504,8 @@ def upload(video_dir: Path, credentials: Path, privacy: str, dry_run: bool):
     "--credentials",
     "-c",
     type=click.Path(path_type=Path),
-    default=Path("credentials"),
-    help="Directory containing client_secrets.json",
+    default=None,
+    help="Directory containing client_secrets.json (default: from config or ./credentials)",
 )
 @click.option(
     "--privacy",
@@ -451,15 +522,40 @@ def upload(video_dir: Path, credentials: Path, privacy: str, dry_run: bool):
     help="Maximum number of videos to upload",
 )
 @click.option(
+    "--log-file",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Write detailed logs to file (default: batch_dir/upload_TIMESTAMP.log)",
+)
+@click.option(
     "--dry-run",
     is_flag=True,
     help="Show what would be uploaded without actually uploading",
 )
-def batch(batch_dir: Path, credentials: Path, privacy: str, limit: int, dry_run: bool):
+def batch(
+    batch_dir: Path,
+    credentials: Optional[Path],
+    privacy: str,
+    limit: Optional[int],
+    log_file: Optional[Path],
+    dry_run: bool,
+):
     """Upload all videos from a batch directory.
 
     Finds all subdirectories containing metadata.json and a video file.
     """
+    # Resolve credentials directory from config
+    user_config = get_config()
+    resolved_credentials = user_config.get_credentials_dir(credentials)
+
+    # Setup logging
+    if log_file is None and not dry_run:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = batch_dir / f"upload_{timestamp}.log"
+    if log_file:
+        setup_logging(log_file)
+        logger.info(f"Batch upload started: {batch_dir}")
+
     # Find all video directories (must have metadata and a video file)
     video_dirs = []
     for item in batch_dir.iterdir():
@@ -478,25 +574,31 @@ def batch(batch_dir: Path, credentials: Path, privacy: str, limit: int, dry_run:
         return
 
     console.print(f"Found [bold]{len(video_dirs)}[/bold] videos to upload")
+    if log_file:
+        console.print(f"[dim]Logging to: {log_file}[/dim]")
     console.print()
 
     uploader = None
     if not dry_run:
         try:
-            uploader = YouTubeUploader(credentials)
+            uploader = YouTubeUploader(resolved_credentials)
             uploader.authenticate()
         except FileNotFoundError as e:
             console.print(f"[red]Error:[/red] {e}")
+            console.print(f"[dim]Searched: {resolved_credentials}[/dim]")
             raise SystemExit(1)
 
     results = []
     for i, video_dir in enumerate(video_dirs, 1):
         console.print(f"\n[bold]Video {i}/{len(video_dirs)}:[/bold] {video_dir.name}")
+        logger.info(f"Processing video {i}/{len(video_dirs)}: {video_dir.name}")
 
         try:
             metadata = VideoMetadata.from_file(video_dir / "metadata.json")
         except Exception as e:
-            console.print(f"  [red]Error loading metadata:[/red] {e}")
+            error_msg = f"Error loading metadata: {e}"
+            console.print(f"  [red]{error_msg}[/red]")
+            logger.error(f"{video_dir.name}: {error_msg}")
             results.append((video_dir.name, None, str(e)))
             continue
 
@@ -522,12 +624,15 @@ def batch(batch_dir: Path, credentials: Path, privacy: str, limit: int, dry_run:
             if video_id:
                 url = f"https://youtu.be/{video_id}"
                 console.print(f"  [green]Uploaded:[/green] {url}")
+                logger.info(f"{video_dir.name}: Uploaded successfully - {url}")
                 results.append((video_dir.name, video_id, url))
             else:
                 console.print(f"  [red]Upload failed[/red]")
+                logger.error(f"{video_dir.name}: Upload failed (no video ID returned)")
                 results.append((video_dir.name, None, "Upload failed"))
         except Exception as e:
             console.print(f"  [red]Error:[/red] {e}")
+            logger.error(f"{video_dir.name}: Upload error - {e}")
             results.append((video_dir.name, None, str(e)))
 
     # Print summary
@@ -537,15 +642,23 @@ def batch(batch_dir: Path, credentials: Path, privacy: str, limit: int, dry_run:
     table.add_column("Status", style="green")
     table.add_column("URL/Error")
 
+    succeeded = 0
+    failed = 0
     for name, video_id, info in results:
         if video_id and video_id != "dry-run":
             table.add_row(name, "OK", info)
+            succeeded += 1
         elif video_id == "dry-run":
             table.add_row(name, "DRY RUN", info)
         else:
             table.add_row(name, "[red]FAILED[/red]", info)
+            failed += 1
 
     console.print(table)
+
+    # Log final summary
+    if log_file:
+        logger.info(f"Batch upload completed: {succeeded} succeeded, {failed} failed out of {len(results)} total")
 
 
 @main.command()
@@ -656,8 +769,8 @@ def list_templates():
     "--template",
     "-t",
     type=str,
-    default="viral_science",
-    help="Template name (use 'random' for random selection, 'list-templates' to see options)",
+    default="minimal_science",
+    help="Template name (use 'random' for random selection, run 'list-templates' command to see options)",
 )
 @click.option(
     "--seed",
@@ -683,8 +796,14 @@ def list_templates():
 @click.option(
     "--quality",
     type=click.IntRange(0, 51),
-    default=18,
-    help="CRF quality (0-51, lower is better, 18 = visually lossless)",
+    default=DEFAULT_CRF_QUALITY,
+    help=f"CRF quality for libx264 (0-51, lower is better, default={DEFAULT_CRF_QUALITY})",
+)
+@click.option(
+    "--nvenc-cq",
+    type=click.IntRange(0, 51),
+    default=DEFAULT_NVENC_CQ,
+    help=f"Quality for NVENC encoder (0-51, lower is better, default={DEFAULT_NVENC_CQ})",
 )
 @click.option(
     "--force",
@@ -703,13 +822,14 @@ def list_templates():
 )
 def process(
     video_dir: Path,
-    output: Path | None,
+    output: Optional[Path],
     template: str,
-    seed: int | None,
+    seed: Optional[int],
     shorts: bool,
     blur_bg: bool,
     no_thumbnail: bool,
     quality: int,
+    nvenc_cq: int,
     force: bool,
     no_nvenc: bool,
     dry_run: bool,
@@ -729,11 +849,11 @@ def process(
         # Full Shorts treatment with blurred background
         pendulum-tools process /path/to/video_0000 --shorts --blur-bg -t hype_mrbeast
 
-        # Use dramatic minimal template (motion only, no text)
-        pendulum-tools process /path/to/video_0000 -t dramatic_minimal
+        # Custom NVENC quality
+        pendulum-tools process /path/to/video_0000 --nvenc-cq 18
 
-        # Random template selection
-        pendulum-tools process /path/to/video_0000 -t random
+        # Use CPU encoding with custom quality
+        pendulum-tools process /path/to/video_0000 --no-nvenc --quality 15
 
         # Preview FFmpeg command
         pendulum-tools process /path/to/video_0000 --dry-run
@@ -746,6 +866,7 @@ def process(
         blurred_background=blur_bg,
         extract_thumbnails=not no_thumbnail,
         crf_quality=quality,
+        nvenc_cq=nvenc_cq,
         use_nvenc=not no_nvenc,
     )
 
@@ -772,7 +893,8 @@ def process(
     if pipeline.metadata.boom_seconds:
         console.print(f"  Boom at: {pipeline.metadata.boom_seconds:.2f}s")
     else:
-        console.print("  [yellow]Warning: No boom detected, motion effects may be skipped[/yellow]")
+        console.print(f"  [yellow]Warning: No boom detected, using fallback time of {FALLBACK_BOOM_SECONDS}s[/yellow]")
+        console.print("  [dim]Motion effects may not sync correctly with visual content[/dim]")
 
     if pipeline.metadata.scores:
         console.print(f"  Causticness score: {pipeline.metadata.scores.causticness or 0:.4f}")
@@ -941,6 +1063,12 @@ def thumbnail(video_dir: Path, output: Path | None, timestamps: str):
     help="Maximum number of videos to process",
 )
 @click.option(
+    "--nvenc-cq",
+    type=click.IntRange(0, 51),
+    default=DEFAULT_NVENC_CQ,
+    help=f"Quality for NVENC encoder (0-51, lower is better, default={DEFAULT_NVENC_CQ})",
+)
+@click.option(
     "--force",
     is_flag=True,
     help="Overwrite existing processed output",
@@ -949,6 +1077,12 @@ def thumbnail(video_dir: Path, output: Path | None, timestamps: str):
     "--no-nvenc",
     is_flag=True,
     help="Disable NVIDIA hardware encoding (use CPU libx264)",
+)
+@click.option(
+    "--log-file",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Write detailed logs to file (default: batch_dir/process_TIMESTAMP.log)",
 )
 @click.option(
     "--dry-run",
@@ -960,9 +1094,11 @@ def batch_process(
     template: str,
     shorts: bool,
     blur_bg: bool,
-    limit: int | None,
+    limit: Optional[int],
+    nvenc_cq: int,
     force: bool,
     no_nvenc: bool,
+    log_file: Optional[Path],
     dry_run: bool,
 ):
     """Process all videos in a batch directory.
@@ -979,9 +1115,17 @@ def batch_process(
         # Process first 5 videos with random templates
         pendulum-tools batch-process /path/to/batch_output --limit 5 -t random
 
-        # Use specific template for all
-        pendulum-tools batch-process /path/to/batch_output -t hype_mrbeast
+        # Use specific template for all with custom quality
+        pendulum-tools batch-process /path/to/batch_output -t minimal_science --nvenc-cq 18
     """
+    # Setup logging
+    if log_file is None and not dry_run:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = batch_dir / f"process_{timestamp}.log"
+    if log_file:
+        setup_logging(log_file)
+        logger.info(f"Batch processing started: {batch_dir}")
+
     # Find all video directories (must have metadata and a video file)
     video_dirs = []
     for item in batch_dir.iterdir():
@@ -1004,11 +1148,14 @@ def batch_process(
     console.print(f"  Shorts: {'Yes' if shorts else 'No'}")
     console.print(f"  Blurred BG: {'Yes' if blur_bg else 'No'}")
     console.print(f"  Encoder: {'NVENC (GPU)' if not no_nvenc else 'libx264 (CPU)'}")
+    if log_file:
+        console.print(f"  [dim]Logging to: {log_file}[/dim]")
     console.print()
 
     results = []
     for i, video_dir in enumerate(video_dirs, 1):
         console.print(f"[bold]Video {i}/{len(video_dirs)}:[/bold] {video_dir.name}")
+        logger.info(f"Processing video {i}/{len(video_dirs)}: {video_dir.name}")
 
         # Use video index as seed for reproducible random selection
         config = ProcessingConfig(
@@ -1017,6 +1164,7 @@ def batch_process(
             shorts=shorts,
             blurred_background=blur_bg,
             extract_thumbnails=True,
+            nvenc_cq=nvenc_cq,
             use_nvenc=not no_nvenc,
         )
 
@@ -1027,13 +1175,16 @@ def batch_process(
             if result.success:
                 status = "DRY RUN" if dry_run else "OK"
                 console.print(f"  [green]{status}[/green] (template: {result.template_used})")
+                logger.info(f"{video_dir.name}: Processed successfully (template: {result.template_used})")
                 results.append((video_dir.name, True, result.template_used or template))
             else:
                 console.print(f"  [red]FAILED:[/red] {result.error}")
+                logger.error(f"{video_dir.name}: Processing failed - {result.error}")
                 results.append((video_dir.name, False, result.error or "Unknown error"))
 
         except Exception as e:
             console.print(f"  [red]Error:[/red] {e}")
+            logger.error(f"{video_dir.name}: Exception - {e}")
             results.append((video_dir.name, False, str(e)))
 
     # Print summary
@@ -1053,8 +1204,13 @@ def batch_process(
 
     # Summary stats
     succeeded = sum(1 for _, s, _ in results if s)
+    failed = len(results) - succeeded
     console.print()
     console.print(f"Processed: {succeeded}/{len(results)} videos")
+
+    # Log final summary
+    if log_file:
+        logger.info(f"Batch processing completed: {succeeded} succeeded, {failed} failed out of {len(results)} total")
 
 
 if __name__ == "__main__":

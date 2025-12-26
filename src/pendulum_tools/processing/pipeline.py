@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from ..models import VideoMetadata
+from ..constants import (
+    DEFAULT_BLUR_STRENGTH,
+    DEFAULT_BACKGROUND_BRIGHTNESS,
+    DEFAULT_CRF_QUALITY,
+    DEFAULT_NVENC_CQ,
+    FALLBACK_BOOM_SECONDS,
+)
+from ..exceptions import FFmpegError
 from .ffmpeg import FFmpegCommand, get_video_dimensions
 from .motion import apply_motion_effects, build_motion_filters
 from .subtitles_ass import generate_ass_from_resolved, CaptionPreset
@@ -18,29 +27,31 @@ from .templates import (
 )
 from .thumbnails import extract_thumbnails
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ProcessingConfig:
     """Configuration for video processing pipeline."""
 
     # Template selection
-    template: str = "viral_science"  # Template name from templates.toml
+    template: str = "minimal_science"  # Template name from templates.toml
     seed: Optional[int] = None  # Random seed for reproducible text selection
 
     # Format settings
     shorts: bool = False  # Pad to 9:16 for YouTube Shorts
     blurred_background: bool = False  # Use blurred video as background
-    blur_strength: int = 50  # Blur sigma for background
-    background_brightness: float = 0.3  # Background brightness (0-1)
+    blur_strength: int = DEFAULT_BLUR_STRENGTH  # Blur sigma for background
+    background_brightness: float = DEFAULT_BACKGROUND_BRIGHTNESS  # (0-1)
 
     # Thumbnail settings
     extract_thumbnails: bool = True
 
     # Quality settings
-    crf_quality: int = 18  # Lower = better (18 = visually lossless)
+    crf_quality: int = DEFAULT_CRF_QUALITY  # Lower = better (18 = visually lossless)
     preset: str = "medium"  # Encoding preset (slower = better compression)
     use_nvenc: bool = True  # Use NVIDIA hardware encoding (much faster)
-    nvenc_cq: int = 23  # NVENC quality (0-51, lower = better)
+    nvenc_cq: int = DEFAULT_NVENC_CQ  # NVENC quality (0-51, lower = better)
 
 
 @dataclass
@@ -141,7 +152,17 @@ class ProcessingPipeline:
         except Exception:
             width, height = self.metadata.config.width, self.metadata.config.height
 
-        boom_seconds = self.metadata.boom_seconds or 10.0
+        # Get boom time with fallback warning
+        boom_seconds = self.metadata.boom_seconds
+        using_fallback_boom = False
+        if boom_seconds is None:
+            boom_seconds = FALLBACK_BOOM_SECONDS
+            using_fallback_boom = True
+            logger.warning(
+                f"No boom detected in metadata, using fallback time of {FALLBACK_BOOM_SECONDS}s. "
+                "Motion effects may not sync correctly."
+            )
+
         video_duration = self.metadata.video_duration
         fps = self.metadata.config.video_fps
 
@@ -257,11 +278,20 @@ class ProcessingPipeline:
         # Execute FFmpeg
         try:
             cmd.run()
+        except FFmpegError as e:
+            # Detailed FFmpeg error with stderr
+            return ProcessingResult(
+                success=False,
+                output_dir=output_dir,
+                error=str(e),
+                ffmpeg_command=ffmpeg_command,
+                template_used=template_name,
+            )
         except Exception as e:
             return ProcessingResult(
                 success=False,
                 output_dir=output_dir,
-                error=f"FFmpeg failed: {e}",
+                error=f"Unexpected error: {e}",
                 ffmpeg_command=ffmpeg_command,
                 template_used=template_name,
             )
@@ -278,7 +308,7 @@ class ProcessingPipeline:
                     video_duration=self.metadata.video_duration,
                 )
             except Exception as e:
-                print(f"Warning: Thumbnail extraction failed: {e}")
+                logger.warning(f"Thumbnail extraction failed: {e}")
 
         return ProcessingResult(
             success=True,
@@ -294,10 +324,14 @@ class ProcessingPipeline:
         """Preview what processing would do without executing."""
         template = self.template_lib.get(self.config.template)
 
+        boom_seconds = self.metadata.boom_seconds
+        if boom_seconds is None:
+            boom_seconds = FALLBACK_BOOM_SECONDS
+
         resolved_captions = resolve_template(
             template=template,
             text_pools=self.text_pools,
-            boom_seconds=self.metadata.boom_seconds or 10.0,
+            boom_seconds=boom_seconds,
             video_duration=self.metadata.video_duration,
             pendulum_count=self.metadata.config.pendulum_count,
             seed=self.config.seed,

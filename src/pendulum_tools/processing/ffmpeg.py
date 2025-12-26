@@ -8,6 +8,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from ..constants import (
+    BLUR_SCALE_FACTOR,
+    DEFAULT_BLUR_STRENGTH,
+    MIN_BLUR_SIGMA,
+    DEFAULT_THUMBNAIL_QUALITY,
+)
+from ..exceptions import FFmpegError, VideoValidationError
+
 
 @dataclass
 class FFmpegCommand:
@@ -151,11 +159,10 @@ class FFmpegCommand:
         # Optimization: scale down before blur, blur at low res, scale back up
         # This is MUCH faster since blur is O(n²) with kernel size
         # Processing at 1/4 resolution = 16x fewer pixels to blur
-        blur_scale = 4
-        blur_w = target_width // blur_scale
-        blur_h = target_height // blur_scale
+        blur_w = target_width // BLUR_SCALE_FACTOR
+        blur_h = target_height // BLUR_SCALE_FACTOR
         # Adjust blur sigma for lower resolution (preserves visual blur amount)
-        scaled_blur = max(blur_strength // blur_scale, 5)
+        scaled_blur = max(blur_strength // BLUR_SCALE_FACTOR, MIN_BLUR_SIGMA)
 
         # Build foreground filter chain
         # Always scale first to target foreground size, then apply effects
@@ -312,6 +319,9 @@ class FFmpegCommand:
 
         Returns:
             CompletedProcess if executed, None if dry_run
+
+        Raises:
+            FFmpegError: If FFmpeg command fails, with detailed error info
         """
         cmd = self.build()
 
@@ -319,12 +329,26 @@ class FFmpegCommand:
             print(self.build_string())
             return None
 
-        return subprocess.run(
-            cmd,
-            check=True,
-            capture_output=capture,
-            text=True,
-        )
+        try:
+            return subprocess.run(
+                cmd,
+                check=True,
+                capture_output=capture,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            raise FFmpegError(
+                message="FFmpeg command failed",
+                command=cmd,
+                returncode=e.returncode,
+                stdout=e.stdout,
+                stderr=e.stderr,
+            ) from e
+        except FileNotFoundError:
+            raise FFmpegError(
+                message="FFmpeg not found. Please install FFmpeg and ensure it's in your PATH.",
+                command=cmd,
+            )
 
     @staticmethod
     def _escape_text(text: str) -> str:
@@ -341,7 +365,7 @@ def extract_frame(
     video_path: Path,
     output_path: Path,
     timestamp: float,
-    quality: int = 2,
+    quality: int = DEFAULT_THUMBNAIL_QUALITY,
 ) -> subprocess.CompletedProcess:
     """Extract a single frame from video at given timestamp.
 
@@ -353,6 +377,9 @@ def extract_frame(
 
     Returns:
         CompletedProcess from FFmpeg execution
+
+    Raises:
+        FFmpegError: If frame extraction fails
     """
     cmd = [
         "ffmpeg",
@@ -364,11 +391,29 @@ def extract_frame(
         str(output_path),
     ]
 
-    return subprocess.run(cmd, check=True, capture_output=True, text=True)
+    try:
+        return subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        raise FFmpegError(
+            message=f"Failed to extract frame at {timestamp:.2f}s",
+            command=cmd,
+            returncode=e.returncode,
+            stdout=e.stdout,
+            stderr=e.stderr,
+        ) from e
+    except FileNotFoundError:
+        raise FFmpegError(
+            message="FFmpeg not found. Please install FFmpeg.",
+            command=cmd,
+        )
 
 
 def get_video_duration(video_path: Path) -> float:
-    """Get video duration in seconds using ffprobe."""
+    """Get video duration in seconds using ffprobe.
+
+    Raises:
+        FFmpegError: If ffprobe fails or returns invalid output
+    """
     cmd = [
         "ffprobe",
         "-v", "error",
@@ -377,12 +422,36 @@ def get_video_duration(video_path: Path) -> float:
         str(video_path),
     ]
 
-    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-    return float(result.stdout.strip())
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        duration_str = result.stdout.strip()
+        if not duration_str:
+            raise VideoValidationError(
+                "ffprobe returned empty duration",
+                video_path=video_path,
+            )
+        return float(duration_str)
+    except subprocess.CalledProcessError as e:
+        raise FFmpegError(
+            message=f"Failed to get video duration: {video_path}",
+            command=cmd,
+            returncode=e.returncode,
+            stderr=e.stderr,
+        ) from e
+    except ValueError as e:
+        raise VideoValidationError(
+            f"Invalid duration format from ffprobe: {e}",
+            video_path=video_path,
+        ) from e
 
 
 def get_video_dimensions(video_path: Path) -> tuple[int, int]:
-    """Get video width and height using ffprobe."""
+    """Get video width and height using ffprobe.
+
+    Raises:
+        FFmpegError: If ffprobe fails
+        VideoValidationError: If output format is invalid
+    """
     cmd = [
         "ffprobe",
         "-v", "error",
@@ -392,6 +461,38 @@ def get_video_dimensions(video_path: Path) -> tuple[int, int]:
         str(video_path),
     ]
 
-    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-    width, height = result.stdout.strip().split("x")
-    return int(width), int(height)
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        output = result.stdout.strip()
+
+        if not output or "x" not in output:
+            raise VideoValidationError(
+                "ffprobe returned invalid dimensions format",
+                video_path=video_path,
+                expected="WIDTHxHEIGHT",
+                actual=output or "(empty)",
+            )
+
+        parts = output.split("x")
+        if len(parts) != 2:
+            raise VideoValidationError(
+                "ffprobe returned invalid dimensions format",
+                video_path=video_path,
+                expected="WIDTHxHEIGHT",
+                actual=output,
+            )
+
+        return int(parts[0]), int(parts[1])
+
+    except subprocess.CalledProcessError as e:
+        raise FFmpegError(
+            message=f"Failed to get video dimensions: {video_path}",
+            command=cmd,
+            returncode=e.returncode,
+            stderr=e.stderr,
+        ) from e
+    except ValueError as e:
+        raise VideoValidationError(
+            f"Invalid dimension values from ffprobe: {e}",
+            video_path=video_path,
+        ) from e
