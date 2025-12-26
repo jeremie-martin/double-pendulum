@@ -513,12 +513,14 @@ class MainWindow(QMainWindow):
         try:
             meta = VideoMetadata.from_file(video.metadata_path)
             date_str = meta.created_at.strftime("%Y-%m-%d %H:%M")
+            color_preset = f" ({meta.color.preset_name})" if meta.color.preset_name else ""
+            pp_preset = f" ({meta.post_process.preset_name})" if meta.post_process.preset_name else ""
             extra_info = f"""<br><b>--- Simulation ---</b><br>
 Pendulums: {meta.simulation.pendulum_count:,}<br>
 Date: {date_str}<br>
 <b>--- Color ---</b><br>
-Scheme: {meta.color.scheme}<br>
-<b>--- Post-Process ---</b><br>
+Scheme: {meta.color.scheme}{color_preset}<br>
+<b>--- Post-Process ---</b>{pp_preset}<br>
 Tone Map: {meta.post_process.tone_map}<br>
 Exposure: {meta.post_process.exposure} | Contrast: {meta.post_process.contrast} | Gamma: {meta.post_process.gamma}"""
         except Exception:

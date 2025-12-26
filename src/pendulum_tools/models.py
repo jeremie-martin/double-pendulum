@@ -56,6 +56,7 @@ class ColorConfig(BaseModel):
     scheme: str
     start: float
     end: float
+    preset_name: Optional[str] = None
 
 
 class PostProcessConfig(BaseModel):
@@ -67,6 +68,7 @@ class PostProcessConfig(BaseModel):
     gamma: float
     normalization: str
     reinhard_white_point: float = 1.0
+    preset_name: Optional[str] = None
 
 
 class OutputConfig(BaseModel):
