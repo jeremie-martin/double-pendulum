@@ -631,7 +631,7 @@ Processed: {'Yes' if video.has_processed else 'No'} | Music: {'Yes' if video.has
                 if track_id:
                     cmd.extend(["--track", track_id])
         elif command == "upload":
-            cmd = ["uv", "run", "pendulum-tools", "upload", video_dir]
+            cmd = ["uv", "run", "pendulum-tools", "upload", video_dir, "--privacy", "public"]
         else:
             return
 
