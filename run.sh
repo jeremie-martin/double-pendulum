@@ -8,21 +8,28 @@ fi
 
 NUM_RUNS="$1"
 
-# Random float in [130, 180)
-rand_angle () {
-    awk -v min=130 -v max=180 'BEGIN { srand(); print min + rand() * (max - min) }'
-}
-
 for ((i=1; i<=NUM_RUNS; i++)); do
-    angle1=$(rand_angle)
-    angle2=$(rand_angle)
+    # Seed randomness once per run
+    seed=$((RANDOM + i))
 
-    printf "[%d/%d] angle1=%.3f angle2=%.3f\n" "$i" "$NUM_RUNS" "$angle1" "$angle2"
+    angle1=$(awk -v s="$seed" 'BEGIN { srand(s); print 130 + rand() * 50 }')
+    angle2=$(awk -v s="$((seed+1))" 'BEGIN { srand(s); print 130 + rand() * 50 }')
+
+    pendulum_count=$(awk -v s="$((seed+2))" 'BEGIN { srand(s); print int(1000 + rand() * (20000 - 1000 + 1)) }')
+    duration_seconds=$(awk -v s="$((seed+3))" 'BEGIN { srand(s); print int(15 + rand() * (20 - 15 + 1)) }')
+    total_frames=$(awk -v s="$((seed+4))" 'BEGIN { srand(s); print int(1000 + rand() * (1500 - 1000 + 1)) }')
+
+    printf "[%d/%d] angle1=%.3f angle2=%.3f pendulums=%d duration=%ds frames=%d\n" \
+        "$i" "$NUM_RUNS" "$angle1" "$angle2" \
+        "$pendulum_count" "$duration_seconds" "$total_frames"
 
     ./build/pendulum config/perf.toml \
         --set physics.initial_angle1_deg="$angle1" \
         --set physics.initial_angle2_deg="$angle2" \
-        --set output.directory=output/eval \
+        --set simulation.pendulum_count="$pendulum_count" \
+        --set simulation.duration_seconds="$duration_seconds" \
+        --set simulation.total_frames="$total_frames" \
+        --set output.directory=output/eval2 \
         --analysis \
         --save-data
 done

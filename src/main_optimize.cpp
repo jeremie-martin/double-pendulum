@@ -1,27 +1,36 @@
 // Metric optimization tool for double pendulum visualization
 //
-// Performs grid search over metric parameters to find optimal settings
-// for boom and peak detection based on annotated ground truth data.
+// Performs multi-phase optimization to find optimal metric parameters
+// and detection methods for prediction targets.
 //
 // Usage:
-//   ./pendulum-optimize annotations.json [options] [simulation_data.bin ...]
+//   ./pendulum-optimize annotations.json [options]
 //
 // Options:
-//   --grid-steps <N>   Grid resolution per dimension (default: 8, use 3-4 for quick tests)
-//   --save-cache <dir> Save Phase 1 computed metrics to cache directory
-//   --load-cache <dir> Load Phase 1 metrics from cache (skip computation)
-//   --output <file>    Output file for best parameters (default: best_params.toml)
+//   --grid-steps <N>     Grid resolution per dimension (default: 8, use 3-4 for quick tests)
+//   --primary <target>   Primary target for metric parameter optimization (default: first frame target)
+//   --output <file>      Output file for best parameters (default: best_params.toml)
 //
-// Annotation format (JSON):
+// Optimization Phases:
+//   Phase 1: Compute metrics for all parameter configurations
+//   Phase 2: Optimize primary target to find best metric parameters
+//   Phase 3: Optimize secondary targets using primary's metric parameters
+//
+// Annotation format (JSON v2):
 // {
-//   "version": 1,
+//   "version": 2,
+//   "target_defs": {
+//     "boom_frame": "frame",
+//     "boom_quality": "score"
+//   },
 //   "annotations": [
 //     {
 //       "id": "run_20241215_143022",
 //       "data_path": "output/run_20241215_143022/simulation_data.bin",
-//       "boom_frame": 180,
-//       "peak_frame": 245,
-//       "notes": "Clean boom, multiple folds at peak"
+//       "targets": {
+//         "boom_frame": 180,
+//         "boom_quality": 0.85
+//       }
 //     }
 //   ]
 // }
@@ -423,20 +432,35 @@ std::vector<ParameterizedMetric> generateParameterizedMetrics(
 }
 
 // ============================================================================
-// ANNOTATION AND SIMULATION DATA
+// TARGET DEFINITIONS AND ANNOTATIONS
 // ============================================================================
+
+// Target definition from annotations file
+struct TargetDef {
+    std::string name;
+    optimize::PredictionType type = optimize::PredictionType::Frame;
+
+    bool isFrame() const { return type == optimize::PredictionType::Frame; }
+    bool isScore() const { return type == optimize::PredictionType::Score; }
+
+    std::string typeString() const {
+        return type == optimize::PredictionType::Frame ? "frame" : "score";
+    }
+};
 
 struct Annotation {
     std::string id;
     std::string data_path;
-    int boom_frame = -1;
-    int peak_frame = -1;
     std::string notes;
 
-    // V2 format: multiple targets
-    std::map<std::string, double> targets;  // "boom_frame" -> 180, "chaos_frame" -> 450, "boom_quality" -> 0.85
+    // V2 format: multiple targets with arbitrary names
+    std::map<std::string, double> targets;  // "boom_frame" -> 180, "boom_quality" -> 0.85
 
-    // Get target value (returns -1 or 0.0 if not found)
+    // Legacy V1 fields (for backward compatibility)
+    int boom_frame = -1;
+    int peak_frame = -1;
+
+    // Get target value for frame-type targets (returns -1 if not found)
     int getTargetFrame(std::string const& name) const {
         auto it = targets.find(name);
         if (it != targets.end()) return static_cast<int>(it->second);
@@ -446,9 +470,10 @@ struct Annotation {
         return -1;
     }
 
+    // Get target value for score-type targets
     double getTargetScore(std::string const& name) const {
         auto it = targets.find(name);
-        return it != targets.end() ? it->second : 0.0;
+        return it != targets.end() ? it->second : -1.0;
     }
 
     bool hasTarget(std::string const& name) const {
@@ -456,6 +481,47 @@ struct Annotation {
         if ((name == "boom_frame" || name == "boom") && boom_frame >= 0) return true;
         if ((name == "peak_frame" || name == "peak") && peak_frame >= 0) return true;
         return false;
+    }
+
+    // Count how many targets this annotation has values for
+    int countTargets(std::vector<TargetDef> const& target_defs) const {
+        int count = 0;
+        for (auto const& td : target_defs) {
+            if (hasTarget(td.name)) count++;
+        }
+        return count;
+    }
+};
+
+// Complete annotations data with target definitions
+struct AnnotationsData {
+    int version = 1;
+    std::vector<TargetDef> target_defs;
+    std::vector<Annotation> annotations;
+
+    // Find target definition by name
+    TargetDef const* findTargetDef(std::string const& name) const {
+        for (auto const& td : target_defs) {
+            if (td.name == name) return &td;
+        }
+        return nullptr;
+    }
+
+    // Get first frame-type target (for default primary)
+    std::string firstFrameTarget() const {
+        for (auto const& td : target_defs) {
+            if (td.isFrame()) return td.name;
+        }
+        return "";
+    }
+
+    // Count annotations that have a specific target
+    int countAnnotationsWithTarget(std::string const& target_name) const {
+        int count = 0;
+        for (auto const& ann : annotations) {
+            if (ann.hasTarget(target_name)) count++;
+        }
+        return count;
     }
 };
 
@@ -480,24 +546,44 @@ int extractInt(std::string const& json, std::string const& key, int default_val 
 }
 }  // namespace
 
-std::vector<Annotation> loadAnnotations(std::string const& path) {
-    std::vector<Annotation> annotations;
+AnnotationsData loadAnnotations(std::string const& path) {
+    AnnotationsData data;
     std::ifstream file(path);
     if (!file.is_open()) {
         std::cerr << "Error: Could not open annotations file: " << path << "\n";
-        return annotations;
+        return data;
     }
 
     try {
         nlohmann::json root = nlohmann::json::parse(file);
 
-        // Check version (v2 supports targets map)
-        int version = root.value("version", 1);
+        // Check version (v2 supports target_defs and targets map)
+        data.version = root.value("version", 1);
+
+        // Parse target_defs (v2)
+        if (data.version >= 2 && root.contains("target_defs")) {
+            auto const& defs = root["target_defs"];
+            if (defs.is_object()) {
+                for (auto it = defs.begin(); it != defs.end(); ++it) {
+                    TargetDef td;
+                    td.name = it.key();
+                    std::string type_str = it.value().get<std::string>();
+                    td.type = optimize::parsePredictionType(type_str);
+                    data.target_defs.push_back(td);
+                }
+            }
+        }
+
+        // If no target_defs, create defaults for backward compatibility
+        if (data.target_defs.empty()) {
+            data.target_defs.push_back({"boom_frame", optimize::PredictionType::Frame});
+            data.target_defs.push_back({"peak_frame", optimize::PredictionType::Frame});
+        }
 
         auto const& arr = root["annotations"];
         if (!arr.is_array()) {
             std::cerr << "Error: annotations must be an array\n";
-            return annotations;
+            return data;
         }
 
         for (auto const& obj : arr) {
@@ -511,7 +597,7 @@ std::vector<Annotation> loadAnnotations(std::string const& path) {
             ann.peak_frame = obj.value("peak_frame", -1);
 
             // V2 format: targets map
-            if (version >= 2 && obj.contains("targets")) {
+            if (data.version >= 2 && obj.contains("targets")) {
                 auto const& targets_obj = obj["targets"];
                 if (targets_obj.is_object()) {
                     for (auto it = targets_obj.begin(); it != targets_obj.end(); ++it) {
@@ -527,8 +613,16 @@ std::vector<Annotation> loadAnnotations(std::string const& path) {
                 }
             }
 
+            // Also add v1 fields to targets map if not present
+            if (ann.boom_frame >= 0 && !ann.targets.count("boom_frame")) {
+                ann.targets["boom_frame"] = ann.boom_frame;
+            }
+            if (ann.peak_frame >= 0 && !ann.targets.count("peak_frame")) {
+                ann.targets["peak_frame"] = ann.peak_frame;
+            }
+
             if (!ann.id.empty() || !ann.data_path.empty()) {
-                annotations.push_back(ann);
+                data.annotations.push_back(ann);
             }
         }
     } catch (nlohmann::json::exception const& e) {
@@ -539,6 +633,10 @@ std::vector<Annotation> loadAnnotations(std::string const& path) {
         std::stringstream buffer;
         buffer << file.rdbuf();
         std::string content = buffer.str();
+
+        // Default target_defs for v1
+        data.target_defs.push_back({"boom_frame", optimize::PredictionType::Frame});
+        data.target_defs.push_back({"peak_frame", optimize::PredictionType::Frame});
 
         std::regex obj_pattern("\\{[^{}]*\"id\"[^{}]*\\}");
         auto obj_begin = std::sregex_iterator(content.begin(), content.end(), obj_pattern);
@@ -553,30 +651,50 @@ std::vector<Annotation> loadAnnotations(std::string const& path) {
             ann.peak_frame = extractInt(obj_str, "peak_frame", -1);
             ann.notes = extractString(obj_str, "notes");
 
+            // Add to targets map
+            if (ann.boom_frame >= 0) ann.targets["boom_frame"] = ann.boom_frame;
+            if (ann.peak_frame >= 0) ann.targets["peak_frame"] = ann.peak_frame;
+
             if (!ann.id.empty() || !ann.data_path.empty()) {
-                annotations.push_back(ann);
+                data.annotations.push_back(ann);
             }
         }
     }
 
-    return annotations;
+    return data;
 }
 
 struct LoadedSimulation {
     std::string id;
     simulation_data::Reader reader;
     double frame_duration = 0.0;
-    int boom_frame_truth = -1;
-    int peak_frame_truth = -1;
+
+    // Ground truth for all targets (from annotations)
+    std::map<std::string, double> target_truths;  // target_name -> truth value
 
     bool load(Annotation const& ann) {
         if (!reader.open(ann.data_path)) return false;
         id = ann.id;
-        boom_frame_truth = ann.boom_frame;
-        peak_frame_truth = ann.peak_frame;
+        target_truths = ann.targets;
         auto const& h = reader.header();
         frame_duration = h.duration_seconds / h.frame_count;
         return true;
+    }
+
+    // Get truth for a frame-type target
+    int getFrameTruth(std::string const& target_name) const {
+        auto it = target_truths.find(target_name);
+        return it != target_truths.end() ? static_cast<int>(it->second) : -1;
+    }
+
+    // Get truth for a score-type target
+    double getScoreTruth(std::string const& target_name) const {
+        auto it = target_truths.find(target_name);
+        return it != target_truths.end() ? it->second : -1.0;
+    }
+
+    bool hasTruth(std::string const& target_name) const {
+        return target_truths.count(target_name) > 0;
     }
 };
 
@@ -721,13 +839,13 @@ struct BoomMethodGrid {
 struct ComputedMetricsForConfig {
     std::vector<metrics::MetricsCollector> collectors;
     std::vector<double> frame_durations;
-    std::vector<int> boom_frame_truths;
+    std::vector<std::string> sim_ids;  // For error reporting
     std::atomic<size_t> sims_completed{0};
 
     void init(size_t num_sims) {
         collectors.resize(num_sims);
         frame_durations.resize(num_sims);
-        boom_frame_truths.resize(num_sims);
+        sim_ids.resize(num_sims);
         sims_completed.store(0);
     }
 
@@ -735,7 +853,7 @@ struct ComputedMetricsForConfig {
         collectors.clear();
         collectors.shrink_to_fit();
         frame_durations.clear();
-        boom_frame_truths.clear();
+        sim_ids.clear();
         sims_completed.store(0);
     }
 };
@@ -746,12 +864,12 @@ void computeMetricsForSim(
     LoadedSimulation const& sim,
     metrics::MetricsCollector& collector,
     double& frame_duration_out,
-    int& boom_frame_truth_out) {
+    std::string& sim_id_out) {
 
     auto const& header = sim.reader.header();
 
     frame_duration_out = sim.frame_duration;
-    boom_frame_truth_out = sim.boom_frame_truth;
+    sim_id_out = sim.id;
 
     std::unordered_map<std::string, ::MetricConfig> config_map;
     config_map[pm.metric_name] = pm.config;
@@ -761,40 +879,44 @@ void computeMetricsForSim(
 
     for (int frame = 0; frame < static_cast<int>(header.frame_count); ++frame) {
         auto const* packed = sim.reader.getFramePacked(frame);
-        if (!packed) break;
+        if (packed == nullptr) break;
         collector.beginFrame(frame);
         collector.updateFromPackedStates(packed, header.pendulum_count);
         collector.endFrame();
     }
 }
 
-// Evaluate a single boom method configuration
-EvaluationResult evaluateBoomMethod(
+// Evaluate a frame detection method configuration for a specific target
+EvaluationResult evaluateFrameTarget(
     ParameterizedMetric const& pm,
     ComputedMetricsForConfig const& computed,
-    optimize::FrameDetectionParams const& boom_params,
-    int /* N */) {
+    optimize::FrameDetectionParams const& detection_params,
+    std::vector<LoadedSimulation> const& simulations,
+    std::string const& target_name) {
 
     std::vector<int> errors;
     errors.reserve(computed.collectors.size());
 
     for (size_t i = 0; i < computed.collectors.size(); ++i) {
-        auto boom = metrics::findBoomFrame(
-            computed.collectors[i], computed.frame_durations[i], boom_params);
+        int truth = simulations[i].getFrameTruth(target_name);
+        if (truth < 0) continue;  // No ground truth for this sim
 
-        if (computed.boom_frame_truths[i] >= 0 && boom.frame >= 0) {
-            int error = std::abs(boom.frame - computed.boom_frame_truths[i]);
+        auto detection = metrics::findBoomFrame(
+            computed.collectors[i], computed.frame_durations[i], detection_params);
+
+        if (detection.frame >= 0) {
+            int error = std::abs(detection.frame - truth);
             errors.push_back(error);
         }
     }
 
     EvaluationResult result;
     result.params.metric_config = pm.config;
-    result.params.boom = boom_params;
+    result.params.boom = detection_params;
 
     // Compute effective sectors if applicable
     result.params.effective_sectors = std::visit(
-        [&](auto const& p) -> int {
+        [](auto const& p) -> int {
             using T = std::decay_t<decltype(p)>;
             if constexpr (std::is_same_v<T, SectorMetricParams>) {
                 return p.max_sectors;
@@ -836,11 +958,11 @@ EvaluationResult evaluateBoomMethod(
         result.boom_max = 1e9;
     }
 
-    result.peak_mae = 1e9;
     result.combined_score = result.boom_mae;
 
     return result;
 }
+
 
 // ============================================================================
 // OUTPUT HELPERS
@@ -897,8 +1019,8 @@ std::string frameDetectionMethodToString(optimize::FrameDetectionMethod method) 
     return "max_value";
 }
 
-void writeTargetParams(std::ofstream& file, std::string const& target_name,
-                       optimize::FrameDetectionParams const& params) {
+void writeFrameTargetParams(std::ofstream& file, std::string const& target_name,
+                             optimize::FrameDetectionParams const& params) {
     file << "[targets." << target_name << "]\n";
     file << "type = \"frame\"\n";
     file << "metric = \"" << params.metric_name << "\"\n";
@@ -927,17 +1049,42 @@ void writeTargetParams(std::ofstream& file, std::string const& target_name,
     }
 }
 
-void saveAllBestParams(std::string const& path, std::vector<EvaluationResult> const& results,
-                       EvaluationResult const& global_best) {
+
+// Optimized target result - stores the best config for each target
+struct OptimizedTarget {
+    std::string name;
+    optimize::PredictionType type = optimize::PredictionType::Frame;
+
+    // For frame targets
+    EvaluationResult frame_result;
+
+    bool isFrame() const { return type == optimize::PredictionType::Frame; }
+
+    double getMAE() const { return frame_result.boom_mae; }
+};
+
+void saveOptimizationResults(
+    std::string const& path,
+    std::string const& primary_target,
+    EvaluationResult const& primary_result,
+    std::vector<EvaluationResult> const& all_frame_results,
+    std::map<std::string, OptimizedTarget> const& optimized_targets) {
+
     std::ofstream file(path);
     if (!file.is_open()) {
         std::cerr << "Error: Could not write to " << path << "\n";
         return;
     }
 
-    // Find best result for each metric type
+    file << "# Best parameters found by pendulum-optimize\n";
+    file << "# Primary target: " << primary_target << "\n";
+    file << "# Best metric: " << primary_result.params.boom.metric_name
+         << " with MAE=" << std::fixed << std::setprecision(2) << primary_result.boom_mae << " frames\n";
+    file << "# Samples evaluated: " << primary_result.samples_evaluated << "\n\n";
+
+    // Find best result for each metric type from all_frame_results
     std::map<std::string, EvaluationResult const*> best_per_metric;
-    for (auto const& r : results) {
+    for (auto const& r : all_frame_results) {
         std::string const& metric = r.params.boom.metric_name;
         if (best_per_metric.find(metric) == best_per_metric.end() ||
             r.boom_mae < best_per_metric[metric]->boom_mae) {
@@ -945,19 +1092,12 @@ void saveAllBestParams(std::string const& path, std::vector<EvaluationResult> co
         }
     }
 
-    file << "# Best parameters found by pendulum-optimize\n";
-    file << "# Global best: " << global_best.params.boom.metric_name
-         << " with MAE=" << std::fixed << std::setprecision(2) << global_best.boom_mae << " frames\n";
-    file << "# Samples evaluated: " << global_best.samples_evaluated << "\n";
-    file << "# This file contains best parameters for ALL metrics.\n";
-    file << "# The [boom_detection] section at the end specifies which metric to use.\n\n";
-
     std::vector<std::pair<std::string, EvaluationResult const*>> sorted_metrics(
         best_per_metric.begin(), best_per_metric.end());
     std::sort(sorted_metrics.begin(), sorted_metrics.end(),
               [](auto const& a, auto const& b) { return a.second->boom_mae < b.second->boom_mae; });
 
-    // Write metric computation params (without boom detection params)
+    // Write metric computation params
     for (auto const& [metric_name, best] : sorted_metrics) {
         file << "# " << metric_name << ": MAE=" << std::fixed << std::setprecision(2)
              << best->boom_mae << " frames\n";
@@ -966,14 +1106,18 @@ void saveAllBestParams(std::string const& path, std::vector<EvaluationResult> co
         file << "\n";
     }
 
-    // Write the best boom target configuration
-    file << "# Best boom detection target (using " << global_best.params.boom.metric_name << ")\n";
-    writeTargetParams(file, "boom", global_best.params.boom);
+    // Write all optimized frame targets
+    for (auto const& [target_name, opt] : optimized_targets) {
+        if (!opt.isFrame()) continue;  // Skip score targets (not supported yet)
 
-    std::cout << "Best parameters for " << best_per_metric.size() << " metrics saved to: " << path << "\n";
-    std::cout << "Best boom target: metric=" << global_best.params.boom.metric_name
-              << ", method=" << frameDetectionMethodToString(global_best.params.boom.method)
-              << ", MAE=" << std::fixed << std::setprecision(2) << global_best.boom_mae << " frames\n";
+        file << "# " << target_name << ": MAE=" << std::fixed << std::setprecision(2)
+             << opt.frame_result.boom_mae << " frames"
+             << " (" << opt.frame_result.samples_evaluated << " samples)\n";
+        writeFrameTargetParams(file, target_name, opt.frame_result.params.boom);
+        file << "\n";
+    }
+
+    std::cout << "Results saved to: " << path << "\n";
 }
 
 // ============================================================================
@@ -982,15 +1126,18 @@ void saveAllBestParams(std::string const& path, std::vector<EvaluationResult> co
 
 void printUsage(char const* prog) {
     std::cerr
-        << "Usage: " << prog << " annotations.json [options] [simulation_data.bin ...]\n\n"
-        << "Performs grid search to find optimal metric parameters.\n\n"
+        << "Usage: " << prog << " annotations.json [options]\n\n"
+        << "Multi-phase optimization for metric parameters and detection methods.\n\n"
         << "Options:\n"
-        << "  --grid-steps <N>   Grid resolution per dimension (default: 8)\n"
-        << "                     Use 3-4 for quick tests, 12-16 for thorough search\n"
-        << "  --output <file>    Output file for best parameters (default: best_params.toml)\n"
-        << "  --help             Show this help message\n\n"
-        << "If simulation data files are provided on command line, they override\n"
-        << "the paths in annotations.json.\n";
+        << "  --grid-steps <N>     Grid resolution per dimension (default: 8)\n"
+        << "                       Use 3-4 for quick tests, 12-16 for thorough search\n"
+        << "  --primary <target>   Primary target for metric optimization (default: first frame target)\n"
+        << "  --output <file>      Output file for best parameters (default: best_params.toml)\n"
+        << "  --help               Show this help message\n\n"
+        << "Optimization Phases:\n"
+        << "  Phase 1: Compute metrics for all parameter configurations\n"
+        << "  Phase 2: Optimize primary target to find best metric parameters\n"
+        << "  Phase 3: Optimize secondary targets using primary's metric parameters\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -1002,8 +1149,8 @@ int main(int argc, char* argv[]) {
     // Parse command line options
     std::string annotations_path;
     std::string output_file = "best_params.toml";
-    int grid_steps = 8;  // Default resolution
-    std::vector<std::string> data_paths;
+    std::string primary_target_arg;  // Empty = auto-detect
+    int grid_steps = 8;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -1014,6 +1161,8 @@ int main(int argc, char* argv[]) {
             grid_steps = std::stoi(argv[++i]);
             if (grid_steps < 1) grid_steps = 1;
             if (grid_steps > 64) grid_steps = 64;
+        } else if ((arg == "--primary" || arg == "-p") && i + 1 < argc) {
+            primary_target_arg = argv[++i];
         } else if (arg == "--output" && i + 1 < argc) {
             output_file = argv[++i];
         } else if (arg[0] == '-') {
@@ -1022,8 +1171,6 @@ int main(int argc, char* argv[]) {
             return 1;
         } else if (annotations_path.empty()) {
             annotations_path = arg;
-        } else {
-            data_paths.push_back(arg);
         }
     }
 
@@ -1033,32 +1180,97 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Load annotations
-    auto annotations = loadAnnotations(annotations_path);
-    if (annotations.empty()) {
+    // ========================================
+    // Load annotations with target definitions
+    // ========================================
+    auto ann_data = loadAnnotations(annotations_path);
+    if (ann_data.annotations.empty()) {
         std::cerr << "No valid annotations found.\n";
         return 1;
     }
-    std::cout << "Loaded " << annotations.size() << " annotations\n";
 
-    // Override paths if provided
-    for (size_t i = 0; i < data_paths.size() && i < annotations.size(); ++i) {
-        annotations[i].data_path = data_paths[i];
+    std::cout << "Loaded " << ann_data.annotations.size() << " annotations (v"
+              << ann_data.version << ")\n";
+
+    // ========================================
+    // Print target statistics
+    // ========================================
+    std::cout << "\n=== Target Definitions ===\n";
+    std::cout << std::left << std::setw(20) << "Target" << std::setw(10) << "Type"
+              << "Annotations\n";
+    std::cout << std::string(45, '-') << "\n";
+
+    for (auto const& td : ann_data.target_defs) {
+        int count = ann_data.countAnnotationsWithTarget(td.name);
+        std::cout << std::left << std::setw(20) << td.name
+                  << std::setw(10) << td.typeString()
+                  << count << "\n";
+    }
+    std::cout << "\n";
+
+    // Determine primary target
+    std::string primary_target = primary_target_arg;
+    if (primary_target.empty()) {
+        primary_target = ann_data.firstFrameTarget();
+    }
+    if (primary_target.empty()) {
+        std::cerr << "Error: No frame-type target found for primary optimization.\n";
+        return 1;
     }
 
-    // Validate and load simulations
+    auto const* primary_td = ann_data.findTargetDef(primary_target);
+    if (!primary_td) {
+        std::cerr << "Error: Primary target '" << primary_target << "' not found in target_defs.\n";
+        return 1;
+    }
+    if (!primary_td->isFrame()) {
+        std::cerr << "Error: Primary target must be a frame-type target.\n";
+        return 1;
+    }
+
+    std::cout << "Primary target: " << primary_target << " (determines metric parameters)\n\n";
+
+    // ========================================
+    // Collect frame targets (skip score targets)
+    // ========================================
+    std::vector<TargetDef> frame_targets;
+    for (auto const& td : ann_data.target_defs) {
+        if (td.isFrame()) {
+            frame_targets.push_back(td);
+        }
+    }
+
+    if (frame_targets.empty()) {
+        std::cerr << "No frame-type targets found.\n";
+        return 1;
+    }
+
+    // ========================================
+    // Load simulations (any sim with ANY frame target)
+    // ========================================
     std::vector<LoadedSimulation> simulations;
     size_t total_frames = 0;
-    size_t total_pendulums = 0;
+    size_t max_pendulums = 0;
 
     std::cout << "Loading simulations...\n";
-    for (auto const& ann : annotations) {
+    for (auto const& ann : ann_data.annotations) {
         if (!std::filesystem::exists(ann.data_path)) {
             std::cerr << "  Skipping " << ann.id << ": file not found: " << ann.data_path << "\n";
             continue;
         }
-        if (ann.boom_frame < 0 && ann.peak_frame < 0) {
-            std::cerr << "  Skipping " << ann.id << ": no ground truth frames\n";
+
+        // Check if this sim has ANY frame target
+        bool has_frame_target = false;
+        std::vector<std::string> sim_targets;
+        for (auto const& td : frame_targets) {
+            if (ann.hasTarget(td.name)) {
+                has_frame_target = true;
+                sim_targets.push_back(td.name);
+            }
+        }
+
+        if (!has_frame_target) {
+            std::cerr << "  Skipping " << ann.id << ": no frame targets\n";
             continue;
         }
 
@@ -1066,9 +1278,16 @@ int main(int argc, char* argv[]) {
         if (sim.load(ann)) {
             auto const& h = sim.reader.header();
             total_frames += h.frame_count;
-            total_pendulums = h.pendulum_count;
+            max_pendulums = std::max(max_pendulums, static_cast<size_t>(h.pendulum_count));
+
+            // Print which targets this sim has
+            std::ostringstream targets_str;
+            for (size_t i = 0; i < sim_targets.size(); ++i) {
+                if (i > 0) targets_str << ", ";
+                targets_str << sim_targets[i] << "@" << sim.getFrameTruth(sim_targets[i]);
+            }
             std::cout << "  " << ann.id << ": " << h.frame_count << " frames, "
-                      << h.pendulum_count << " pendulums, boom@" << ann.boom_frame << "\n";
+                      << h.pendulum_count << " pendulums [" << targets_str.str() << "]\n";
             simulations.push_back(std::move(sim));
         } else {
             std::cerr << "  FAILED: " << ann.data_path << "\n";
@@ -1080,18 +1299,31 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    int N = static_cast<int>(total_pendulums);
+    // Check that primary target has at least some sims
+    int primary_sim_count = 0;
+    for (auto const& sim : simulations) {
+        if (sim.hasTruth(primary_target)) primary_sim_count++;
+    }
+    if (primary_sim_count == 0) {
+        std::cerr << "Error: No simulations have ground truth for primary target '" << primary_target << "'.\n";
+        return 1;
+    }
+    std::cout << "\nLoaded " << simulations.size() << " simulations ("
+              << primary_sim_count << " with primary target '" << primary_target << "')\n";
 
-    // Build metric schemas and generate configurations
+    int N = static_cast<int>(max_pendulums);
+
+    // ========================================
+    // Build metric schemas and configurations
+    // ========================================
     auto schemas = buildMetricSchemas();
     auto param_metrics = generateParameterizedMetrics(schemas, grid_steps, N);
 
     std::cout << "\n=== Grid Search Configuration ===\n";
     std::cout << "Grid steps: " << grid_steps << " per dimension\n";
     std::cout << "Simulations: " << simulations.size() << " (" << total_frames << " total frames)\n";
-    std::cout << "Pendulums: " << N << "\n\n";
+    std::cout << "Max pendulums: " << N << "\n\n";
 
-    // Count by metric type
     std::map<std::string, int> metric_counts;
     for (auto const& pm : param_metrics) {
         metric_counts[pm.metric_name]++;
@@ -1101,21 +1333,20 @@ int main(int argc, char* argv[]) {
         std::cout << "  " << name << ": " << count << "\n";
     }
 
-    // Generate boom method grid
-    auto boom_grid = BoomMethodGrid::create(grid_steps);
-    size_t total_evals = param_metrics.size() * boom_grid.totalMethods();
+    auto method_grid = BoomMethodGrid::create(grid_steps);
+    size_t total_evals = param_metrics.size() * method_grid.totalMethods();
 
-    std::cout << "\nBoom detection methods: " << boom_grid.totalMethods() << "\n";
+    std::cout << "\nDetection methods: " << method_grid.totalMethods() << "\n";
     std::cout << "Total evaluations: " << total_evals << "\n\n";
 
     unsigned int num_threads = std::thread::hardware_concurrency();
     if (num_threads == 0) num_threads = 4;
     std::cout << "Threads: " << num_threads << "\n\n";
 
-    // ============================================
-    // STREAMING EVALUATION
-    // Process one metric config at a time to save memory
-    // ============================================
+    // ========================================
+    // PHASE 1 & 2: Compute metrics and optimize primary target
+    // ========================================
+    std::cout << "=== Phase 1 & 2: Optimizing Primary Target (" << primary_target << ") ===\n";
 
     auto start_time = std::chrono::steady_clock::now();
     std::vector<EvaluationResult> results;
@@ -1123,7 +1354,6 @@ int main(int argc, char* argv[]) {
     std::atomic<size_t> metrics_completed{0};
     std::atomic<bool> done{false};
 
-    // Progress thread (prints while main thread works)
     std::thread progress_thread([&]() {
         while (!done.load()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -1141,30 +1371,27 @@ int main(int argc, char* argv[]) {
         }
     });
 
-    // Pre-allocate storage for all configs
     size_t num_sims = simulations.size();
     std::vector<ComputedMetricsForConfig> config_states(param_metrics.size());
     for (size_t i = 0; i < param_metrics.size(); ++i) {
         config_states[i].init(num_sims);
     }
 
-    // Mutex for results and boom evaluation
     std::mutex results_mutex;
     std::mutex eval_mutex;
 
-    // Lambda to evaluate boom methods for a completed config
     auto evaluateCompletedConfig = [&](size_t config_idx) {
         auto const& pm = param_metrics[config_idx];
         auto const& computed = config_states[config_idx];
         std::vector<EvaluationResult> local_results;
 
         auto evaluateMethod = [&](optimize::FrameDetectionParams const& bp) {
-            auto result = evaluateBoomMethod(pm, computed, bp, N);
+            auto result = evaluateFrameTarget(pm, computed, bp, simulations, primary_target);
             local_results.push_back(result);
         };
 
         // MaxValue
-        for (double offset : boom_grid.offset_vals) {
+        for (double offset : method_grid.offset_vals) {
             optimize::FrameDetectionParams bp;
             bp.metric_name = pm.metric_name;
             bp.method = optimize::FrameDetectionMethod::MaxValue;
@@ -1173,9 +1400,9 @@ int main(int argc, char* argv[]) {
         }
 
         // FirstPeakPercent
-        for (double pct : boom_grid.peak_pct_vals) {
-            for (double offset : boom_grid.offset_vals) {
-                for (double prom : boom_grid.prominence_vals) {
+        for (double pct : method_grid.peak_pct_vals) {
+            for (double offset : method_grid.offset_vals) {
+                for (double prom : method_grid.prominence_vals) {
                     optimize::FrameDetectionParams bp;
                     bp.metric_name = pm.metric_name;
                     bp.method = optimize::FrameDetectionMethod::FirstPeakPercent;
@@ -1188,8 +1415,8 @@ int main(int argc, char* argv[]) {
         }
 
         // DerivativePeak
-        for (int smooth : boom_grid.smooth_vals) {
-            for (double offset : boom_grid.offset_vals) {
+        for (int smooth : method_grid.smooth_vals) {
+            for (double offset : method_grid.offset_vals) {
                 optimize::FrameDetectionParams bp;
                 bp.metric_name = pm.metric_name;
                 bp.method = optimize::FrameDetectionMethod::DerivativePeak;
@@ -1200,9 +1427,9 @@ int main(int argc, char* argv[]) {
         }
 
         // ThresholdCrossing
-        for (double thresh : boom_grid.crossing_thresh_vals) {
-            for (int confirm : boom_grid.crossing_confirm_vals) {
-                for (double offset : boom_grid.offset_vals) {
+        for (double thresh : method_grid.crossing_thresh_vals) {
+            for (int confirm : method_grid.crossing_confirm_vals) {
+                for (double offset : method_grid.offset_vals) {
                     optimize::FrameDetectionParams bp;
                     bp.metric_name = pm.metric_name;
                     bp.method = optimize::FrameDetectionMethod::ThresholdCrossing;
@@ -1215,8 +1442,8 @@ int main(int argc, char* argv[]) {
         }
 
         // SecondDerivativePeak
-        for (int smooth : boom_grid.smooth_vals) {
-            for (double offset : boom_grid.offset_vals) {
+        for (int smooth : method_grid.smooth_vals) {
+            for (double offset : method_grid.offset_vals) {
                 optimize::FrameDetectionParams bp;
                 bp.metric_name = pm.metric_name;
                 bp.method = optimize::FrameDetectionMethod::SecondDerivativePeak;
@@ -1226,7 +1453,6 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Merge results and free memory
         {
             std::lock_guard<std::mutex> lock(results_mutex);
             results.insert(results.end(), local_results.begin(), local_results.end());
@@ -1235,11 +1461,9 @@ int main(int argc, char* argv[]) {
         metrics_completed.fetch_add(1);
     };
 
-    // Build work items as (config_idx, sim_idx) pairs
     size_t total_work_items = param_metrics.size() * num_sims;
     std::atomic<size_t> work_idx{0};
 
-    // Global thread pool processes (config, sim) pairs
     std::vector<std::thread> workers;
     for (unsigned int t = 0; t < num_threads; ++t) {
         workers.emplace_back([&]() {
@@ -1254,17 +1478,14 @@ int main(int argc, char* argv[]) {
                 auto const& sim = simulations[sim_idx];
                 auto& state = config_states[config_idx];
 
-                // Compute metrics for this (config, sim) pair
                 computeMetricsForSim(
                     pm, sim,
                     state.collectors[sim_idx],
                     state.frame_durations[sim_idx],
-                    state.boom_frame_truths[sim_idx]);
+                    state.sim_ids[sim_idx]);
 
-                // Check if this config is complete
                 size_t completed = state.sims_completed.fetch_add(1) + 1;
                 if (completed == num_sims) {
-                    // This thread completed the config - evaluate boom methods
                     std::lock_guard<std::mutex> lock(eval_mutex);
                     evaluateCompletedConfig(config_idx);
                 }
@@ -1285,15 +1506,15 @@ int main(int argc, char* argv[]) {
     std::cout << "\nCompleted in " << std::fixed << std::setprecision(2) << total_secs << "s"
               << " (" << std::setprecision(0) << (results.size() / total_secs) << " evals/sec)\n\n";
 
-    // Sort by score
+    // Sort by MAE
     std::sort(results.begin(), results.end(),
               [](auto const& a, auto const& b) { return a.combined_score < b.combined_score; });
 
-    // ============================================
-    // RESULTS
-    // ============================================
+    // ========================================
+    // RESULTS FOR PRIMARY TARGET
+    // ========================================
     std::cout << std::string(100, '=') << "\n";
-    std::cout << "OPTIMIZATION RESULTS\n";
+    std::cout << "PRIMARY TARGET: " << primary_target << "\n";
     std::cout << std::string(100, '=') << "\n\n";
 
     // Top 15
@@ -1337,30 +1558,222 @@ int main(int argc, char* argv[]) {
     }
     std::cout << std::string(100, '-') << "\n\n";
 
-    // Winner details
-    if (!results.empty()) {
-        auto const& winner = results[0];
-        std::cout << "WINNER\n";
-        std::cout << std::string(100, '-') << "\n";
-        std::cout << "  Metric: " << winner.params.boom.metric_name << "\n";
-        std::cout << "  MAE: " << std::fixed << std::setprecision(2) << winner.boom_mae << " frames\n";
-        std::cout << "  Median: " << winner.boom_median << " frames\n";
-        std::cout << "  StdDev: " << winner.boom_stddev << " frames\n";
-        std::cout << "  Max: " << static_cast<int>(winner.boom_max) << " frames\n";
-        std::cout << "  Samples: " << winner.samples_evaluated << "\n";
+    // Winner
+    if (results.empty()) {
+        std::cerr << "No results for primary target.\n";
+        return 1;
+    }
 
-        if (!winner.per_sim_errors.empty() && winner.per_sim_errors.size() == simulations.size()) {
-            std::cout << "\n  Per-simulation errors:\n";
-            for (size_t i = 0; i < simulations.size(); ++i) {
-                std::cout << "    " << std::left << std::setw(30) << simulations[i].id
-                          << std::right << " error=" << std::setw(4) << winner.per_sim_errors[i]
-                          << " (truth=" << simulations[i].boom_frame_truth << ")\n";
+    auto const& primary_winner = results[0];
+    std::cout << "PRIMARY TARGET WINNER\n";
+    std::cout << std::string(100, '-') << "\n";
+    std::cout << "  Metric: " << primary_winner.params.boom.metric_name << "\n";
+    std::cout << "  MAE: " << std::fixed << std::setprecision(2) << primary_winner.boom_mae << " frames\n";
+    std::cout << "  Median: " << primary_winner.boom_median << " frames\n";
+    std::cout << "  StdDev: " << primary_winner.boom_stddev << " frames\n";
+    std::cout << "  Max: " << static_cast<int>(primary_winner.boom_max) << " frames\n";
+    std::cout << "  Samples: " << primary_winner.samples_evaluated << "\n";
+
+    if (!primary_winner.per_sim_errors.empty() && primary_winner.per_sim_errors.size() == simulations.size()) {
+        std::cout << "\n  Per-simulation errors:\n";
+        for (size_t i = 0; i < simulations.size(); ++i) {
+            int truth = simulations[i].getFrameTruth(primary_target);
+            std::cout << "    " << std::left << std::setw(30) << simulations[i].id
+                      << std::right << " error=" << std::setw(4) << primary_winner.per_sim_errors[i]
+                      << " (truth=" << truth << ")\n";
+        }
+    }
+    std::cout << std::string(100, '-') << "\n\n";
+
+    // ========================================
+    // Build optimized targets map
+    // ========================================
+    std::map<std::string, OptimizedTarget> optimized_targets;
+
+    // Add primary target
+    {
+        OptimizedTarget opt;
+        opt.name = primary_target;
+        opt.type = optimize::PredictionType::Frame;
+        opt.frame_result = primary_winner;
+        optimized_targets[primary_target] = opt;
+    }
+
+    // ========================================
+    // PHASE 3: Optimize secondary frame targets
+    // ========================================
+    std::string best_metric_name = primary_winner.params.boom.metric_name;
+    ::MetricConfig best_metric_config = primary_winner.params.metric_config;
+
+    // Find secondary frame targets (skip score targets)
+    std::vector<TargetDef> secondary_frame_targets;
+    for (auto const& td : frame_targets) {
+        if (td.name != primary_target) {
+            // Count sims with this target
+            int sim_count = 0;
+            for (auto const& sim : simulations) {
+                if (sim.hasTruth(td.name)) sim_count++;
+            }
+            if (sim_count > 0) {
+                secondary_frame_targets.push_back(td);
             }
         }
-        std::cout << std::string(100, '-') << "\n\n";
-
-        saveAllBestParams(output_file, results, winner);
     }
+
+    if (!secondary_frame_targets.empty()) {
+        std::cout << "=== Phase 3: Optimizing Secondary Frame Targets ===\n";
+        std::cout << "Using metric: " << best_metric_name << " (from primary)\n";
+        std::cout << "Detection methods: " << method_grid.totalMethods() << "\n\n";
+
+        // Create the best metric config as a ParameterizedMetric
+        ParameterizedMetric best_pm;
+        best_pm.metric_name = best_metric_name;
+        best_pm.config = best_metric_config;
+
+        // Compute metrics once for all simulations using the best config
+        std::cout << "Computing metrics for all simulations...\n";
+        ComputedMetricsForConfig computed;
+        computed.init(simulations.size());
+
+        for (size_t i = 0; i < simulations.size(); ++i) {
+            computeMetricsForSim(best_pm, simulations[i],
+                                 computed.collectors[i],
+                                 computed.frame_durations[i],
+                                 computed.sim_ids[i]);
+        }
+        std::cout << "Done.\n\n";
+
+        // Optimize each secondary frame target
+        for (auto const& td : secondary_frame_targets) {
+            int sim_count = 0;
+            for (auto const& sim : simulations) {
+                if (sim.hasTruth(td.name)) sim_count++;
+            }
+
+            std::cout << "--- " << td.name << " (" << sim_count << " simulations) ---\n";
+
+            // Evaluate all detection methods
+            std::vector<EvaluationResult> target_results;
+
+            auto evaluateMethod = [&](optimize::FrameDetectionParams const& bp) {
+                auto result = evaluateFrameTarget(best_pm, computed, bp, simulations, td.name);
+                if (result.samples_evaluated > 0) {
+                    target_results.push_back(result);
+                }
+            };
+
+            // MaxValue
+            for (double offset : method_grid.offset_vals) {
+                optimize::FrameDetectionParams bp;
+                bp.metric_name = best_metric_name;
+                bp.method = optimize::FrameDetectionMethod::MaxValue;
+                bp.offset_seconds = offset;
+                evaluateMethod(bp);
+            }
+
+            // FirstPeakPercent
+            for (double pct : method_grid.peak_pct_vals) {
+                for (double offset : method_grid.offset_vals) {
+                    for (double prom : method_grid.prominence_vals) {
+                        optimize::FrameDetectionParams bp;
+                        bp.metric_name = best_metric_name;
+                        bp.method = optimize::FrameDetectionMethod::FirstPeakPercent;
+                        bp.peak_percent_threshold = pct;
+                        bp.offset_seconds = offset;
+                        bp.min_peak_prominence = prom;
+                        evaluateMethod(bp);
+                    }
+                }
+            }
+
+            // DerivativePeak
+            for (int smooth : method_grid.smooth_vals) {
+                for (double offset : method_grid.offset_vals) {
+                    optimize::FrameDetectionParams bp;
+                    bp.metric_name = best_metric_name;
+                    bp.method = optimize::FrameDetectionMethod::DerivativePeak;
+                    bp.smoothing_window = smooth;
+                    bp.offset_seconds = offset;
+                    evaluateMethod(bp);
+                }
+            }
+
+            // ThresholdCrossing
+            for (double thresh : method_grid.crossing_thresh_vals) {
+                for (int confirm : method_grid.crossing_confirm_vals) {
+                    for (double offset : method_grid.offset_vals) {
+                        optimize::FrameDetectionParams bp;
+                        bp.metric_name = best_metric_name;
+                        bp.method = optimize::FrameDetectionMethod::ThresholdCrossing;
+                        bp.crossing_threshold = thresh;
+                        bp.crossing_confirmation = confirm;
+                        bp.offset_seconds = offset;
+                        evaluateMethod(bp);
+                    }
+                }
+            }
+
+            // SecondDerivativePeak
+            for (int smooth : method_grid.smooth_vals) {
+                for (double offset : method_grid.offset_vals) {
+                    optimize::FrameDetectionParams bp;
+                    bp.metric_name = best_metric_name;
+                    bp.method = optimize::FrameDetectionMethod::SecondDerivativePeak;
+                    bp.smoothing_window = smooth;
+                    bp.offset_seconds = offset;
+                    evaluateMethod(bp);
+                }
+            }
+
+            // Find best result for this target
+            if (!target_results.empty()) {
+                std::sort(target_results.begin(), target_results.end(),
+                          [](auto const& a, auto const& b) { return a.boom_mae < b.boom_mae; });
+
+                auto const& best = target_results[0];
+
+                // Print top 5
+                std::cout << "  Top 5 methods:\n";
+                for (size_t i = 0; i < std::min(target_results.size(), size_t(5)); ++i) {
+                    auto const& r = target_results[i];
+                    std::cout << "    " << (i + 1) << ". MAE=" << std::fixed << std::setprecision(1)
+                              << r.boom_mae << " | " << r.params.describeFull() << "\n";
+                }
+
+                std::cout << "  Winner: MAE=" << std::fixed << std::setprecision(2) << best.boom_mae
+                          << " frames, " << best.samples_evaluated << " samples\n";
+
+                // Print per-sim errors
+                if (!best.per_sim_errors.empty()) {
+                    std::cout << "  Per-simulation errors:\n";
+                    size_t err_idx = 0;
+                    for (size_t i = 0; i < simulations.size() && err_idx < best.per_sim_errors.size(); ++i) {
+                        if (simulations[i].hasTruth(td.name)) {
+                            int truth = simulations[i].getFrameTruth(td.name);
+                            std::cout << "    " << simulations[i].id << ": error="
+                                      << best.per_sim_errors[err_idx] << " (truth=" << truth << ")\n";
+                            err_idx++;
+                        }
+                    }
+                }
+
+                // Store optimized target
+                OptimizedTarget opt;
+                opt.name = td.name;
+                opt.type = optimize::PredictionType::Frame;
+                opt.frame_result = best;
+                optimized_targets[td.name] = opt;
+            } else {
+                std::cout << "  No valid results (no simulations with ground truth?)\n";
+            }
+            std::cout << "\n";
+        }
+    }
+
+    // ========================================
+    // Save results
+    // ========================================
+    saveOptimizationResults(output_file, primary_target, primary_winner, results, optimized_targets);
 
     std::cout << std::string(100, '=') << "\n";
     return 0;

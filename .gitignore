@@ -54,3 +54,5 @@ eval
 # Stability analysis output
 stability*.csv
 stability_report*/
+
+old/
