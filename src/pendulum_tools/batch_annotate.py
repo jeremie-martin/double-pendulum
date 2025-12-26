@@ -648,8 +648,16 @@ Music: {music_str}"""
             return
 
         # Run and show result in status bar (no pop-ups)
+        # Also print output to terminal for debugging
+        print(f"\n>>> Running: {' '.join(cmd)}")
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(Path.cwd()))
+
+            # Print output to terminal
+            if result.stdout:
+                print(result.stdout)
+            if result.stderr:
+                print(result.stderr)
 
             if result.returncode == 0:
                 # Show success in status bar
@@ -668,10 +676,11 @@ Music: {music_str}"""
                         item.setText(f"[{status}] {new_info.name}")
                     self._update_ui()
             else:
-                # Show error in status bar, keep stderr for debugging
+                # Show error in status bar
                 error_line = result.stderr.strip().split('\n')[-1] if result.stderr else "Unknown error"
                 self.statusBar().showMessage(f"Failed: {error_line[:80]}", 5000)
         except Exception as e:
+            print(f"Error: {e}")
             self.statusBar().showMessage(f"Error: {e}", 5000)
 
     def _delete_video(self) -> None:
