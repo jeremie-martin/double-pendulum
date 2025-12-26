@@ -48,7 +48,7 @@ struct PredictorDef {
 // All available prediction methods in one place.
 // Add new predictors here - they'll automatically appear in config parsing and UI.
 
-inline constexpr std::array<PredictorDef, 15> PREDICTOR_REGISTRY = {{
+inline constexpr std::array<PredictorDef, 18> PREDICTOR_REGISTRY = {{
     // ========================================================================
     // Frame Detection Methods (from FrameDetector)
     // ========================================================================
@@ -121,6 +121,22 @@ inline constexpr std::array<PredictorDef, 15> PREDICTOR_REGISTRY = {{
     {"boom_steepness", "Steepness",
      "Derivative at boom vs max (high=sharp)",
      PredictorType::Score, PredictorCategory::Signal, true},
+
+    // ========================================================================
+    // Score Prediction Methods - Additional signal analysis
+    // ========================================================================
+
+    {"buildup_gradient", "Buildup",
+     "Average slope to peak (high=dramatic rise)",
+     PredictorType::Score, PredictorCategory::Signal, false},
+
+    {"peak_dominance", "Dominance",
+     "Peak/mean ratio (high=prominent peak)",
+     PredictorType::Score, PredictorCategory::Signal, false},
+
+    {"decay_rate", "Decay",
+     "Drop rate after peak (high=fast decay)",
+     PredictorType::Score, PredictorCategory::Signal, false},
 
     // ========================================================================
     // Testing

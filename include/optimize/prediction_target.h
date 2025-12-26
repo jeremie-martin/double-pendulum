@@ -78,6 +78,11 @@ enum class ScoreMethod {
     PreBoomContrast, // 1 - (avg_before / peak) - contrast before boom
     BoomSteepness,   // derivative_at_boom / max_derivative - sharpness of event
 
+    // Additional signal analysis methods
+    BuildupGradient, // Average slope from start to peak - measures dramatic rise
+    PeakDominance,   // peak / mean ratio - how much peak stands out
+    DecayRate,       // How quickly signal drops after peak
+
     // Testing
     ConstantScore    // Always returns configured score (for testing)
 };
@@ -226,6 +231,12 @@ inline std::string toString(ScoreMethod method) {
         return "pre_boom_contrast";
     case ScoreMethod::BoomSteepness:
         return "boom_steepness";
+    case ScoreMethod::BuildupGradient:
+        return "buildup_gradient";
+    case ScoreMethod::PeakDominance:
+        return "peak_dominance";
+    case ScoreMethod::DecayRate:
+        return "decay_rate";
     case ScoreMethod::ConstantScore:
         return "constant_score";
     default:
@@ -250,6 +261,12 @@ inline ScoreMethod parseScoreMethod(std::string const& s) {
         return ScoreMethod::PreBoomContrast;
     if (s == "boom_steepness" || s == "steepness")
         return ScoreMethod::BoomSteepness;
+    if (s == "buildup_gradient" || s == "buildup")
+        return ScoreMethod::BuildupGradient;
+    if (s == "peak_dominance" || s == "dominance")
+        return ScoreMethod::PeakDominance;
+    if (s == "decay_rate" || s == "decay")
+        return ScoreMethod::DecayRate;
     if (s == "constant_score" || s == "constant")
         return ScoreMethod::ConstantScore;
     return ScoreMethod::PeakClarity;

@@ -96,6 +96,18 @@ public:
             result.score = computeBoomSteepness(values, reference_frame, frame_duration);
             result.score = std::clamp(result.score, 0.0, 1.0);
             return result;
+        case ScoreMethod::BuildupGradient:
+            result.score = computeBuildupGradient(values, frame_duration);
+            result.score = std::clamp(result.score, 0.0, 1.0);
+            return result;
+        case ScoreMethod::PeakDominance:
+            result.score = computePeakDominance(values);
+            result.score = std::clamp(result.score, 0.0, 1.0);
+            return result;
+        case ScoreMethod::DecayRate:
+            result.score = computeDecayRate(values, frame_duration);
+            result.score = std::clamp(result.score, 0.0, 1.0);
+            return result;
         default:
             break;
         }
@@ -297,6 +309,95 @@ private:
         // Ratio of boom derivative to max derivative
         // Use absolute value - steepness can be either direction
         return std::clamp(std::abs(deriv_at_boom) / max_deriv, 0.0, 1.0);
+    }
+
+    // ========================================================================
+    // Additional signal analysis methods
+    // ========================================================================
+
+    // Buildup gradient: average slope from start to peak
+    // High score = steep, dramatic rise to peak
+    static double computeBuildupGradient(std::vector<double> const& values,
+                                          double frame_duration) {
+        if (values.size() < 2) return 0.0;
+
+        // Find peak frame
+        auto max_it = std::max_element(values.begin(), values.end());
+        size_t peak_frame = static_cast<size_t>(std::distance(values.begin(), max_it));
+        double peak_value = *max_it;
+
+        if (peak_frame == 0 || peak_value <= 0.0) return 0.0;
+
+        // Average gradient from start to peak
+        double start_value = values[0];
+        double rise = peak_value - start_value;
+        double time_to_peak = static_cast<double>(peak_frame) * frame_duration;
+
+        double gradient = rise / time_to_peak;
+
+        // Normalize: typical gradients vary widely, use sigmoid-like normalization
+        // Scale factor chosen empirically - adjust based on typical metric ranges
+        double normalized = gradient / (gradient + 100.0);  // Approaches 1 as gradient increases
+        return std::clamp(normalized, 0.0, 1.0);
+    }
+
+    // Peak dominance: peak / mean ratio
+    // High score = peak stands out significantly from average
+    static double computePeakDominance(std::vector<double> const& values) {
+        if (values.empty()) return 0.0;
+
+        double sum = 0.0;
+        double max_val = 0.0;
+        for (double v : values) {
+            sum += v;
+            max_val = std::max(max_val, v);
+        }
+
+        double mean = sum / static_cast<double>(values.size());
+        if (mean <= 0.0) return 0.0;
+
+        double ratio = max_val / mean;
+
+        // Normalize: ratio of 1 = peak equals mean (bad), ratio >> 1 = dominant peak
+        // Use log scale for better distribution
+        // ratio=1 -> 0, ratio=e -> 0.5, ratio=e^2 -> 0.67, etc.
+        double normalized = 1.0 - 1.0 / ratio;  // Simpler: 0 when ratio=1, approaches 1 as ratio->inf
+        return std::clamp(normalized, 0.0, 1.0);
+    }
+
+    // Decay rate: how quickly signal drops after peak
+    // High score = fast, clean decay
+    static double computeDecayRate(std::vector<double> const& values,
+                                    double frame_duration) {
+        if (values.size() < 3) return 0.0;
+
+        // Find peak frame
+        auto max_it = std::max_element(values.begin(), values.end());
+        size_t peak_frame = static_cast<size_t>(std::distance(values.begin(), max_it));
+        double peak_value = *max_it;
+
+        if (peak_frame >= values.size() - 1 || peak_value <= 0.0) return 0.0;
+
+        // Compute average negative derivative after peak
+        // Look at a window after the peak (up to 30% of remaining signal or all of it)
+        size_t remaining = values.size() - peak_frame - 1;
+        size_t window = std::min(remaining, std::max(size_t(10), remaining * 3 / 10));
+
+        double total_drop = 0.0;
+        for (size_t i = peak_frame; i < peak_frame + window; ++i) {
+            double drop = values[i] - values[i + 1];
+            if (drop > 0) total_drop += drop;  // Only count decreases
+        }
+
+        double avg_drop_per_frame = total_drop / static_cast<double>(window);
+        double decay_rate = avg_drop_per_frame / frame_duration;
+
+        // Normalize relative to peak value
+        double relative_decay = decay_rate / peak_value;
+
+        // Sigmoid normalization - typical decay rates map to 0.3-0.8
+        double normalized = relative_decay / (relative_decay + 0.1);
+        return std::clamp(normalized, 0.0, 1.0);
     }
 };
 

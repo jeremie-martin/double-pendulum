@@ -89,6 +89,9 @@ constexpr const char* toString(optimize::ScoreMethod method) {
     case optimize::ScoreMethod::Smoothness: return "smoothness";
     case optimize::ScoreMethod::PreBoomContrast: return "pre_boom_contrast";
     case optimize::ScoreMethod::BoomSteepness: return "boom_steepness";
+    case optimize::ScoreMethod::BuildupGradient: return "buildup_gradient";
+    case optimize::ScoreMethod::PeakDominance: return "peak_dominance";
+    case optimize::ScoreMethod::DecayRate: return "decay_rate";
     case optimize::ScoreMethod::ConstantScore: return "constant_score";
     }
     return "unknown";
