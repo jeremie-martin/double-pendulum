@@ -23,6 +23,7 @@ dependencies = [
 
 [project.scripts]
 pendulum-tools = "pendulum_tools.cli:main"
+batch-annotate = "pendulum_tools.batch_annotate:main"
 
 [build-system]
 requires = ["hatchling"]
