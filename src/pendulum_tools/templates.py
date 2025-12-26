@@ -9,64 +9,101 @@ if TYPE_CHECKING:
     from .models import VideoMetadata
 
 # Title Templates - randomly selected for variety
+# Philosophy: Not always "double pendulum", mix themes (chaos, butterfly effect, satisfying)
+# Keep titles clear, searchable, and scroll-stopping
 TITLE_TEMPLATES = [
-    "{count_formatted} Pendulums Diverge into Chaos",
-    "Double Pendulum Chaos - {count_formatted} Simulations",
-    "When {count_formatted} Pendulums Go Chaotic",
-    "Mesmerizing Chaos: {count_formatted} Double Pendulums",
-    "The Butterfly Effect with {count_formatted} Pendulums",
+    # Chaos-focused (no "pendulum") - strong performers
+    "Chaos Theory Visualized",
+    "From Order to Chaos",
+    "The Moment Chaos Begins",
+    "When Order Breaks Down",
+    "Pure Chaos",
+    "Controlled Chaos",
+    # Butterfly effect themed - highly searchable
+    "The Butterfly Effect",
+    "The Butterfly Effect Visualized",
+    "Tiny Change, Massive Chaos",
+    "Small Differences, Big Chaos",
+    "One Tiny Difference",
+    # Satisfying/hypnotic vibe
+    "Oddly Satisfying Chaos",
+    "Hypnotic",
+    # Count-focused (impressive numbers)
+    "{count_formatted} Simulations, One Tiny Difference",
+    "{count_formatted} Identical Starts, Total Chaos",
+    "{count_formatted} Start Together, Then This Happens",
+    "{count_formatted} Pendulums, One Outcome",
+    # Curiosity-driven (scroll stoppers)
+    "Watch Until The End",
+    "You Won't See It Coming",
+    "This Is Why Prediction Is Impossible",
+    "They All Start The Same",
+    # Clean/minimal
+    "Chaos",
+    "Order to Chaos",
 ]
 
 # Description Templates - mix of minimal and detailed
 # Note: {boom_time} is VIDEO time (when it appears on screen), not simulation time
+# Philosophy: Not always mention boom time, keep it clean, avoid being too dry/educational
 DESCRIPTION_TEMPLATES = [
-    # Minimal - engagement focused
+    # Ultra minimal - no boom time
     """\
-{count_formatted} pendulums. One tiny difference. Pure chaos. 🌀
+{count_formatted} identical starts. Complete chaos.
 
-Wait for {boom_time} 👀
+#chaos #physics #satisfying #butterflyeffect""",
 
-#doublependulum #chaos #physics #satisfying #butterflyeffect""",
-
-    # Short and punchy
+    # Butterfly effect focus - no boom time
     """\
-What happens when {count_formatted} pendulums start almost identical?
+The butterfly effect: tiny differences create massive outcomes.
 
-Chaos. Beautiful, beautiful chaos.
+{count_formatted} simulations prove it.
 
-The moment everything changes: {boom_time}
+#butterflyeffect #chaos #physics #satisfying""",
 
-#physics #simulation #chaostheory #satisfying #mesmerizing""",
-
-    # Engagement hook
+    # Minimal with boom time
     """\
-This is the butterfly effect visualized.
+{count_formatted} pendulums. One tiny difference.
 
-{count_formatted} double pendulums, each starting just 0.00001° apart.
+Watch for {boom_time}.
 
-Watch what happens at {boom_time} 🔥
+#chaos #physics #satisfying #simulation""",
 
-Like & Subscribe for more physics simulations!
-
-#doublependulum #chaos #physics #satisfying #butterflyeffect""",
-
-    # Educational but brief
+    # Mysterious/intriguing - no boom time
     """\
-{count_formatted} double pendulums demonstrating chaos theory.
+They all start the same way.
 
-They start nearly identical, but tiny differences compound exponentially. By {boom_time}, they've completely diverged.
+They don't end the same way.
 
-This is why weather prediction is so hard.
+#chaos #physics #satisfying #butterflyeffect""",
 
-#physics #chaostheory #simulation #doublependulum #satisfying""",
-
-    # Minimal mystique
+    # Short punchy - with boom time
     """\
-Order → Chaos
+Order becomes chaos at {boom_time}.
 
-{count_formatted} pendulums. {boom_time}.
+{count_formatted} simulations.
 
-#doublependulum #chaos #satisfying #physics""",
+#chaos #physics #satisfying #simulation""",
+
+    # Clean statement - no boom time
+    """\
+{count_formatted} pendulums. Tiny differences. Total chaos.
+
+#chaos #physics #satisfying #butterflyeffect""",
+
+    # Curiosity - no boom time
+    """\
+Same start. Different end.
+
+#chaos #physics #satisfying #simulation""",
+
+    # Count focused - no boom time
+    """\
+What happens when {count_formatted} start almost identical?
+
+Chaos.
+
+#chaos #physics #satisfying #butterflyeffect""",
 ]
 
 # Base tags (always included)

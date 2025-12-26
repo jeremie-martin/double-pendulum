@@ -21,7 +21,7 @@ slow_zoom = { start = 1.0, end = 1.08 }
 pool = "hooks.science"
 position = "hook"
 start = 0
-end = 3.0
+end = 5.0
 effects = { fade_in = 200, fade_out = 300 }
 
 
@@ -40,7 +40,7 @@ slow_zoom = { start = 1.0, end = 1.06 }
 pool = "hooks.wait"
 position = "main"
 start = 0
-end = 4.0
+end = 5.0
 effects = { fade_in = 300, fade_out = 400 }
 
 
@@ -77,24 +77,7 @@ end = 6.0
 effects = { fade_in = 150, fade_out = 300 }
 
 
-# =============================================================================
-# TEMPLATE: relatable
-# Single meme-style caption - chaos is the relatable punchline
-# =============================================================================
-
-[template.relatable]
-description = "Relatable meme style"
-
-[template.relatable.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
-
-[[template.relatable.captions]]
-pool = "hooks.relatable"
-position = "hook"
-start = 0
-end = 5.0
-effects = { fade_in = 200, fade_out = 300 }
-
+# NOTE: Removed "relatable" template - meme captions don't fit elegant physics aesthetic
 
 # =============================================================================
 # TEMPLATE: satisfying
@@ -111,7 +94,7 @@ slow_zoom = { start = 1.0, end = 1.05 }
 pool = "hooks.satisfying"
 position = "hook"
 start = 0
-end = 3.0
+end = 5.0
 effects = { fade_in = 300, fade_out = 300 }
 
 
@@ -130,7 +113,7 @@ slow_zoom = { start = 1.0, end = 1.06 }
 pool = "hooks.challenge"
 position = "hook"
 start = 0
-end = 4.0
+end = 5.0
 effects = { fade_in = 150, fade_out = 300 }
 
 
@@ -149,7 +132,7 @@ slow_zoom = { start = 1.0, end = 1.08 }
 pool = "hooks.count"
 position = "hook"
 start = 0
-end = 3.5
+end = 5.0
 effects = { fade_in = 200, fade_out = 300 }
 
 
@@ -168,7 +151,7 @@ slow_zoom = { start = 1.0, end = 1.08 }
 pool = "hooks.science"
 position = "hook"
 start = 0
-end = 3.0
+end = 5.0
 effects = { fade_in = 200, fade_out = 300 }
 
 [[template.science_subscribe.captions]]
@@ -194,7 +177,7 @@ slow_zoom = { start = 1.0, end = 1.08 }
 pool = "hooks.science"
 position = "hook"
 start = 0
-end = 3.0
+end = 5.0
 effects = { fade_in = 200, fade_out = 300 }
 
 [[template.science_tease.captions]]
@@ -273,5 +256,64 @@ pool = "engagement.tease"
 position = "main"
 start = "end-6"
 end = "end-0.5"
+effects = { fade_in = 300, fade_out = 400 }
+
+
+# =============================================================================
+# TEMPLATE: countdown
+# Countdown before the boom moment - 3, 2, 1 then nothing at boom
+# =============================================================================
+
+[template.countdown]
+description = "Countdown to the boom moment"
+
+[template.countdown.motion]
+slow_zoom = { start = 1.0, end = 1.08 }
+
+[[template.countdown.captions]]
+pool = "hooks.science"
+position = "hook"
+start = 0
+end = 5.0
+effects = { fade_in = 200, fade_out = 300 }
+
+[[template.countdown.captions]]
+pool = "countdown.three"
+position = "center"
+start = "boom-3"
+end = "boom-2"
+effects = { pop_in = true }
+
+[[template.countdown.captions]]
+pool = "countdown.two"
+position = "center"
+start = "boom-2"
+end = "boom-1"
+effects = { pop_in = true }
+
+[[template.countdown.captions]]
+pool = "countdown.one"
+position = "center"
+start = "boom-1"
+end = "boom-0.1"
+effects = { pop_in = true }
+
+
+# =============================================================================
+# TEMPLATE: mystery
+# Mysterious hook - intriguing without explaining
+# =============================================================================
+
+[template.mystery]
+description = "Mysterious, intriguing hook"
+
+[template.mystery.motion]
+slow_zoom = { start = 1.0, end = 1.1 }
+
+[[template.mystery.captions]]
+pool = "hooks.mystery"
+position = "hook"
+start = 0
+end = 5.0
 effects = { fade_in = 300, fade_out = 400 }
 

@@ -100,11 +100,11 @@ class ASSStyleConfig:
 ASS_PRESETS: dict[CaptionPreset, ASSStyleConfig] = {
     CaptionPreset.CAPCUT_BOLD: ASSStyleConfig(
         fontname="Inter Bold",
-        fontsize=78,
+        fontsize=86,  # +10% for better mobile visibility
         primary_color="&H00FFFFFF",
         outline_color="&H00000000",
         back_color="&H80000000",
-        outline=5.0,
+        outline=5.5,
         shadow=3.0,
         bold=True,
         alignment=2,
@@ -112,12 +112,12 @@ ASS_PRESETS: dict[CaptionPreset, ASSStyleConfig] = {
     ),
     CaptionPreset.KARAOKE: ASSStyleConfig(
         fontname="Inter Bold",
-        fontsize=72,
+        fontsize=80,  # +10%
         primary_color="&H00FFFFFF",
         secondary_color="&H0000FFFF",  # Yellow for highlight
         outline_color="&H00000000",
         back_color="&H00000000",
-        outline=4.0,
+        outline=4.5,
         shadow=2.0,
         bold=True,
         alignment=2,
@@ -125,11 +125,11 @@ ASS_PRESETS: dict[CaptionPreset, ASSStyleConfig] = {
     ),
     CaptionPreset.MINIMAL_SCIENCE: ASSStyleConfig(
         fontname="Inter",
-        fontsize=56,
+        fontsize=62,  # +10%
         primary_color="&H00FFFFFF",
         outline_color="&H00000000",
         back_color="&H00000000",
-        outline=2.0,
+        outline=2.5,
         shadow=1.0,
         bold=False,
         alignment=2,
@@ -137,11 +137,11 @@ ASS_PRESETS: dict[CaptionPreset, ASSStyleConfig] = {
     ),
     CaptionPreset.MRBEAST: ASSStyleConfig(
         fontname="Inter Bold",
-        fontsize=90,
+        fontsize=100,  # +10% for maximum impact
         primary_color="&H00FFFFFF",
         outline_color="&H00000000",
         back_color="&H00000000",
-        outline=6.0,
+        outline=7.0,
         shadow=4.0,
         bold=True,
         alignment=2,
@@ -250,6 +250,7 @@ class ASSGenerator:
         self.subs.styles["Default"] = create_ass_style("Default", config)
 
         # Hook style (for top-positioned text)
+        # Positioned slightly towards center (18% from top instead of 12%)
         hook_config = ASSStyleConfig(
             fontname=config.fontname,
             fontsize=int(config.fontsize * 0.85),
@@ -260,7 +261,7 @@ class ASSGenerator:
             shadow=config.shadow,
             bold=config.bold,
             alignment=8,  # Top center
-            margin_v=int(self.video_height * 0.12),
+            margin_v=int(self.video_height * 0.18),
         )
         self.subs.styles["Hook"] = create_ass_style("Hook", hook_config)
 
@@ -280,6 +281,7 @@ class ASSGenerator:
         self.subs.styles["Center"] = create_ass_style("Center", center_config)
 
         # Main style (bottom position, for build-up text)
+        # Positioned slightly towards center (20% from bottom instead of 15%)
         main_config = ASSStyleConfig(
             fontname=config.fontname,
             fontsize=config.fontsize,
@@ -290,7 +292,7 @@ class ASSGenerator:
             shadow=config.shadow,
             bold=config.bold,
             alignment=2,  # Bottom center
-            margin_v=int(self.video_height * 0.15),
+            margin_v=int(self.video_height * 0.20),
         )
         self.subs.styles["Main"] = create_ass_style("Main", main_config)
 

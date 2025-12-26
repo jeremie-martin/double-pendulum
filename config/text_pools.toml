@@ -4,6 +4,7 @@
 # - Each caption should be self-contained and make sense on its own
 # - The visual chaos IS the payoff - captions just set the stage
 # - Use {count} for formatted pendulum count (e.g., "1M", "500K")
+# - Keep it clean, modern, not cheesy
 
 # =============================================================================
 # HOOKS - Opening captions (first few seconds)
@@ -19,6 +20,10 @@ texts = [
     "Tiny differences in starting angle.",
     "The butterfly effect.",
     "Chaos theory in action.",
+    "Order becomes chaos.",
+    "Mathematics made visible.",
+    "From order to chaos.",
+    "Deterministic yet unpredictable.",
 ]
 
 [hooks.wait]
@@ -26,53 +31,69 @@ texts = [
 texts = [
     "Wait for it...",
     "Keep watching...",
-    "Don't blink.",
-    "Watch until the end.",
+    "Watch closely.",
+    "Stay focused.",
 ]
 
 [hooks.challenge]
 # Interactive - asks viewer to engage
 texts = [
-    "Can you see it coming?",
-    "Find the exact moment.",
-    "Watch for the divergence.",
+    "Spot when it happens.",
+    "Find the moment.",
+    "Watch for the shift.",
+    "See it coming?",
 ]
 
 [hooks.pov]
 # POV-style immersive hooks - visual is the punchline
 texts = [
     "POV: chaos theory",
-    "POV: the butterfly effect",
-    "POV: sensitive dependence",
-    "POV: deterministic chaos",
+    "POV: butterfly effect",
+    "POV: physics simulation",
+    "POV: mathematics",
 ]
 
 [hooks.satisfying]
 # Oddly satisfying vibes
 texts = [
-    "This is oddly satisfying.",
-    "I could watch this forever.",
-    "Why is this so calming?",
+    "Oddly satisfying.",
+    "Pure satisfaction.",
+    "So smooth.",
     "Hypnotic.",
 ]
 
-[hooks.relatable]
-# Meme-style relatable - chaos is the punchline
-texts = [
-    "My last brain cell at 3am:",
-    "My thoughts during a meeting:",
-    "Me trying to make a decision:",
-    "My plans vs reality:",
-    "Monday morning energy:",
-]
+# NOTE: Removed "relatable" meme hooks - they don't fit the elegant physics aesthetic
 
 [hooks.count]
 # Simple count display - just the facts
 texts = [
     "{count} pendulums",
-    "{count} double pendulums",
-    "{count} simulated pendulums",
+    "{count} simulations",
+    "{count} identical starts",
 ]
+
+[hooks.mystery]
+# Mysterious, intriguing hooks
+texts = [
+    "What happens next?",
+    "Then this happens.",
+    "Watch what unfolds.",
+    "It starts simple.",
+    "Looks stable, right?",
+]
+
+# =============================================================================
+# COUNTDOWN - Numbers for countdown template
+# =============================================================================
+
+[countdown.three]
+texts = ["3"]
+
+[countdown.two]
+texts = ["2"]
+
+[countdown.one]
+texts = ["1"]
 
 # =============================================================================
 # ENGAGEMENT - End captions for calls to action
@@ -82,25 +103,24 @@ texts = [
 [engagement.subscribe]
 # Call to action - subscribe/follow
 texts = [
-    "Subscribe for more chaos",
-    "Follow for more physics",
-    "More simulations coming...",
+    "More chaos coming",
+    "Follow for more",
+    "Subscribe for simulations",
 ]
 
 [engagement.tease]
 # Tease next video or bigger runs
 texts = [
-    "Next one will blow your mind",
-    "Want to see 1 million?",
-    "This was just the beginning...",
-    "Wait until you see the next one",
-    "The sequel is even better",
+    "Next one is bigger",
+    "Want to see more?",
+    "Just the beginning",
+    "Next one is wilder",
 ]
 
 [engagement.question]
 # Engage with questions
 texts = [
-    "Did you catch the moment?",
-    "Which pendulum survived longest?",
-    "How many times did you rewatch?",
+    "Caught the moment?",
+    "See it happen?",
+    "Watched twice yet?",
 ]
