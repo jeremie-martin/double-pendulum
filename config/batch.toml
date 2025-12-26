@@ -11,17 +11,17 @@ presets = "config/presets.toml"          # Preset library file
 
 [probe]
 enabled = true           # Enable probe-based filtering
-pendulum_count = 2500    # Fast probing with fewer pendulums (no rendering)
+pendulum_count = 1000    # Fast probing with fewer pendulums (no rendering)
 total_frames = 200       # Fewer frames for faster probing (0 = use base_config)
-max_dt = 0.0075            # Larger timestep for faster probing (0 = use base_config)
+max_dt = 0.01            # Larger timestep for faster probing (0 = use base_config)
 max_retries = 100000       # Retry with new params if probe fails
 
 [physics_ranges]
 # Random initial angles (in degrees)
-initial_angle1_deg = [50.0, 180.0]
-initial_angle2_deg = [50.0, 180.0]
+initial_angle1_deg = [140.0, 180.0]
+initial_angle2_deg = [140.0, 180.0]
 # Random angle variation (in degrees)
-angle_variation_deg = [0.05, 0.1]
+# angle_variation_deg = [0.003, 0.004]
 # Random initial velocities (rad/s) - small values for variety
 initial_velocity1 = [-0.05, 0.05]
 initial_velocity2 = [-0.05, 0.05]
@@ -37,8 +37,8 @@ min_seconds = 7.0          # Boom must happen after this time
 max_seconds = 14.0         # Boom must happen before this time
 required = true            # Reject simulations with no detectable boom
 
-# [filter.targets.boom_quality]
-# min_score = 0.6          # Minimum quality score for boom
+[filter.targets.boom_quality]
+min_score = 0.7          # Minimum quality score for boom
 
 # Randomization settings - which presets to randomly select from
 # Names must match presets defined in the preset library
