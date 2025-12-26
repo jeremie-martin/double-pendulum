@@ -461,18 +461,32 @@ class MainWindow(QMainWindow):
             self.path_edit.clear()
             return
 
-        # Update info
+        # Update info - load full metadata for details
         boom_str = f"{video.boom_seconds:.2f}s" if video.boom_seconds else "N/A"
         video_file = video.best_video_path.name if video.best_video_path else "None"
         music_str = video.music_title if video.music_title else "None"
 
+        # Try to load full metadata for extra details
+        extra_info = ""
+        try:
+            meta = VideoMetadata.from_file(video.metadata_path)
+            date_str = meta.created_at.strftime("%Y-%m-%d %H:%M")
+            extra_info = f"""<br><b>--- Simulation ---</b><br>
+Pendulums: {meta.simulation.pendulum_count:,}<br>
+Date: {date_str}<br>
+<b>--- Color ---</b><br>
+Scheme: {meta.color.scheme}<br>
+<b>--- Post-Process ---</b><br>
+Tone Map: {meta.post_process.tone_map}<br>
+Exposure: {meta.post_process.exposure} | Contrast: {meta.post_process.contrast} | Gamma: {meta.post_process.gamma}"""
+        except Exception:
+            pass
+
         info_text = f"""<b>{video.name}</b><br>
 FPS: {video.video_fps} | Duration: {video.duration_seconds:.1f}s<br>
 Video: {video_file}<br>
-Boom Frame: {video.boom_frame if video.boom_frame else 'Not set'}<br>
-Boom Time: {boom_str}<br>
-Processed: {'Yes' if video.has_processed else 'No'}<br>
-Music: {music_str}"""
+Boom Frame: {video.boom_frame if video.boom_frame else 'Not set'} | Time: {boom_str}<br>
+Processed: {'Yes' if video.has_processed else 'No'} | Music: {music_str}{extra_info}"""
 
         self.info_label.setText(info_text)
 
