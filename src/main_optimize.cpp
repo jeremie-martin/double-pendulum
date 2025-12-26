@@ -41,6 +41,7 @@
 #include "metrics/metrics_init.h"
 #include "optimize/frame_detector.h"
 #include "optimize/prediction_target.h"
+#include "optimize/score_predictor.h"
 #include "pendulum.h"
 #include "simulation_data.h"
 
@@ -1057,6 +1058,40 @@ void writeFrameTargetParams(std::ofstream& file, std::string const& target_name,
 }
 
 
+void writeScoreTargetParams(std::ofstream& file, std::string const& target_name,
+                             optimize::ScoreParams const& params) {
+    file << "[targets." << target_name << "]\n";
+    file << "type = \"score\"\n";
+    file << "metric = \"" << params.metric_name << "\"\n";
+    file << "method = \"" << optimize::toString(params.method) << "\"\n";
+
+    // Write method-specific params
+    if (params.method == optimize::ScoreMethod::Composite && !params.weights.empty()) {
+        file << "# weights: ";
+        for (size_t i = 0; i < params.weights.size(); ++i) {
+            if (i > 0) file << ", ";
+            file << params.weights[i].first << "=" << params.weights[i].second;
+        }
+        file << "\n";
+    } else if (params.method == optimize::ScoreMethod::ConstantScore) {
+        file << "constant_score = " << std::fixed << std::setprecision(3) << params.constant_score << "\n";
+    }
+}
+
+// Evaluation result for score targets
+struct ScoreEvaluationResult {
+    optimize::ScoreParams params;
+    double mae = std::numeric_limits<double>::max();  // Mean absolute error (0-1 scale)
+    double median = 0.0;
+    double max_error = 0.0;
+    int samples_evaluated = 0;
+    std::vector<double> per_sim_errors;
+
+    std::string describeShort() const {
+        return optimize::toString(params.method);
+    }
+};
+
 // Optimized target result - stores the best config for each target
 struct OptimizedTarget {
     std::string name;
@@ -1065,9 +1100,15 @@ struct OptimizedTarget {
     // For frame targets
     EvaluationResult frame_result;
 
-    bool isFrame() const { return type == optimize::PredictionType::Frame; }
+    // For score targets
+    ScoreEvaluationResult score_result;
 
-    double getMAE() const { return frame_result.boom_mae; }
+    bool isFrame() const { return type == optimize::PredictionType::Frame; }
+    bool isScore() const { return type == optimize::PredictionType::Score; }
+
+    double getMAE() const {
+        return isFrame() ? frame_result.boom_mae : score_result.mae;
+    }
 };
 
 void saveOptimizationResults(
@@ -1113,16 +1154,19 @@ void saveOptimizationResults(
         file << "\n";
     }
 
-    // Write all optimized frame targets
-    // TODO: Add score target optimization - compare predicted scores to annotated truths
-    //       using ScorePredictor::predict(collector, ref_frame, frame_duration)
+    // Write all optimized targets (frame and score)
     for (auto const& [target_name, opt] : optimized_targets) {
-        if (!opt.isFrame()) continue;  // Score target optimization not yet implemented
-
-        file << "# " << target_name << ": MAE=" << std::fixed << std::setprecision(2)
-             << opt.frame_result.boom_mae << " frames"
-             << " (" << opt.frame_result.samples_evaluated << " samples)\n";
-        writeFrameTargetParams(file, target_name, opt.frame_result.params.boom);
+        if (opt.isFrame()) {
+            file << "# " << target_name << ": MAE=" << std::fixed << std::setprecision(2)
+                 << opt.frame_result.boom_mae << " frames"
+                 << " (" << opt.frame_result.samples_evaluated << " samples)\n";
+            writeFrameTargetParams(file, target_name, opt.frame_result.params.boom);
+        } else {
+            file << "# " << target_name << ": MAE=" << std::fixed << std::setprecision(4)
+                 << opt.score_result.mae << " (score units, 0-1 scale)"
+                 << " (" << opt.score_result.samples_evaluated << " samples)\n";
+            writeScoreTargetParams(file, target_name, opt.score_result.params);
+        }
         file << "\n";
     }
 
@@ -1771,6 +1815,167 @@ int main(int argc, char* argv[]) {
                 opt.name = td.name;
                 opt.type = optimize::PredictionType::Frame;
                 opt.frame_result = best;
+                optimized_targets[td.name] = opt;
+            } else {
+                std::cout << "  No valid results (no simulations with ground truth?)\n";
+            }
+            std::cout << "\n";
+        }
+    }
+
+    // ========================================
+    // PHASE 4: Optimize score targets
+    // ========================================
+    std::vector<TargetDef> score_targets;
+    for (auto const& td : ann_data.target_defs) {
+        if (td.isScore()) {
+            // Count sims with this target
+            int sim_count = 0;
+            for (auto const& sim : simulations) {
+                if (sim.hasTruth(td.name)) sim_count++;
+            }
+            if (sim_count > 0) {
+                score_targets.push_back(td);
+            }
+        }
+    }
+
+    if (!score_targets.empty()) {
+        std::cout << "=== Phase 4: Optimizing Score Targets ===\n";
+        std::cout << "Using metric: " << best_metric_name << " (from primary)\n";
+        std::cout << "Score methods: peak_clarity, post_boom_sustain, composite\n\n";
+
+        // Use the same computed metrics from Phase 3
+        ParameterizedMetric best_pm;
+        best_pm.metric_name = best_metric_name;
+        best_pm.config = best_metric_config;
+
+        ComputedMetricsForConfig computed;
+        computed.init(simulations.size());
+
+        std::cout << "Computing metrics for all simulations...\n";
+        for (size_t i = 0; i < simulations.size(); ++i) {
+            computeMetricsForSim(best_pm, simulations[i],
+                                 computed.collectors[i],
+                                 computed.frame_durations[i],
+                                 computed.sim_ids[i]);
+        }
+        std::cout << "Done.\n\n";
+
+        // Get boom frames for reference (from primary target or first frame target)
+        std::vector<int> reference_frames(simulations.size(), -1);
+        for (size_t i = 0; i < simulations.size(); ++i) {
+            // Try to get boom frame from the primary target prediction
+            optimize::FrameDetectionParams bp = primary_winner.params.boom;
+            bp.metric_name = best_metric_name;
+            optimize::FrameDetector detector(bp);
+            auto detection = detector.detect(computed.collectors[i], computed.frame_durations[i]);
+            if (detection.valid()) {
+                reference_frames[i] = detection.frame;
+            }
+        }
+
+        // Score methods to try
+        std::vector<optimize::ScoreMethod> score_methods = {
+            optimize::ScoreMethod::PeakClarity,
+            optimize::ScoreMethod::PostBoomSustain,
+            optimize::ScoreMethod::Composite
+        };
+
+        for (auto const& td : score_targets) {
+            int sim_count = 0;
+            for (auto const& sim : simulations) {
+                if (sim.hasTruth(td.name)) sim_count++;
+            }
+
+            std::cout << "--- " << td.name << " (" << sim_count << " simulations) ---\n";
+
+            std::vector<ScoreEvaluationResult> target_results;
+
+            for (auto method : score_methods) {
+                optimize::ScoreParams sp;
+                sp.metric_name = best_metric_name;
+                sp.method = method;
+
+                optimize::ScorePredictor predictor(sp);
+
+                std::vector<double> errors;
+                for (size_t i = 0; i < simulations.size(); ++i) {
+                    if (!simulations[i].hasTruth(td.name)) continue;
+
+                    double truth = simulations[i].getScoreTruth(td.name);
+                    if (truth < 0.0) continue;  // Invalid truth
+
+                    auto prediction = predictor.predict(
+                        computed.collectors[i],
+                        reference_frames[i],
+                        computed.frame_durations[i]);
+
+                    double error = std::abs(prediction.score - truth);
+                    errors.push_back(error);
+                }
+
+                if (!errors.empty()) {
+                    ScoreEvaluationResult result;
+                    result.params = sp;
+                    result.samples_evaluated = static_cast<int>(errors.size());
+                    result.per_sim_errors = errors;
+
+                    // Compute MAE
+                    double sum = 0.0;
+                    for (double e : errors) sum += e;
+                    result.mae = sum / errors.size();
+
+                    // Compute median
+                    std::vector<double> sorted_errors = errors;
+                    std::sort(sorted_errors.begin(), sorted_errors.end());
+                    result.median = sorted_errors[sorted_errors.size() / 2];
+
+                    // Compute max
+                    result.max_error = *std::max_element(errors.begin(), errors.end());
+
+                    target_results.push_back(result);
+                }
+            }
+
+            // Find best result for this target
+            if (!target_results.empty()) {
+                std::sort(target_results.begin(), target_results.end(),
+                          [](auto const& a, auto const& b) { return a.mae < b.mae; });
+
+                auto const& best = target_results[0];
+
+                // Print all methods
+                std::cout << "  Methods evaluated:\n";
+                for (size_t i = 0; i < target_results.size(); ++i) {
+                    auto const& r = target_results[i];
+                    std::cout << "    " << (i + 1) << ". MAE=" << std::fixed << std::setprecision(4)
+                              << r.mae << " | " << r.describeShort() << "\n";
+                }
+
+                std::cout << "  Winner: MAE=" << std::fixed << std::setprecision(4) << best.mae
+                          << ", " << best.samples_evaluated << " samples\n";
+
+                // Print per-sim errors
+                if (!best.per_sim_errors.empty()) {
+                    std::cout << "  Per-simulation errors:\n";
+                    size_t err_idx = 0;
+                    for (size_t i = 0; i < simulations.size() && err_idx < best.per_sim_errors.size(); ++i) {
+                        if (simulations[i].hasTruth(td.name)) {
+                            double truth = simulations[i].getScoreTruth(td.name);
+                            std::cout << "    " << simulations[i].id << ": error="
+                                      << std::fixed << std::setprecision(4) << best.per_sim_errors[err_idx]
+                                      << " (truth=" << std::setprecision(2) << truth << ")\n";
+                            err_idx++;
+                        }
+                    }
+                }
+
+                // Store optimized target
+                OptimizedTarget opt;
+                opt.name = td.name;
+                opt.type = optimize::PredictionType::Score;
+                opt.score_result = best;
                 optimized_targets[td.name] = opt;
             } else {
                 std::cout << "  No valid results (no simulations with ground truth?)\n";
