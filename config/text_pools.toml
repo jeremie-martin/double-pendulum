@@ -74,3 +74,36 @@ texts = [
     "{count} double pendulums",
     "{count} simulated pendulums",
 ]
+
+# =============================================================================
+# ENGAGEMENT - End captions for calls to action
+# Goal: Encourage likes, subscribes, or tease next video
+# =============================================================================
+
+[engagement.subscribe]
+# Call to action - subscribe/follow
+texts = [
+    "Subscribe for more chaos 🔔",
+    "Follow for more physics ✨",
+    "Like if this was satisfying 👍",
+    "More simulations coming...",
+]
+
+[engagement.tease]
+# Tease next video or bigger runs
+texts = [
+    "Next one will blow your mind 🤯",
+    "Want to see 1 million? 👀",
+    "This was just the beginning...",
+    "Wait until you see the next one",
+    "The sequel is even better",
+]
+
+[engagement.question]
+# Engage with questions
+texts = [
+    "Did you catch the moment? 👀",
+    "Which pendulum survived longest?",
+    "Comment your favorite color 🎨",
+    "How many times did you rewatch?",
+]

@@ -151,3 +151,127 @@ position = "hook"
 start = 0
 end = 3.5
 effects = { fade_in = 200, fade_out = 300 }
+
+
+# =============================================================================
+# TEMPLATE: science_subscribe
+# Science hook at start + subscribe CTA at end
+# =============================================================================
+
+[template.science_subscribe]
+description = "Science facts with subscribe CTA"
+
+[template.science_subscribe.motion]
+slow_zoom = { start = 1.0, end = 1.08 }
+
+[[template.science_subscribe.captions]]
+pool = "hooks.science"
+position = "hook"
+start = 0
+end = 3.0
+effects = { fade_in = 200, fade_out = 300 }
+
+[[template.science_subscribe.captions]]
+pool = "engagement.subscribe"
+position = "main"
+start = "end-4"
+end = "end-0.5"
+effects = { fade_in = 300, fade_out = 400 }
+
+
+# =============================================================================
+# TEMPLATE: science_tease
+# Science hook at start + tease next video at end
+# =============================================================================
+
+[template.science_tease]
+description = "Science facts with next video tease"
+
+[template.science_tease.motion]
+slow_zoom = { start = 1.0, end = 1.08 }
+
+[[template.science_tease.captions]]
+pool = "hooks.science"
+position = "hook"
+start = 0
+end = 3.0
+effects = { fade_in = 200, fade_out = 300 }
+
+[[template.science_tease.captions]]
+pool = "engagement.tease"
+position = "main"
+start = "end-4"
+end = "end-0.5"
+effects = { fade_in = 300, fade_out = 400 }
+
+
+# =============================================================================
+# TEMPLATE: wait_subscribe
+# Wait for it + subscribe CTA at end
+# =============================================================================
+
+[template.wait_subscribe]
+description = "Wait for it with subscribe CTA"
+
+[template.wait_subscribe.motion]
+slow_zoom = { start = 1.0, end = 1.06 }
+
+[[template.wait_subscribe.captions]]
+pool = "hooks.wait"
+position = "main"
+start = 0
+end = 4.0
+effects = { fade_in = 300, fade_out = 400 }
+
+[[template.wait_subscribe.captions]]
+pool = "engagement.subscribe"
+position = "main"
+start = "end-4"
+end = "end-0.5"
+effects = { fade_in = 300, fade_out = 400 }
+
+
+# =============================================================================
+# TEMPLATE: challenge_question
+# Challenge hook + engagement question at end
+# =============================================================================
+
+[template.challenge_question]
+description = "Challenge with engagement question"
+
+[template.challenge_question.motion]
+slow_zoom = { start = 1.0, end = 1.06 }
+
+[[template.challenge_question.captions]]
+pool = "hooks.challenge"
+position = "hook"
+start = 0
+end = 4.0
+effects = { fade_in = 150, fade_out = 300 }
+
+[[template.challenge_question.captions]]
+pool = "engagement.question"
+position = "main"
+start = "end-4"
+end = "end-0.5"
+effects = { fade_in = 300, fade_out = 400 }
+
+
+# =============================================================================
+# TEMPLATE: silent_tease
+# No opening text, just tease at end
+# =============================================================================
+
+[template.silent_tease]
+description = "Silent with end tease"
+
+[template.silent_tease.motion]
+slow_zoom = { start = 1.0, end = 1.1 }
+
+[[template.silent_tease.captions]]
+pool = "engagement.tease"
+position = "main"
+start = "end-4"
+end = "end-0.5"
+effects = { fade_in = 300, fade_out = 400 }
+

@@ -65,17 +65,35 @@ def setup_logging(log_file: Optional[Path] = None, verbose: bool = False) -> Non
     )
 
 
-def get_video_path(video_dir: Path) -> Path:
+def get_video_path(video_dir: Path, for_upload: bool = False) -> Path:
     """Get the appropriate video file from a directory.
 
-    Prefers video.mp4, falls back to video_raw.mp4.
+    For upload: prefers most processed version (with music > processed > with music only > raw)
+    For processing: prefers video.mp4 > video_raw.mp4
+
+    Priority for upload:
+        1. video_processed_final.mp4 (processed + music)
+        2. video_processed.mp4 (processed, no music)
+        3. video.mp4 (with music only)
+        4. video_raw.mp4 (original)
     """
-    video_path = video_dir / "video.mp4"
-    if video_path.exists():
-        return video_path
-    raw_path = video_dir / "video_raw.mp4"
-    if raw_path.exists():
-        return raw_path
+    if for_upload:
+        # Prefer most processed version for upload
+        candidates = [
+            "video_processed_final.mp4",
+            "video_processed.mp4",
+            "video.mp4",
+            "video_raw.mp4",
+        ]
+    else:
+        # For processing, prefer video.mp4 (may have music) > raw
+        candidates = ["video.mp4", "video_raw.mp4"]
+
+    for name in candidates:
+        path = video_dir / name
+        if path.exists():
+            return path
+
     raise FileNotFoundError(f"No video file found in {video_dir}")
 
 
@@ -494,21 +512,23 @@ def music_sync(video_dir: Path, music_dir: Optional[Path]):
 def upload(video_dir: Path, credentials: Optional[Path], privacy: str, dry_run: bool):
     """Upload a single video from VIDEO_DIR.
 
-    VIDEO_DIR must contain metadata.json and video.mp4.
+    VIDEO_DIR must contain metadata.json and a video file.
+    Prefers processed videos: video_processed_final.mp4 > video_processed.mp4 > video.mp4
     """
     # Resolve credentials directory from config
     user_config = get_config()
     resolved_credentials = user_config.get_credentials_dir(credentials)
 
     metadata_path = video_dir / "metadata.json"
-    video_path = video_dir / "video.mp4"
 
     if not metadata_path.exists():
         console.print(f"[red]Error:[/red] metadata.json not found in {video_dir}")
         raise SystemExit(1)
 
-    if not video_path.exists():
-        console.print(f"[red]Error:[/red] video.mp4 not found in {video_dir}")
+    try:
+        video_path = get_video_path(video_dir, for_upload=True)
+    except FileNotFoundError:
+        console.print(f"[red]Error:[/red] No video file found in {video_dir}")
         raise SystemExit(1)
 
     # Load metadata and generate YouTube metadata
@@ -684,7 +704,18 @@ def batch(
             continue
 
         title = generate_title(metadata)
+
+        # Find best video file
+        try:
+            video_path = get_video_path(video_dir, for_upload=True)
+        except FileNotFoundError:
+            console.print(f"  [red]No video file found[/red]")
+            logger.error(f"{video_dir.name}: No video file found")
+            results.append((video_dir.name, None, "No video file"))
+            continue
+
         console.print(f"  Title: {title}")
+        console.print(f"  Video: {video_path.name}")
 
         if dry_run:
             results.append((video_dir.name, "dry-run", title))
@@ -695,7 +726,7 @@ def batch(
 
         try:
             video_id = uploader.upload(
-                video_path=video_dir / "video.mp4",
+                video_path=video_path,
                 title=title,
                 description=description,
                 tags=tags,

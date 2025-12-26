@@ -17,37 +17,56 @@ TITLE_TEMPLATES = [
     "The Butterfly Effect with {count_formatted} Pendulums",
 ]
 
-# Description Templates
+# Description Templates - mix of minimal and detailed
+# Note: {boom_time} is VIDEO time (when it appears on screen), not simulation time
 DESCRIPTION_TEMPLATES = [
+    # Minimal - engagement focused
     """\
-Watch {count_formatted} double pendulums start nearly identical, then diverge into beautiful chaos.
+{count_formatted} pendulums. One tiny difference. Pure chaos. 🌀
 
-This simulation demonstrates the butterfly effect - tiny differences in initial conditions lead to completely different outcomes. Each pendulum started with angles differing by a fraction of a degree.
+Wait for {boom_time} 👀
 
-Simulation Details:
-- Pendulum count: {pendulum_count:,}
-- Physics duration: {duration:.1f} seconds
-- Playback speed: {speed:.1f}x
-- Resolution: {width}x{height}
-- Chaos begins at: {boom_time}
+#doublependulum #chaos #physics #satisfying #butterflyeffect""",
 
-Created with custom C++/OpenGL simulation software.
-
-#doublependulum #chaos #physics #simulation #satisfying #butterflyeffect""",
+    # Short and punchy
     """\
-A mesmerizing visualization of chaos theory in action.
+What happens when {count_formatted} pendulums start almost identical?
 
-{count_formatted} double pendulums, each starting from almost identical positions, quickly diverge into a stunning display of chaotic motion. The "boom" - when chaos visibly emerges - happens around {boom_time}.
+Chaos. Beautiful, beautiful chaos.
 
-Technical specs:
-- {pendulum_count:,} individual pendulum simulations
-- {duration:.1f}s of physics at {speed:.1f}x speed
-- High-precision RK4 integration ({substeps} substeps/frame)
-- {width}x{height} resolution
+The moment everything changes: {boom_time}
 
-The colors represent each pendulum's position in the initial lineup, creating a rainbow of chaos.
+#physics #simulation #chaostheory #satisfying #mesmerizing""",
 
-#physics #simulation #doublependulum #chaostheory #satisfying #hypnotic #mesmerizing""",
+    # Engagement hook
+    """\
+This is the butterfly effect visualized.
+
+{count_formatted} double pendulums, each starting just 0.00001° apart.
+
+Watch what happens at {boom_time} 🔥
+
+Like & Subscribe for more physics simulations!
+
+#doublependulum #chaos #physics #satisfying #butterflyeffect""",
+
+    # Educational but brief
+    """\
+{count_formatted} double pendulums demonstrating chaos theory.
+
+They start nearly identical, but tiny differences compound exponentially. By {boom_time}, they've completely diverged.
+
+This is why weather prediction is so hard.
+
+#physics #chaostheory #simulation #doublependulum #satisfying""",
+
+    # Minimal mystique
+    """\
+Order → Chaos
+
+{count_formatted} pendulums. {boom_time}.
+
+#doublependulum #chaos #satisfying #physics""",
 ]
 
 # Base tags (always included)
@@ -113,19 +132,19 @@ def generate_description(metadata: VideoMetadata) -> str:
     """Generate a random description from templates."""
     template = random.choice(DESCRIPTION_TEMPLATES)
 
+    # Use VIDEO time (boom_frame / fps), not simulation time
     boom_time = "N/A"
-    if metadata.boom_seconds is not None:
-        boom_time = f"{metadata.boom_seconds:.1f}s"
+    if metadata.results and metadata.results.boom_frame:
+        video_boom_seconds = metadata.results.boom_frame / metadata.config.video_fps
+        boom_time = f"{video_boom_seconds:.0f}s"
+    elif metadata.boom_seconds is not None:
+        # Fallback to simulation time if no boom_frame
+        boom_time = f"{metadata.boom_seconds:.0f}s"
 
     return template.format(
         count_formatted=format_count(metadata.config.pendulum_count),
         pendulum_count=metadata.config.pendulum_count,
-        duration=metadata.config.duration_seconds,
-        speed=metadata.simulation_speed,
-        width=metadata.config.width,
-        height=metadata.config.height,
         boom_time=boom_time,
-        substeps=metadata.config.substeps,
     )
 
 

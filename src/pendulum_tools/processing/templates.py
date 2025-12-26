@@ -294,7 +294,12 @@ def resolve_timing_ms(
     """Resolve a timing expression to milliseconds.
 
     Args:
-        time_expr: Time expression (float seconds, or "boom", "boom+1", "boom-0.5")
+        time_expr: Time expression:
+            - float: absolute seconds
+            - "boom": boom time
+            - "boom+N" or "boom-N": relative to boom
+            - "end": video end
+            - "end-N": N seconds before end
         boom_seconds: Boom time in seconds
         video_duration: Video duration in seconds
 
@@ -311,6 +316,12 @@ def resolve_timing_ms(
 
     if expr == "boom":
         return int(boom_seconds * 1000)
+
+    # Parse end-N (seconds before end)
+    match = re.match(r"end\s*-\s*(\d+\.?\d*)", expr)
+    if match:
+        offset = float(match.group(1))
+        return int((video_duration - offset) * 1000)
 
     # Parse boom+N or boom-N
     match = re.match(r"boom\s*([+-])\s*(\d+\.?\d*)", expr)

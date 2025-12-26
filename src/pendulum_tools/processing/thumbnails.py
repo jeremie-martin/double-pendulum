@@ -7,30 +7,25 @@ from pathlib import Path
 from typing import Optional
 
 from .ffmpeg import extract_frame
-from ..constants import PRE_BOOM_OFFSET_SECONDS
 
 logger = logging.getLogger(__name__)
+
+# Offset after boom for thumbnail (video time)
+POST_BOOM_THUMBNAIL_OFFSET = 1.0
 
 
 def extract_thumbnails(
     video_path: Path,
     output_dir: Path,
-    boom_seconds: Optional[float] = None,
-    best_frame_seconds: Optional[float] = None,
+    video_boom_seconds: Optional[float] = None,
     video_duration: Optional[float] = None,
 ) -> list[Path]:
-    """Extract key frames as thumbnail images.
-
-    Extracts thumbnails at significant moments:
-    - pre_boom: PRE_BOOM_OFFSET_SECONDS before boom (tension moment)
-    - boom: Exact moment of chaos emergence
-    - best_caustic: Frame with peak causticness (if score available)
+    """Extract thumbnail at 1 second after boom (in video time).
 
     Args:
         video_path: Path to input video
         output_dir: Directory to save thumbnails
-        boom_seconds: Time of boom in seconds (from metadata)
-        best_frame_seconds: Time of best causticness frame
+        video_boom_seconds: Time of boom in VIDEO seconds (boom_frame / fps)
         video_duration: Total video duration (for bounds checking)
 
     Returns:
@@ -39,42 +34,28 @@ def extract_thumbnails(
     output_dir.mkdir(parents=True, exist_ok=True)
     thumbnails: list[Path] = []
 
-    # Define extraction points
-    extractions: list[tuple[str, Optional[float]]] = []
+    # Calculate thumbnail time: 1s after boom (video time)
+    if video_boom_seconds is not None:
+        thumbnail_time = video_boom_seconds + POST_BOOM_THUMBNAIL_OFFSET
+    elif video_duration:
+        # Fallback: middle of video
+        thumbnail_time = video_duration / 2
+    else:
+        logger.warning("No boom time or video duration - cannot extract thumbnail")
+        return thumbnails
 
-    if boom_seconds is not None:
-        # Pre-boom: offset before (but not negative)
-        pre_boom_time = max(0.0, boom_seconds - PRE_BOOM_OFFSET_SECONDS)
-        extractions.append(("pre_boom", pre_boom_time))
+    # Bounds check
+    if video_duration and thumbnail_time > video_duration:
+        thumbnail_time = max(0.1, video_duration - 0.5)
 
-        # Boom moment
-        extractions.append(("boom", boom_seconds))
+    output_path = output_dir / "thumbnail.jpg"
 
-    if best_frame_seconds is not None:
-        # Best causticness frame
-        extractions.append(("best_caustic", best_frame_seconds))
-
-    # If no boom info, try to get a mid-video frame
-    if not extractions and video_duration:
-        extractions.append(("mid", video_duration / 2))
-
-    # Extract each thumbnail
-    for name, timestamp in extractions:
-        if timestamp is None:
-            continue
-
-        # Bounds check
-        if video_duration and timestamp > video_duration:
-            timestamp = video_duration - 0.1
-
-        output_path = output_dir / f"thumbnail_{name}.jpg"
-
-        try:
-            extract_frame(video_path, output_path, timestamp)
-            thumbnails.append(output_path)
-        except Exception as e:
-            # Log but don't fail on individual thumbnail errors
-            logger.warning(f"Failed to extract {name} thumbnail: {e}")
+    try:
+        extract_frame(video_path, output_path, thumbnail_time)
+        thumbnails.append(output_path)
+        logger.info(f"Extracted thumbnail at {thumbnail_time:.1f}s")
+    except Exception as e:
+        logger.warning(f"Failed to extract thumbnail: {e}")
 
     return thumbnails
 

@@ -296,15 +296,22 @@ class ProcessingPipeline:
                 template_used=template_name,
             )
 
-        # Extract thumbnails
+        # Extract thumbnails (using VIDEO time, not simulation time)
         thumbnails: list[Path] = []
         if self.config.extract_thumbnails:
+            # Calculate video boom time from boom_frame / fps
+            video_boom_seconds = None
+            if (self.metadata.results and self.metadata.results.boom_frame
+                    and self.metadata.config.video_fps):
+                video_boom_seconds = (
+                    self.metadata.results.boom_frame / self.metadata.config.video_fps
+                )
+
             try:
                 thumbnails = extract_thumbnails(
                     self.input_video,
                     output_dir,
-                    boom_seconds=self.metadata.boom_seconds,
-                    best_frame_seconds=self.metadata.best_frame_seconds,
+                    video_boom_seconds=video_boom_seconds,
                     video_duration=self.metadata.video_duration,
                 )
             except Exception as e:
