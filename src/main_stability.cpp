@@ -175,8 +175,14 @@ SimulationRun runSimulation(
             }
         }
 
-        // Update metrics with full state (includes positions for spatial metrics)
+        // Update metrics with full pendulum data (includes velocities for velocity metrics)
+        // Note: We use updateFromPendulums instead of updateFromStates because
+        // velocity-based metrics require omega1/omega2 which are only in Pendulum objects
         collector.beginFrame(frame);
+        collector.updateFromPendulums(pendulums);
+
+        // Also need to compute position-based metrics (spatial concentration, etc.)
+        // which require x2/y2 coordinates
         collector.updateFromStates(states);
         collector.endFrame();
 

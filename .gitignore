@@ -50,3 +50,7 @@ youtube-uploader/.venv/
 uv.lock
 
 eval
+
+# Stability analysis output
+stability*.csv
+stability_report*/

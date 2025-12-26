@@ -34,18 +34,6 @@ GRADE_COLORS <- c(
   "F"  = "#8e44ad"
 )
 
-METRIC_CATEGORIES <- list(
-  "Basic Statistics" = c("variance", "circular_spread", "spread_ratio", "angular_range"),
-  "Causticness (Sector)" = c("angular_causticness", "tip_causticness", "cv_causticness",
-                              "organization_causticness", "r1_concentration",
-                              "r2_concentration", "joint_concentration"),
-  "Causticness (Spatial)" = c("spatial_concentration", "fold_causticness"),
-  "Local Coherence" = c("trajectory_smoothness", "curvature", "true_folds", "local_coherence"),
-  "Velocity" = c("velocity_dispersion", "velocity_bimodality", "speed_variance",
-                 "angular_momentum_spread", "acceleration_dispersion"),
-  "Other" = c("total_energy")
-)
-
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
@@ -56,15 +44,6 @@ get_grade <- function(cv) {
   ifelse(cv < THRESHOLDS$acceptable, "B",
   ifelse(cv < THRESHOLDS$marginal, "C",
   ifelse(cv < THRESHOLDS$poor, "D", "F")))))
-}
-
-get_category <- function(metric) {
-  for (cat_name in names(METRIC_CATEGORIES)) {
-    if (metric %in% METRIC_CATEGORIES[[cat_name]]) {
-      return(cat_name)
-    }
-  }
-  return("Other")
 }
 
 theme_stability <- function() {
@@ -168,10 +147,7 @@ compute_metric_summary <- function(data) {
       unstable_pct = mean(value > 0.10, na.rm = TRUE) * 100,
       .groups = "drop"
     ) %>%
-    mutate(
-      grade = get_grade(mean_cv),
-      category = sapply(metric, get_category)
-    ) %>%
+    mutate(grade = get_grade(mean_cv)) %>%
     arrange(mean_cv)
 
   cv_data
@@ -293,23 +269,6 @@ plot_heatmap <- function(data, summary_data) {
       y = NULL
     ) +
     theme_stability()
-}
-
-plot_category_comparison <- function(summary_data) {
-  ggplot(summary_data, aes(x = category, y = mean_cv * 100, fill = category)) +
-    geom_boxplot(alpha = 0.7) +
-    geom_jitter(aes(color = grade), width = 0.2, size = 3) +
-    scale_color_manual(values = GRADE_COLORS, name = "Grade") +
-    scale_fill_viridis_d(guide = "none") +
-    scale_y_log10(labels = function(x) paste0(x, "%")) +
-    labs(
-      title = "Stability by Metric Category",
-      subtitle = "Comparing different types of metrics",
-      x = NULL,
-      y = "Mean CV (%, log scale)"
-    ) +
-    theme_stability() +
-    theme(axis.text.x = element_text(angle = 30, hjust = 1))
 }
 
 # Plot metric values across N (the key comparison plot)
@@ -651,7 +610,7 @@ generate_report <- function(csv_path, output_dir = NULL) {
   print_data$mean_cv <- sprintf("%.2f%%", print_data$mean_cv * 100)
   print_data$max_cv <- sprintf("%.2f%%", print_data$max_cv * 100)
   print_data$unstable_pct <- sprintf("%.1f%%", print_data$unstable_pct)
-  print(print_data[, c("metric", "mean_cv", "max_cv", "unstable_pct", "grade", "category")])
+  print(print_data[, c("metric", "mean_cv", "max_cv", "unstable_pct", "grade")])
 
   # Print absolute value analysis if available
   if (!is.null(abs_summary)) {
@@ -710,13 +669,6 @@ generate_report <- function(csv_path, output_dir = NULL) {
   }
   plot_num <- plot_num + 1
 
-  # 5. Category comparison
-  cat(sprintf("%d. Category comparison...\n", plot_num))
-  p5 <- plot_category_comparison(summary_data)
-  ggsave(file.path(report_dir, sprintf("%02d_category_comparison.png", plot_num)), p5,
-         width = 10, height = 6, dpi = 300)
-  plot_num <- plot_num + 1
-
   # === ABSOLUTE VALUE ANALYSIS PLOTS ===
   cat(sprintf("%d. Scale sensitivity analysis...\n", plot_num))
   if (!is.null(abs_summary)) {
@@ -747,8 +699,8 @@ generate_report <- function(csv_path, output_dir = NULL) {
   plot_num <- plot_num + 1
 
   cat(sprintf("%d. Value scaling (causticness metrics)...\n", plot_num))
-  causticness_metrics <- c("angular_causticness", "tip_causticness", "cv_causticness",
-                           "organization_causticness", "spatial_concentration", "fold_causticness")
+  # Dynamically find causticness metrics from the data
+  causticness_metrics <- data$metrics[grepl("caustic|concentration", data$metrics)]
   p_scale <- plot_value_vs_n(per_n_stats, causticness_metrics)
   if (!is.null(p_scale)) {
     ggsave(file.path(report_dir, sprintf("%02d_value_scaling_causticness.png", plot_num)), p_scale,
@@ -829,18 +781,17 @@ generate_index <- function(report_dir, metrics_dir, metrics, summary_data, abs_s
     <div class="plot-container"><img src="02_stability_heatmap.png" alt="Stability Heatmap"></div>
     <div class="plot-container"><img src="03_cv_timeseries_stable.png" alt="CV Timeseries (Stable)"></div>
     <div class="plot-container"><img src="04_cv_timeseries_unstable.png" alt="CV Timeseries (Unstable)"></div>
-    <div class="plot-container"><img src="05_category_comparison.png" alt="Category Comparison"></div>
   </div>
 
   <h2>Absolute Value Analysis</h2>
   <p>These plots show how the <strong>actual metric values</strong> (not just relative stability) change with pendulum count.
   Critical for threshold-based detection methods that depend on absolute values.</p>
   <div class="plot-grid">
-    <div class="plot-container"><img src="06_scale_sensitivity.png" alt="Scale Sensitivity"></div>
-    <div class="plot-container"><img src="07_convergence_analysis.png" alt="Convergence Analysis"></div>
-    <div class="plot-container"><img src="08_deviation_heatmap.png" alt="Deviation Heatmap"></div>
-    <div class="plot-container"><img src="09_value_scaling_causticness.png" alt="Value Scaling (Causticness)"></div>
-    <div class="plot-container"><img src="10_absolute_values_midpoint.png" alt="Absolute Values at Midpoint"></div>
+    <div class="plot-container"><img src="05_scale_sensitivity.png" alt="Scale Sensitivity"></div>
+    <div class="plot-container"><img src="06_convergence_analysis.png" alt="Convergence Analysis"></div>
+    <div class="plot-container"><img src="07_deviation_heatmap.png" alt="Deviation Heatmap"></div>
+    <div class="plot-container"><img src="08_value_scaling_causticness.png" alt="Value Scaling (Causticness)"></div>
+    <div class="plot-container"><img src="09_absolute_values_midpoint.png" alt="Absolute Values at Midpoint"></div>
   </div>
 '
 
