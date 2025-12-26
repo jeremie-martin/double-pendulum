@@ -166,6 +166,8 @@ private:
     mutable std::vector<double> angle2_buf_;
     mutable std::vector<double> x2_buf_;
     mutable std::vector<double> y2_buf_;
+    mutable std::vector<double> w1_buf_;
+    mutable std::vector<double> w2_buf_;
 
     // Maximum spread_history size (0 = unlimited)
     // For long-running GUI, keeps memory bounded (~40 bytes per entry)

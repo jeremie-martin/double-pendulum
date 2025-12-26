@@ -5,7 +5,8 @@
 
 struct PendulumState {
     double x1, y1, x2, y2; // Cartesian positions
-    double th1, th2;       // Angles (for boom detection)
+    double th1, th2;       // Angles (radians)
+    double w1, w2;         // Angular velocities (rad/s)
 };
 
 class Pendulum {
@@ -152,6 +153,6 @@ private:
         double y1 = L1 * cos_th1;
         double x2 = x1 + L2 * sin_th2;
         double y2 = y1 + L2 * cos_th2;
-        return {x1, y1, x2, y2, th1, th2};
+        return {x1, y1, x2, y2, th1, th2, w1, w2};
     }
 };

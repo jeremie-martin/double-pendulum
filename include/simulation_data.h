@@ -15,7 +15,7 @@ namespace simulation_data {
 
 // Magic number: "PNDL" + version bytes
 constexpr char MAGIC[8] = {'P', 'N', 'D', 'L', 0x01, 0x00, 0x00, 0x00};
-constexpr uint32_t FORMAT_VERSION = 1;
+constexpr uint32_t FORMAT_VERSION = 2;
 
 // Header structure (fixed size for easy seeking)
 // All multi-byte values are little-endian
@@ -42,7 +42,7 @@ struct Header {
     double angle_variation;
 
     // Data layout info
-    uint32_t floats_per_pendulum;  // Always 6: x1, y1, x2, y2, th1, th2
+    uint32_t floats_per_pendulum;  // v2: 8 floats: x1, y1, x2, y2, th1, th2, w1, w2
     uint64_t uncompressed_size;    // Total bytes of frame data before compression
     uint64_t compressed_size;      // Size of ZSTD-compressed payload
 
@@ -56,17 +56,18 @@ struct Header {
 
 static_assert(sizeof(Header) == 144, "Header must be exactly 144 bytes");
 
-// Packed pendulum state for serialization (24 bytes per pendulum)
+// Packed pendulum state for serialization (32 bytes per pendulum)
 struct PackedState {
     float x1, y1, x2, y2;  // Cartesian positions
     float th1, th2;        // Angles (radians)
+    float w1, w2;          // Angular velocities (rad/s)
 
     PackedState() = default;
     explicit PackedState(PendulumState const& state);
     PendulumState toPendulumState() const;
 };
 
-static_assert(sizeof(PackedState) == 24, "PackedState must be 24 bytes");
+static_assert(sizeof(PackedState) == 32, "PackedState must be 32 bytes");
 
 // Writer for streaming frame data to disk with ZSTD compression
 class Writer {

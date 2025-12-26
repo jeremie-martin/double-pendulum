@@ -17,7 +17,7 @@ Header::Header() {
     std::memset(this, 0, sizeof(Header));
     std::memcpy(magic, MAGIC, 8);
     format_version = FORMAT_VERSION;
-    floats_per_pendulum = 6;
+    floats_per_pendulum = 8;
 }
 
 void Header::initFromConfig(Config const& config, uint32_t total_frames) {
@@ -40,7 +40,7 @@ void Header::initFromConfig(Config const& config, uint32_t total_frames) {
     initial_velocity2 = config.physics.initial_velocity2;
     angle_variation = config.simulation.angle_variation;
 
-    floats_per_pendulum = 6;
+    floats_per_pendulum = 8;
     uncompressed_size = static_cast<uint64_t>(pendulum_count) * frame_count *
                         floats_per_pendulum * sizeof(float);
     compressed_size = 0;  // Set after compression
@@ -48,15 +48,25 @@ void Header::initFromConfig(Config const& config, uint32_t total_frames) {
 
 bool Header::validate() const {
     if (std::memcmp(magic, MAGIC, 4) != 0) {
-        return false;  // Magic mismatch
-    }
-    if (format_version > FORMAT_VERSION) {
-        return false;  // Unsupported version
-    }
-    if (pendulum_count == 0 || frame_count == 0) {
+        std::cerr << "Error: Invalid simulation data file (magic mismatch)\n";
         return false;
     }
-    if (floats_per_pendulum != 6) {
+    if (format_version != FORMAT_VERSION) {
+        std::cerr << "Error: Unsupported format version " << format_version
+                  << " (expected " << FORMAT_VERSION << ")\n";
+        if (format_version < FORMAT_VERSION) {
+            std::cerr << "This file was created with an older version. "
+                      << "Please re-run the simulation with --save-data to generate a v2 file.\n";
+        }
+        return false;
+    }
+    if (pendulum_count == 0 || frame_count == 0) {
+        std::cerr << "Error: Invalid pendulum/frame count in header\n";
+        return false;
+    }
+    if (floats_per_pendulum != 8) {
+        std::cerr << "Error: Expected 8 floats per pendulum (v2 format), got "
+                  << floats_per_pendulum << "\n";
         return false;
     }
     return true;
@@ -70,7 +80,9 @@ PackedState::PackedState(PendulumState const& state)
     , x2(static_cast<float>(state.x2))
     , y2(static_cast<float>(state.y2))
     , th1(static_cast<float>(state.th1))
-    , th2(static_cast<float>(state.th2)) {}
+    , th2(static_cast<float>(state.th2))
+    , w1(static_cast<float>(state.w1))
+    , w2(static_cast<float>(state.w2)) {}
 
 PendulumState PackedState::toPendulumState() const {
     PendulumState state;
@@ -80,6 +92,8 @@ PendulumState PackedState::toPendulumState() const {
     state.y2 = static_cast<double>(y2);
     state.th1 = static_cast<double>(th1);
     state.th2 = static_cast<double>(th2);
+    state.w1 = static_cast<double>(w1);
+    state.w2 = static_cast<double>(w2);
     return state;
 }
 
@@ -116,7 +130,7 @@ void Writer::writeFrame(std::vector<PendulumState> const& states) {
         return;
     }
 
-    // Append packed state data to buffer
+    // Append packed state data to buffer (8 floats per pendulum)
     for (auto const& state : states) {
         buffer_.push_back(static_cast<float>(state.x1));
         buffer_.push_back(static_cast<float>(state.y1));
@@ -124,6 +138,8 @@ void Writer::writeFrame(std::vector<PendulumState> const& states) {
         buffer_.push_back(static_cast<float>(state.y2));
         buffer_.push_back(static_cast<float>(state.th1));
         buffer_.push_back(static_cast<float>(state.th2));
+        buffer_.push_back(static_cast<float>(state.w1));
+        buffer_.push_back(static_cast<float>(state.w2));
     }
 
     frames_written_++;

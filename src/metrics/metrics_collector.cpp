@@ -614,6 +614,30 @@ void MetricsCollector::updateFromStates(std::vector<PendulumState> const& states
 
     double local_coherence = computeLocalCoherence(x2s, y2s);
     setMetric(MetricNames::LocalCoherence, local_coherence);
+
+    // === Velocity-based metrics ===
+    // Now that PendulumState includes w1/w2, we can compute velocity metrics
+    std::vector<double> w1s, w2s;
+    w1s.reserve(states.size());
+    w2s.reserve(states.size());
+    for (auto const& s : states) {
+        w1s.push_back(s.w1);
+        w2s.push_back(s.w2);
+    }
+
+    // Physics constants (fixed in this codebase)
+    constexpr double L1 = 1.0, L2 = 1.0, M1 = 1.0, M2 = 1.0, G = 9.81;
+
+    std::vector<double> vx2s, vy2s;
+    computeTipVelocities(angle1s, angle2s, w1s, w2s, L1, L2, vx2s, vy2s);
+
+    setMetric(MetricNames::VelocityDispersion, computeVelocityDispersion(vx2s, vy2s));
+    setMetric(MetricNames::SpeedVariance, computeSpeedVariance(vx2s, vy2s));
+    setMetric(MetricNames::VelocityBimodality, computeVelocityBimodality(vx2s, vy2s));
+    setMetric(MetricNames::AngularMomentumSpread,
+              computeAngularMomentumSpread(angle1s, angle2s, w1s, w2s, L1, L2, M1, M2));
+    setMetric(MetricNames::AccelerationDispersion,
+              computeAccelerationDispersion(angle1s, angle2s, w1s, w2s, L1, L2, G));
 }
 
 void MetricsCollector::updateFromPackedStates(
@@ -625,6 +649,8 @@ void MetricsCollector::updateFromPackedStates(
     angle2_buf_.resize(count);
     x2_buf_.resize(count);
     y2_buf_.resize(count);
+    w1_buf_.resize(count);
+    w2_buf_.resize(count);
 
     // Extract data from packed states (float -> double)
     for (size_t i = 0; i < count; ++i) {
@@ -632,6 +658,8 @@ void MetricsCollector::updateFromPackedStates(
         angle2_buf_[i] = static_cast<double>(states[i].th2);
         x2_buf_[i] = static_cast<double>(states[i].x2);
         y2_buf_[i] = static_cast<double>(states[i].y2);
+        w1_buf_[i] = static_cast<double>(states[i].w1);
+        w2_buf_[i] = static_cast<double>(states[i].w2);
     }
 
     // Call existing angle-based computations (variance, spread, angular_causticness)
@@ -675,6 +703,21 @@ void MetricsCollector::updateFromPackedStates(
 
     double local_coherence = computeLocalCoherence(x2_buf_, y2_buf_);
     setMetric(MetricNames::LocalCoherence, local_coherence);
+
+    // === Velocity-based metrics ===
+    // Physics constants (fixed in this codebase)
+    constexpr double L1 = 1.0, L2 = 1.0, M1 = 1.0, M2 = 1.0, G = 9.81;
+
+    std::vector<double> vx2s, vy2s;
+    computeTipVelocities(angle1_buf_, angle2_buf_, w1_buf_, w2_buf_, L1, L2, vx2s, vy2s);
+
+    setMetric(MetricNames::VelocityDispersion, computeVelocityDispersion(vx2s, vy2s));
+    setMetric(MetricNames::SpeedVariance, computeSpeedVariance(vx2s, vy2s));
+    setMetric(MetricNames::VelocityBimodality, computeVelocityBimodality(vx2s, vy2s));
+    setMetric(MetricNames::AngularMomentumSpread,
+              computeAngularMomentumSpread(angle1_buf_, angle2_buf_, w1_buf_, w2_buf_, L1, L2, M1, M2));
+    setMetric(MetricNames::AccelerationDispersion,
+              computeAccelerationDispersion(angle1_buf_, angle2_buf_, w1_buf_, w2_buf_, L1, L2, G));
 }
 
 double MetricsCollector::computeCausticnessFromAngles(
