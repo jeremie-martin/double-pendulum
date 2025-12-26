@@ -1,4 +1,5 @@
 #include "metrics/metrics_collector.h"
+#include "metrics/metric_registry.h"
 #include "pendulum.h"
 #include "simulation_data.h"
 
@@ -42,43 +43,21 @@ void MetricsCollector::registerMetric(std::string const& name, MetricType type) 
 }
 
 void MetricsCollector::registerStandardMetrics() {
-    registerMetric(MetricNames::Variance, MetricType::Physics);
-    registerMetric(MetricNames::SpreadRatio, MetricType::Physics);
-    registerMetric(MetricNames::CircularSpread, MetricType::Physics);
-    registerMetric(MetricNames::AngularRange, MetricType::Physics);
-    registerMetric(MetricNames::TotalEnergy, MetricType::Physics);
-    registerMetric(MetricNames::AngularCausticness, MetricType::Physics);
-
-    // New caustic metrics
-    registerMetric(MetricNames::R1, MetricType::Physics);
-    registerMetric(MetricNames::R2, MetricType::Physics);
-    registerMetric(MetricNames::JointConcentration, MetricType::Physics);
-    registerMetric(MetricNames::TipCausticness, MetricType::Physics);
-    registerMetric(MetricNames::SpatialConcentration, MetricType::Physics);
-
-    // Alternative caustic metrics (experimental)
-    registerMetric(MetricNames::CVCausticness, MetricType::Physics);
-    registerMetric(MetricNames::OrganizationCausticness, MetricType::Physics);
-    registerMetric(MetricNames::FoldCausticness, MetricType::Physics);
-
-    // New paradigm metrics (local coherence based)
-    registerMetric(MetricNames::TrajectorySmoothness, MetricType::Physics);
-    registerMetric(MetricNames::Curvature, MetricType::Physics);
-    registerMetric(MetricNames::TrueFolds, MetricType::Physics);
-    registerMetric(MetricNames::LocalCoherence, MetricType::Physics);
-
-    // Velocity-based metrics (for boom detection)
-    registerMetric(MetricNames::VelocityDispersion, MetricType::Physics);
-    registerMetric(MetricNames::SpeedVariance, MetricType::Physics);
-    registerMetric(MetricNames::VelocityBimodality, MetricType::Physics);
-    registerMetric(MetricNames::AngularMomentumSpread, MetricType::Physics);
-    registerMetric(MetricNames::AccelerationDispersion, MetricType::Physics);
+    // Register all physics metrics from the central registry
+    for (auto const& m : METRIC_REGISTRY) {
+        if (m.source == MetricSource::Physics) {
+            registerMetric(m.name, MetricType::Physics);
+        }
+    }
 }
 
 void MetricsCollector::registerGPUMetrics() {
-    registerMetric(MetricNames::MaxValue, MetricType::GPU);
-    registerMetric(MetricNames::Brightness, MetricType::GPU);
-    registerMetric(MetricNames::Coverage, MetricType::GPU);
+    // Register all GPU metrics from the central registry
+    for (auto const& m : METRIC_REGISTRY) {
+        if (m.source == MetricSource::GPU) {
+            registerMetric(m.name, MetricType::GPU);
+        }
+    }
 }
 
 void MetricsCollector::beginFrame(int frame_number) {

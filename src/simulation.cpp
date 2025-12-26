@@ -2,6 +2,7 @@
 
 #include "enum_strings.h"
 #include "metrics/boom_detection.h"
+#include "metrics/metric_registry.h"
 #include "metrics/metrics_init.h"
 #include "optimize/frame_detector.h"
 #include "optimize/score_predictor.h"
@@ -383,97 +384,36 @@ void Simulation::saveMetricsCSV() {
         return;
     }
 
-    // Get all metric series (using metric names for consistency)
-    auto* variance = metrics_collector_.getMetric(metrics::MetricNames::Variance);
-    auto* circular_spread = metrics_collector_.getMetric(metrics::MetricNames::CircularSpread);
-    auto* spread_ratio = metrics_collector_.getMetric(metrics::MetricNames::SpreadRatio);
-    auto* angular_range = metrics_collector_.getMetric(metrics::MetricNames::AngularRange);
-    auto* angular_causticness =
-        metrics_collector_.getMetric(metrics::MetricNames::AngularCausticness);
-    // New caustic metrics
-    auto* r1 = metrics_collector_.getMetric(metrics::MetricNames::R1);
-    auto* r2 = metrics_collector_.getMetric(metrics::MetricNames::R2);
-    auto* joint_concentration =
-        metrics_collector_.getMetric(metrics::MetricNames::JointConcentration);
-    auto* tip_causticness = metrics_collector_.getMetric(metrics::MetricNames::TipCausticness);
-    auto* spatial_concentration =
-        metrics_collector_.getMetric(metrics::MetricNames::SpatialConcentration);
-    // Alternative caustic metrics (experimental)
-    auto* cv_causticness = metrics_collector_.getMetric(metrics::MetricNames::CVCausticness);
-    auto* organization = metrics_collector_.getMetric(metrics::MetricNames::OrganizationCausticness);
-    auto* fold_causticness = metrics_collector_.getMetric(metrics::MetricNames::FoldCausticness);
-    // New paradigm metrics (local coherence based)
-    auto* smoothness = metrics_collector_.getMetric(metrics::MetricNames::TrajectorySmoothness);
-    auto* curvature = metrics_collector_.getMetric(metrics::MetricNames::Curvature);
-    auto* true_folds = metrics_collector_.getMetric(metrics::MetricNames::TrueFolds);
-    auto* local_coherence = metrics_collector_.getMetric(metrics::MetricNames::LocalCoherence);
-    // Velocity-based metrics
-    auto* velocity_dispersion = metrics_collector_.getMetric(metrics::MetricNames::VelocityDispersion);
-    auto* speed_variance = metrics_collector_.getMetric(metrics::MetricNames::SpeedVariance);
-    auto* velocity_bimodality = metrics_collector_.getMetric(metrics::MetricNames::VelocityBimodality);
-    auto* angular_momentum_spread = metrics_collector_.getMetric(metrics::MetricNames::AngularMomentumSpread);
-    auto* acceleration_dispersion = metrics_collector_.getMetric(metrics::MetricNames::AccelerationDispersion);
-    // GPU and energy metrics
-    auto* brightness = metrics_collector_.getMetric(metrics::MetricNames::Brightness);
-    auto* coverage = metrics_collector_.getMetric(metrics::MetricNames::Coverage);
-    auto* total_energy = metrics_collector_.getMetric(metrics::MetricNames::TotalEnergy);
+    // Get canonical column order from registry
+    auto columns = metrics::getCSVColumns();
+    if (columns.empty()) return;
 
-    // Determine number of frames
-    size_t frame_count = variance ? variance->size() : 0;
-    if (frame_count == 0)
-        return;
+    // Determine frame count from first available metric
+    size_t frame_count = 0;
+    for (auto const* col : columns) {
+        if (auto const* series = metrics_collector_.getMetric(col)) {
+            frame_count = series->size();
+            break;
+        }
+    }
+    if (frame_count == 0) return;
 
-    // Helper to get value at frame
-    auto getValue = [](auto* series, size_t i) -> double {
-        return (series && i < series->size()) ? series->at(i) : 0.0;
-    };
-
-    // Write header - CANONICAL COLUMN ORDER for simulation metrics CSV
-    // This order is intentional and matches what downstream tools expect.
-    // Physics metrics first, then new caustic metrics, then velocity metrics, then GPU metrics, then energy.
-    out << "frame,variance,circular_spread,spread_ratio,angular_range,angular_causticness,"
-        << "r1_concentration,r2_concentration,joint_concentration,"
-        << "tip_causticness,spatial_concentration,"
-        << "cv_causticness,organization_causticness,fold_causticness,"
-        << "trajectory_smoothness,curvature,true_folds,local_coherence,"
-        << "velocity_dispersion,speed_variance,velocity_bimodality,"
-        << "angular_momentum_spread,acceleration_dispersion,"
-        << "brightness,coverage,total_energy\n";
+    // Write header
+    out << "frame";
+    for (auto const* col : columns) {
+        out << "," << col;
+    }
+    out << "\n";
     out << std::fixed << std::setprecision(6);
 
     // Write data
     for (size_t i = 0; i < frame_count; ++i) {
         out << i;
-        out << "," << getValue(variance, i);
-        out << "," << getValue(circular_spread, i);
-        out << "," << getValue(spread_ratio, i);
-        out << "," << getValue(angular_range, i);
-        out << "," << getValue(angular_causticness, i);
-        // New caustic metrics
-        out << "," << getValue(r1, i);
-        out << "," << getValue(r2, i);
-        out << "," << getValue(joint_concentration, i);
-        out << "," << getValue(tip_causticness, i);
-        out << "," << getValue(spatial_concentration, i);
-        // Alternative caustic metrics
-        out << "," << getValue(cv_causticness, i);
-        out << "," << getValue(organization, i);
-        out << "," << getValue(fold_causticness, i);
-        // New paradigm metrics
-        out << "," << getValue(smoothness, i);
-        out << "," << getValue(curvature, i);
-        out << "," << getValue(true_folds, i);
-        out << "," << getValue(local_coherence, i);
-        // Velocity-based metrics
-        out << "," << getValue(velocity_dispersion, i);
-        out << "," << getValue(speed_variance, i);
-        out << "," << getValue(velocity_bimodality, i);
-        out << "," << getValue(angular_momentum_spread, i);
-        out << "," << getValue(acceleration_dispersion, i);
-        // GPU and energy metrics
-        out << "," << getValue(brightness, i);
-        out << "," << getValue(coverage, i);
-        out << "," << getValue(total_energy, i);
+        for (auto const* col : columns) {
+            auto const* series = metrics_collector_.getMetric(col);
+            double value = (series && i < series->size()) ? series->at(i) : 0.0;
+            out << "," << value;
+        }
         out << "\n";
     }
 }

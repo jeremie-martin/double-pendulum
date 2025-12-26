@@ -4,6 +4,7 @@
 #include "headless_gl.h"
 #include "color_scheme.h"
 #include "metrics/metrics_collector.h"
+#include "metrics/metric_registry.h"
 #include "metrics/event_detector.h"
 #include "metrics/boom_detection.h"
 #include "metrics/causticness_analyzer.h"
@@ -218,40 +219,10 @@ int computePhysicsMetrics(Options const& opts,
         output_path = opts.data_path.parent_path() / "metrics_recomputed.csv";
     }
 
-    // Use explicit column order for reproducibility across tools
-    std::vector<std::string> const canonical_columns = {
-        metrics::MetricNames::Variance,
-        metrics::MetricNames::CircularSpread,
-        metrics::MetricNames::SpreadRatio,
-        metrics::MetricNames::AngularRange,
-        metrics::MetricNames::AngularCausticness,
-        // New caustic metrics
-        metrics::MetricNames::R1,
-        metrics::MetricNames::R2,
-        metrics::MetricNames::JointConcentration,
-        metrics::MetricNames::TipCausticness,
-        metrics::MetricNames::SpatialConcentration,
-        // Alternative caustic metrics
-        metrics::MetricNames::CVCausticness,
-        metrics::MetricNames::OrganizationCausticness,
-        metrics::MetricNames::FoldCausticness,
-        // New paradigm metrics
-        metrics::MetricNames::TrajectorySmoothness,
-        metrics::MetricNames::Curvature,
-        metrics::MetricNames::TrueFolds,
-        metrics::MetricNames::LocalCoherence,
-        // Velocity-based metrics
-        metrics::MetricNames::VelocityDispersion,
-        metrics::MetricNames::SpeedVariance,
-        metrics::MetricNames::VelocityBimodality,
-        metrics::MetricNames::AngularMomentumSpread,
-        metrics::MetricNames::AccelerationDispersion,
-        // GPU and energy metrics
-        metrics::MetricNames::Brightness,
-        metrics::MetricNames::Coverage,
-        metrics::MetricNames::TotalEnergy
-    };
-    collector.exportCSV(output_path.string(), canonical_columns);
+    // Use canonical column order from registry
+    auto csv_columns = metrics::getCSVColumns();
+    std::vector<std::string> columns(csv_columns.begin(), csv_columns.end());
+    collector.exportCSV(output_path.string(), columns);
     std::cout << "\nMetrics saved to: " << output_path << "\n";
 
     return 0;
@@ -398,40 +369,10 @@ int computeGPUMetrics(Options const& opts,
         output_path = opts.data_path.parent_path() / "metrics_recomputed.csv";
     }
 
-    // Use explicit column order for reproducibility across tools
-    std::vector<std::string> const canonical_columns = {
-        metrics::MetricNames::Variance,
-        metrics::MetricNames::CircularSpread,
-        metrics::MetricNames::SpreadRatio,
-        metrics::MetricNames::AngularRange,
-        metrics::MetricNames::AngularCausticness,
-        // New caustic metrics
-        metrics::MetricNames::R1,
-        metrics::MetricNames::R2,
-        metrics::MetricNames::JointConcentration,
-        metrics::MetricNames::TipCausticness,
-        metrics::MetricNames::SpatialConcentration,
-        // Alternative caustic metrics
-        metrics::MetricNames::CVCausticness,
-        metrics::MetricNames::OrganizationCausticness,
-        metrics::MetricNames::FoldCausticness,
-        // New paradigm metrics
-        metrics::MetricNames::TrajectorySmoothness,
-        metrics::MetricNames::Curvature,
-        metrics::MetricNames::TrueFolds,
-        metrics::MetricNames::LocalCoherence,
-        // Velocity-based metrics
-        metrics::MetricNames::VelocityDispersion,
-        metrics::MetricNames::SpeedVariance,
-        metrics::MetricNames::VelocityBimodality,
-        metrics::MetricNames::AngularMomentumSpread,
-        metrics::MetricNames::AccelerationDispersion,
-        // GPU and energy metrics
-        metrics::MetricNames::Brightness,
-        metrics::MetricNames::Coverage,
-        metrics::MetricNames::TotalEnergy
-    };
-    collector.exportCSV(output_path.string(), canonical_columns);
+    // Use canonical column order from registry
+    auto csv_columns = metrics::getCSVColumns();
+    std::vector<std::string> columns(csv_columns.begin(), csv_columns.end());
+    collector.exportCSV(output_path.string(), columns);
     std::cout << "\nMetrics saved to: " << output_path << "\n";
 
     return 0;
