@@ -183,6 +183,9 @@ class MainWindow(QMainWindow):
         self._setup_shortcuts()
         self._load_music_database()
 
+        # Ensure status bar is visible
+        self.statusBar().show()
+
         if batch_dir:
             self._load_batch(batch_dir)
         else:
