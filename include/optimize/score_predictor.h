@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <string>
+#include <vector>
 
 namespace optimize {
 
@@ -52,7 +54,7 @@ public:
         ScorePrediction result;
         result.method_used = params_.method;
 
-        // ConstantScore doesn't need analyzer - just return configured value
+        // ConstantScore doesn't need any data - just return configured value
         if (params_.method == ScoreMethod::ConstantScore) {
             result.score = std::clamp(params_.constant_score, 0.0, 1.0);
             return result;
@@ -64,7 +66,41 @@ public:
             return result;
         }
 
-        // Create and configure analyzer
+        // Get the raw metric series for boom-independent methods
+        auto const* metric_series = collector.getMetric(params_.metric_name);
+        if (!metric_series || metric_series->empty()) {
+            result.score = 0.0;
+            return result;
+        }
+        auto const& values = metric_series->values();
+
+        // Boom-independent methods: compute directly from values
+        switch (params_.method) {
+        case ScoreMethod::DynamicRange:
+            result.score = computeDynamicRange(values);
+            result.score = std::clamp(result.score, 0.0, 1.0);
+            return result;
+        case ScoreMethod::RiseTime:
+            result.score = computeRiseTime(values);
+            result.score = std::clamp(result.score, 0.0, 1.0);
+            return result;
+        case ScoreMethod::Smoothness:
+            result.score = computeSmoothness(values, frame_duration);
+            result.score = std::clamp(result.score, 0.0, 1.0);
+            return result;
+        case ScoreMethod::PreBoomContrast:
+            result.score = computePreBoomContrast(values, reference_frame, frame_duration);
+            result.score = std::clamp(result.score, 0.0, 1.0);
+            return result;
+        case ScoreMethod::BoomSteepness:
+            result.score = computeBoomSteepness(values, reference_frame, frame_duration);
+            result.score = std::clamp(result.score, 0.0, 1.0);
+            return result;
+        default:
+            break;
+        }
+
+        // Boom-dependent methods: use SignalAnalyzer
         metrics::SignalAnalyzer analyzer;
         analyzer.setMetricName(params_.metric_name);
         analyzer.setReferenceFrame(reference_frame);
@@ -145,6 +181,122 @@ private:
         }
 
         return weight_sum > 0 ? total / weight_sum : 0.0;
+    }
+
+    // ========================================================================
+    // Boom-independent score methods
+    // ========================================================================
+
+    // Dynamic range: (max - min) / max
+    // High score = high contrast/drama in the signal
+    static double computeDynamicRange(std::vector<double> const& values) {
+        if (values.empty()) return 0.0;
+
+        auto [min_it, max_it] = std::minmax_element(values.begin(), values.end());
+        double min_val = *min_it;
+        double max_val = *max_it;
+
+        if (max_val <= 0.0) return 0.0;
+        return (max_val - min_val) / max_val;
+    }
+
+    // Rise time: peak_frame / total_frames
+    // Low score = early peak (action happens quickly)
+    // High score = late peak (slow buildup)
+    // Inverted so early peak = high score (more dramatic)
+    static double computeRiseTime(std::vector<double> const& values) {
+        if (values.empty()) return 0.0;
+
+        auto max_it = std::max_element(values.begin(), values.end());
+        size_t peak_frame = static_cast<size_t>(std::distance(values.begin(), max_it));
+
+        // Invert: early peak = high score
+        double ratio = static_cast<double>(peak_frame) / static_cast<double>(values.size());
+        return 1.0 - ratio;
+    }
+
+    // Smoothness: 1 / (1 + mean_abs_second_derivative)
+    // High score = smooth signal, low score = noisy/jagged
+    static double computeSmoothness(std::vector<double> const& values, double frame_duration) {
+        if (values.size() < 3) return 1.0;  // Too short to measure
+
+        // Compute second derivative (central difference)
+        double sum_abs_d2 = 0.0;
+        double dt2 = frame_duration * frame_duration;
+
+        for (size_t i = 1; i + 1 < values.size(); ++i) {
+            double d2 = (values[i + 1] - 2.0 * values[i] + values[i - 1]) / dt2;
+            sum_abs_d2 += std::abs(d2);
+        }
+
+        double mean_abs_d2 = sum_abs_d2 / static_cast<double>(values.size() - 2);
+
+        // Normalize - empirically, values around 1000 are typical for "smooth"
+        // Scale factor makes typical smooth signals score ~0.8-0.9
+        double scaled = mean_abs_d2 / 10000.0;
+        return 1.0 / (1.0 + scaled);
+    }
+
+    // ========================================================================
+    // Boom-relative score methods
+    // ========================================================================
+
+    // Pre-boom contrast: 1 - (avg_before / peak)
+    // High score = quiet before boom (good contrast)
+    double computePreBoomContrast(std::vector<double> const& values,
+                                   int reference_frame,
+                                   double frame_duration) const {
+        if (values.empty() || reference_frame <= 0) return 0.0;
+
+        // Window before boom
+        int window_frames = static_cast<int>(params_.window_seconds / frame_duration);
+        int start = std::max(0, reference_frame - window_frames);
+        int end = std::min(reference_frame, static_cast<int>(values.size()));
+
+        if (start >= end) return 0.0;
+
+        // Average in pre-boom window
+        double sum = 0.0;
+        for (int i = start; i < end; ++i) {
+            sum += values[i];
+        }
+        double avg_before = sum / static_cast<double>(end - start);
+
+        // Peak value (at or near reference frame)
+        double peak = values[std::min(reference_frame, static_cast<int>(values.size()) - 1)];
+        if (peak <= 0.0) return 0.0;
+
+        // Contrast: how much quieter was it before?
+        double ratio = avg_before / peak;
+        return std::clamp(1.0 - ratio, 0.0, 1.0);
+    }
+
+    // Boom steepness: derivative_at_boom / max_derivative
+    // High score = sharp transition at boom
+    double computeBoomSteepness(std::vector<double> const& values,
+                                 int reference_frame,
+                                 double frame_duration) const {
+        if (values.size() < 3 || reference_frame < 1 ||
+            reference_frame >= static_cast<int>(values.size()) - 1) {
+            return 0.0;
+        }
+
+        // Derivative at boom (central difference)
+        double deriv_at_boom = (values[reference_frame + 1] - values[reference_frame - 1])
+                              / (2.0 * frame_duration);
+
+        // Find max derivative in the signal
+        double max_deriv = 0.0;
+        for (size_t i = 1; i + 1 < values.size(); ++i) {
+            double d = (values[i + 1] - values[i - 1]) / (2.0 * frame_duration);
+            max_deriv = std::max(max_deriv, std::abs(d));
+        }
+
+        if (max_deriv <= 0.0) return 0.0;
+
+        // Ratio of boom derivative to max derivative
+        // Use absolute value - steepness can be either direction
+        return std::clamp(std::abs(deriv_at_boom) / max_deriv, 0.0, 1.0);
     }
 };
 

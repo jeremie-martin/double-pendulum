@@ -48,7 +48,7 @@ struct PredictorDef {
 // All available prediction methods in one place.
 // Add new predictors here - they'll automatically appear in config parsing and UI.
 
-inline constexpr std::array<PredictorDef, 10> PREDICTOR_REGISTRY = {{
+inline constexpr std::array<PredictorDef, 15> PREDICTOR_REGISTRY = {{
     // ========================================================================
     // Frame Detection Methods (from FrameDetector)
     // ========================================================================
@@ -79,9 +79,8 @@ inline constexpr std::array<PredictorDef, 10> PREDICTOR_REGISTRY = {{
      PredictorType::Frame, PredictorCategory::Detection, false},
 
     // ========================================================================
-    // Score Prediction Methods (from SignalAnalyzer)
+    // Score Prediction Methods - Boom-dependent (require reference frame)
     // ========================================================================
-    // These compute quality scores (0-1) from signal analysis
 
     {"peak_clarity", "Clarity",
      "Peak dominance over competitors",
@@ -94,6 +93,38 @@ inline constexpr std::array<PredictorDef, 10> PREDICTOR_REGISTRY = {{
     {"composite", "Composite",
      "Weighted combination of scores",
      PredictorType::Score, PredictorCategory::Signal, true},
+
+    // ========================================================================
+    // Score Prediction Methods - Boom-independent (analyze full signal)
+    // ========================================================================
+
+    {"dynamic_range", "Range",
+     "(max-min)/max - signal drama/contrast",
+     PredictorType::Score, PredictorCategory::Signal, false},
+
+    {"rise_time", "Rise",
+     "How quickly peak is reached (early=high)",
+     PredictorType::Score, PredictorCategory::Signal, false},
+
+    {"smoothness", "Smooth",
+     "Signal smoothness (low noise=high)",
+     PredictorType::Score, PredictorCategory::Signal, false},
+
+    // ========================================================================
+    // Score Prediction Methods - Simple boom-relative
+    // ========================================================================
+
+    {"pre_boom_contrast", "Contrast",
+     "Quietness before boom (high=clean buildup)",
+     PredictorType::Score, PredictorCategory::Signal, true},
+
+    {"boom_steepness", "Steepness",
+     "Derivative at boom vs max (high=sharp)",
+     PredictorType::Score, PredictorCategory::Signal, true},
+
+    // ========================================================================
+    // Testing
+    // ========================================================================
 
     {"constant_score", "ConstScore",
      "Always returns configured score (for testing)",

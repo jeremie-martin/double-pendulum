@@ -64,9 +64,21 @@ struct FrameDetectionParams {
 
 // Methods for computing quality scores
 enum class ScoreMethod {
+    // Boom-dependent methods (require reference frame)
     PeakClarity,     // Peak clarity from causticness analyzer
     PostBoomSustain, // Post-boom area normalized
     Composite,       // Weighted combination of scores
+
+    // Boom-independent methods (analyze full signal)
+    DynamicRange,    // (max - min) / max - measures "drama" of the signal
+    RiseTime,        // peak_frame / total_frames - how quickly action happens
+    Smoothness,      // 1 / (1 + mean_abs_second_deriv) - signal quality
+
+    // Simple boom-relative methods (properties around boom)
+    PreBoomContrast, // 1 - (avg_before / peak) - contrast before boom
+    BoomSteepness,   // derivative_at_boom / max_derivative - sharpness of event
+
+    // Testing
     ConstantScore    // Always returns configured score (for testing)
 };
 
@@ -80,6 +92,9 @@ struct ScoreParams {
 
     // For ConstantScore: the score to always return (for testing)
     double constant_score = 0.5;
+
+    // For boom-relative methods: window size around boom (seconds)
+    double window_seconds = 1.0;
 };
 
 // ============================================================================
@@ -201,6 +216,16 @@ inline std::string toString(ScoreMethod method) {
         return "post_boom_sustain";
     case ScoreMethod::Composite:
         return "composite";
+    case ScoreMethod::DynamicRange:
+        return "dynamic_range";
+    case ScoreMethod::RiseTime:
+        return "rise_time";
+    case ScoreMethod::Smoothness:
+        return "smoothness";
+    case ScoreMethod::PreBoomContrast:
+        return "pre_boom_contrast";
+    case ScoreMethod::BoomSteepness:
+        return "boom_steepness";
     case ScoreMethod::ConstantScore:
         return "constant_score";
     default:
@@ -215,6 +240,16 @@ inline ScoreMethod parseScoreMethod(std::string const& s) {
         return ScoreMethod::PostBoomSustain;
     if (s == "composite" || s == "weighted")
         return ScoreMethod::Composite;
+    if (s == "dynamic_range" || s == "range")
+        return ScoreMethod::DynamicRange;
+    if (s == "rise_time" || s == "rise")
+        return ScoreMethod::RiseTime;
+    if (s == "smoothness" || s == "smooth")
+        return ScoreMethod::Smoothness;
+    if (s == "pre_boom_contrast" || s == "contrast")
+        return ScoreMethod::PreBoomContrast;
+    if (s == "boom_steepness" || s == "steepness")
+        return ScoreMethod::BoomSteepness;
     if (s == "constant_score" || s == "constant")
         return ScoreMethod::ConstantScore;
     return ScoreMethod::PeakClarity;

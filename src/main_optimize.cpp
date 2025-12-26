@@ -1518,7 +1518,7 @@ int main(int argc, char* argv[]) {
             bp.metric_name = pm.metric_name;
             bp.method = optimize::FrameDetectionMethod::ConstantFrame;
             bp.constant_frame = frame_val;
-            evaluateMehod(bp);
+            evaluateMethod(bp);
         }
 
         {
