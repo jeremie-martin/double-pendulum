@@ -88,6 +88,83 @@ def get_template_names() -> list[str]:
         return []
 
 
+def _add_music_to_video(
+    video_dir: Path,
+    video_path: Path,
+    metadata: "VideoMetadata",
+    music_dir: Optional[Path],
+    track_id: Optional[str],
+) -> bool:
+    """Add music to a processed video. Returns True on success."""
+    from .music import MusicManager
+
+    # Resolve music directory from config
+    user_config = get_config()
+    resolved_music_dir = user_config.get_music_dir(music_dir)
+
+    try:
+        manager = MusicManager(resolved_music_dir)
+    except FileNotFoundError as e:
+        console.print(f"[red]Music error:[/red] {e}")
+        return False
+
+    # Get boom info - use VIDEO time (frame/fps), not simulation time
+    boom_frame = metadata.results.boom_frame if metadata.results else None
+    if boom_frame is None or boom_frame == 0:
+        console.print("[red]Music error:[/red] No boom frame in metadata")
+        return False
+
+    video_fps = metadata.config.video_fps
+    video_boom_seconds = boom_frame / video_fps
+
+    # Select track
+    if track_id:
+        selected_track = manager.get_track(track_id)
+        if not selected_track:
+            console.print(f"[red]Music error:[/red] Track not found: {track_id}")
+            return False
+    else:
+        selected_track = manager.pick_track_for_boom(video_boom_seconds)
+        if not selected_track:
+            console.print(
+                f"[yellow]Warning:[/yellow] No tracks with drop > {video_boom_seconds:.1f}s, using random"
+            )
+            selected_track = manager.random_track()
+
+    # Output: replace _processed.mp4 with _final.mp4
+    output_path = video_path.with_name(video_path.stem + "_final.mp4")
+
+    console.print("[bold]Adding Music:[/bold]")
+    console.print(f"  Track: {selected_track.title}")
+    console.print(f"  Boom: {video_boom_seconds:.2f}s → Drop: {selected_track.drop_time_seconds:.2f}s")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        progress.add_task("Muxing audio...", total=None)
+
+        success = MusicManager.mux_with_audio(
+            video_path=video_path,
+            audio_path=selected_track.filepath,
+            output_path=output_path,
+            boom_frame=boom_frame,
+            drop_time_ms=selected_track.drop_time_ms,
+            video_fps=video_fps,
+        )
+
+    if success:
+        console.print(f"[green]Music added:[/green] {output_path.name}")
+        # Update metadata
+        metadata_path = video_dir / "metadata.json"
+        MusicManager.update_metadata_with_music(metadata_path, selected_track)
+        return True
+    else:
+        console.print("[red]Failed to add music[/red]")
+        return False
+
+
 @click.group()
 @click.version_option(version="0.2.0")
 def main():
@@ -238,13 +315,14 @@ def music_add(
         console.print(f"[dim]Searched: {resolved_music_dir}[/dim]")
         raise SystemExit(1)
 
-    # Get boom info
-    if not metadata.boom_seconds:
-        console.print("[red]Error:[/red] No boom detected in metadata")
+    # Get boom info - use VIDEO time (frame/fps), not simulation time
+    boom_frame = metadata.results.boom_frame if metadata.results else None
+    if boom_frame is None or boom_frame == 0:
+        console.print("[red]Error:[/red] No boom frame detected in metadata")
         raise SystemExit(1)
 
-    boom_frame = metadata.results.boom_frame if metadata.results else 0
-    boom_seconds = metadata.boom_seconds
+    video_fps = metadata.config.video_fps
+    video_boom_seconds = boom_frame / video_fps  # Video time, not simulation time
 
     # Select track
     if track:
@@ -254,11 +332,11 @@ def music_add(
             console.print("Use 'pendulum-tools music list' to see available tracks")
             raise SystemExit(1)
     else:
-        # Auto-select based on boom timing
-        selected_track = manager.pick_track_for_boom(boom_seconds)
+        # Auto-select based on VIDEO boom timing (not simulation time)
+        selected_track = manager.pick_track_for_boom(video_boom_seconds)
         if not selected_track:
             console.print(
-                f"[yellow]Warning:[/yellow] No tracks with drop time > {boom_seconds:.1f}s"
+                f"[yellow]Warning:[/yellow] No tracks with drop time > {video_boom_seconds:.1f}s"
             )
             console.print(
                 "[dim]Music drop will happen before the visual boom (sync will be off)[/dim]"
@@ -280,7 +358,7 @@ def music_add(
     console.print(f"  Input: {raw_video}")
     console.print(f"  Output: {output_path}")
     console.print(f"  Track: {selected_track.title} ({selected_track.id})")
-    console.print(f"  Boom: {boom_seconds:.2f}s (frame {boom_frame})")
+    console.print(f"  Boom: {video_boom_seconds:.2f}s (frame {boom_frame})")
     console.print(f"  Drop: {selected_track.drop_time_seconds:.2f}s")
 
     if dry_run:
@@ -359,10 +437,13 @@ def music_sync(video_dir: Path, music_dir: Optional[Path]):
         console.print(f"[dim]Searched: {resolved_music_dir}[/dim]")
         raise SystemExit(1)
 
-    boom_seconds = metadata.boom_seconds or 0
+    # Use VIDEO time (frame/fps), not simulation time
+    boom_frame = metadata.results.boom_frame if metadata.results else None
+    video_fps = metadata.config.video_fps
+    video_boom_seconds = boom_frame / video_fps if boom_frame else 0
 
     console.print()
-    console.print(f"[bold]Boom time:[/bold] {boom_seconds:.2f}s")
+    console.print(f"[bold]Boom time (video):[/bold] {video_boom_seconds:.2f}s (frame {boom_frame})")
     console.print()
 
     table = Table(title="Track Compatibility")
@@ -373,7 +454,7 @@ def music_sync(video_dir: Path, music_dir: Optional[Path]):
 
     valid_count = 0
     for track in manager.tracks:
-        is_valid = track.drop_time_seconds > boom_seconds
+        is_valid = track.drop_time_seconds > video_boom_seconds
         status = "[green]OK[/green]" if is_valid else "[red]Too early[/red]"
         if is_valid:
             valid_count += 1
@@ -820,6 +901,23 @@ def list_templates():
     is_flag=True,
     help="Show FFmpeg command without executing",
 )
+@click.option(
+    "--music",
+    is_flag=True,
+    help="Add music to the processed video",
+)
+@click.option(
+    "--music-dir",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Music database directory (default: from config or ./music)",
+)
+@click.option(
+    "--track",
+    type=str,
+    default=None,
+    help="Specific track ID for music (default: auto-select based on boom timing)",
+)
 def process(
     video_dir: Path,
     output: Optional[Path],
@@ -833,6 +931,9 @@ def process(
     force: bool,
     no_nvenc: bool,
     dry_run: bool,
+    music: bool,
+    music_dir: Optional[Path],
+    track: Optional[str],
 ):
     """Process video with motion effects and text overlays.
 
@@ -939,6 +1040,17 @@ def process(
             console.print("  Captions:")
             for text in result.captions_text:
                 console.print(f"    - {text}")
+
+        # Add music if requested
+        if music and result.video_path:
+            console.print()
+            _add_music_to_video(
+                video_dir=video_dir,
+                video_path=result.video_path,
+                metadata=pipeline.metadata,
+                music_dir=music_dir,
+                track_id=track,
+            )
     else:
         console.print(f"[red]Processing failed:[/red] {result.error}")
         if result.ffmpeg_command:
