@@ -625,7 +625,7 @@ Processed: {'Yes' if video.has_processed else 'No'} | Music: {'Yes' if video.has
             if track_id:
                 cmd.extend(["--track", track_id])
         elif command == "process":
-            cmd = ["uv", "run", "pendulum-tools", "process", video_dir, "--shorts", "--blur-bg"]
+            cmd = ["uv", "run", "pendulum-tools", "process", video_dir, "--shorts", "--blur-bg", "--force"]
             if music:
                 cmd.append("--music")
                 if track_id:
