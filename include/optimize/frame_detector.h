@@ -62,6 +62,9 @@ public:
         case FrameDetectionMethod::SecondDerivativePeak:
             result = detectSecondDerivativePeak(values, frame_duration);
             break;
+        case FrameDetectionMethod::ConstantFrame:
+            result = detectConstantFrame(values, frame_duration);
+            break;
         default:
             result = detectMaxValue(values, frame_duration);
             break;
@@ -282,6 +285,25 @@ private:
             // Fall back to first derivative peak
             return detectDerivativePeak(values, frame_duration);
         }
+
+        return result;
+    }
+
+    // Method 6: Always return configured constant frame (for testing)
+    FrameDetection detectConstantFrame(std::vector<double> const& values,
+                                        double frame_duration) const {
+        FrameDetection result;
+        result.method_used = FrameDetectionMethod::ConstantFrame;
+
+        if (values.empty()) return result;
+
+        // Clamp constant_frame to valid range
+        int frame = params_.constant_frame;
+        frame = std::max(0, std::min(static_cast<int>(values.size()) - 1, frame));
+
+        result.frame = frame;
+        result.seconds = frame * frame_duration;
+        result.metric_value = values[frame];
 
         return result;
     }

@@ -52,7 +52,13 @@ public:
         ScorePrediction result;
         result.method_used = params_.method;
 
-        // Check metric name is set
+        // ConstantScore doesn't need analyzer - just return configured value
+        if (params_.method == ScoreMethod::ConstantScore) {
+            result.score = std::clamp(params_.constant_score, 0.0, 1.0);
+            return result;
+        }
+
+        // Check metric name is set for other methods
         if (params_.metric_name.empty()) {
             result.score = 0.0;
             return result;
@@ -105,6 +111,9 @@ private:
             return analyzer.postReferenceAreaNormalized();
         case ScoreMethod::Composite:
             return computeComposite(analyzer);
+        case ScoreMethod::ConstantScore:
+            // Constant score doesn't need analyzer - return configured value
+            return params_.constant_score;
         default:
             return analyzer.peakClarityScore();
         }

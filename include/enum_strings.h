@@ -74,6 +74,7 @@ constexpr const char* toString(optimize::FrameDetectionMethod method) {
     case optimize::FrameDetectionMethod::DerivativePeak: return "derivative_peak";
     case optimize::FrameDetectionMethod::ThresholdCrossing: return "threshold_crossing";
     case optimize::FrameDetectionMethod::SecondDerivativePeak: return "second_derivative_peak";
+    case optimize::FrameDetectionMethod::ConstantFrame: return "constant_frame";
     }
     return "unknown";
 }
@@ -83,6 +84,7 @@ constexpr const char* toString(optimize::ScoreMethod method) {
     case optimize::ScoreMethod::PeakClarity: return "peak_clarity";
     case optimize::ScoreMethod::PostBoomSustain: return "post_boom_sustain";
     case optimize::ScoreMethod::Composite: return "composite";
+    case optimize::ScoreMethod::ConstantScore: return "constant_score";
     }
     return "unknown";
 }

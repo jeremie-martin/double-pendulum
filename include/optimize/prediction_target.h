@@ -27,7 +27,8 @@ enum class FrameDetectionMethod {
     FirstPeakPercent,    // First peak >= X% of max
     DerivativePeak,      // When d(metric)/dt is maximum
     ThresholdCrossing,   // First sustained crossing of threshold
-    SecondDerivativePeak // When d²(metric)/dt² is maximum
+    SecondDerivativePeak, // When d²(metric)/dt² is maximum
+    ConstantFrame        // Always returns configured frame (for testing)
 };
 
 // Parameters for frame detection
@@ -52,6 +53,9 @@ struct FrameDetectionParams {
 
     // For ThresholdCrossing: consecutive frames above threshold
     int crossing_confirmation = 3;
+
+    // For ConstantFrame: the frame to always return (for testing)
+    int constant_frame = 100;
 };
 
 // ============================================================================
@@ -62,7 +66,8 @@ struct FrameDetectionParams {
 enum class ScoreMethod {
     PeakClarity,     // Peak clarity from causticness analyzer
     PostBoomSustain, // Post-boom area normalized
-    Composite        // Weighted combination of scores
+    Composite,       // Weighted combination of scores
+    ConstantScore    // Always returns configured score (for testing)
 };
 
 // Parameters for score prediction
@@ -72,6 +77,9 @@ struct ScoreParams {
 
     // For Composite: pairs of (score_name, weight)
     std::vector<std::pair<std::string, double>> weights;
+
+    // For ConstantScore: the score to always return (for testing)
+    double constant_score = 0.5;
 };
 
 // ============================================================================
@@ -162,6 +170,8 @@ inline std::string toString(FrameDetectionMethod method) {
         return "threshold_crossing";
     case FrameDetectionMethod::SecondDerivativePeak:
         return "second_derivative_peak";
+    case FrameDetectionMethod::ConstantFrame:
+        return "constant_frame";
     default:
         return "max_value";
     }
@@ -178,6 +188,8 @@ inline FrameDetectionMethod parseFrameDetectionMethod(std::string const& s) {
         return FrameDetectionMethod::ThresholdCrossing;
     if (s == "second_derivative_peak" || s == "accel")
         return FrameDetectionMethod::SecondDerivativePeak;
+    if (s == "constant_frame" || s == "constant")
+        return FrameDetectionMethod::ConstantFrame;
     return FrameDetectionMethod::MaxValue;
 }
 
@@ -189,6 +201,8 @@ inline std::string toString(ScoreMethod method) {
         return "post_boom_sustain";
     case ScoreMethod::Composite:
         return "composite";
+    case ScoreMethod::ConstantScore:
+        return "constant_score";
     default:
         return "peak_clarity";
     }
@@ -201,6 +215,8 @@ inline ScoreMethod parseScoreMethod(std::string const& s) {
         return ScoreMethod::PostBoomSustain;
     if (s == "composite" || s == "weighted")
         return ScoreMethod::Composite;
+    if (s == "constant_score" || s == "constant")
+        return ScoreMethod::ConstantScore;
     return ScoreMethod::PeakClarity;
 }
 

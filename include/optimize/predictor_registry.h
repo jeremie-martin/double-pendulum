@@ -48,7 +48,7 @@ struct PredictorDef {
 // All available prediction methods in one place.
 // Add new predictors here - they'll automatically appear in config parsing and UI.
 
-inline constexpr std::array<PredictorDef, 8> PREDICTOR_REGISTRY = {{
+inline constexpr std::array<PredictorDef, 10> PREDICTOR_REGISTRY = {{
     // ========================================================================
     // Frame Detection Methods (from FrameDetector)
     // ========================================================================
@@ -74,6 +74,10 @@ inline constexpr std::array<PredictorDef, 8> PREDICTOR_REGISTRY = {{
      "Maximum acceleration (d²/dt²)",
      PredictorType::Frame, PredictorCategory::Detection, false},
 
+    {"constant_frame", "ConstFrame",
+     "Always returns configured frame (for testing)",
+     PredictorType::Frame, PredictorCategory::Detection, false},
+
     // ========================================================================
     // Score Prediction Methods (from SignalAnalyzer)
     // ========================================================================
@@ -90,6 +94,10 @@ inline constexpr std::array<PredictorDef, 8> PREDICTOR_REGISTRY = {{
     {"composite", "Composite",
      "Weighted combination of scores",
      PredictorType::Score, PredictorCategory::Signal, true},
+
+    {"constant_score", "ConstScore",
+     "Always returns configured score (for testing)",
+     PredictorType::Score, PredictorCategory::Signal, false},
 }};
 
 // Number of predictors in registry

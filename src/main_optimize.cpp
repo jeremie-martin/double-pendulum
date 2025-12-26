@@ -736,6 +736,9 @@ struct ParameterSet {
         case optimize::FrameDetectionMethod::SecondDerivativePeak:
             oss << "accel w=" << boom.smoothing_window;
             break;
+        case optimize::FrameDetectionMethod::ConstantFrame:
+            oss << "const=" << boom.constant_frame;
+            break;
         }
         oss << " off=" << std::fixed << std::setprecision(2) << boom.offset_seconds;
         return oss.str();
@@ -1015,6 +1018,7 @@ std::string frameDetectionMethodToString(optimize::FrameDetectionMethod method) 
     case optimize::FrameDetectionMethod::DerivativePeak: return "derivative_peak";
     case optimize::FrameDetectionMethod::ThresholdCrossing: return "threshold_crossing";
     case optimize::FrameDetectionMethod::SecondDerivativePeak: return "second_derivative_peak";
+    case optimize::FrameDetectionMethod::ConstantFrame: return "constant_frame";
     }
     return "max_value";
 }
@@ -1045,6 +1049,9 @@ void writeFrameTargetParams(std::ofstream& file, std::string const& target_name,
     case optimize::FrameDetectionMethod::ThresholdCrossing:
         file << "crossing_threshold = " << std::fixed << std::setprecision(2) << params.crossing_threshold << "\n";
         file << "crossing_confirmation = " << params.crossing_confirmation << "\n";
+        break;
+    case optimize::FrameDetectionMethod::ConstantFrame:
+        file << "constant_frame = " << params.constant_frame << "\n";
         break;
     }
 }
