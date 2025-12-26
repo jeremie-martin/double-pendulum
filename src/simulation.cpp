@@ -28,11 +28,10 @@ using Duration = std::chrono::duration<double>;
 namespace {
 
 // Convert config targets to PredictionTargets and evaluate using TargetEvaluator
+// Uses the new API that evaluates frame targets first, then score targets with correct reference
 std::vector<optimize::PredictionResult> evaluateTargets(
     std::vector<TargetConfig> const& targets,
     metrics::MetricsCollector const& collector,
-    metrics::EventDetector const& events,
-    metrics::CausticnessAnalyzer const& analyzer,
     double frame_duration) {
 
     if (targets.empty()) {
@@ -50,7 +49,9 @@ std::vector<optimize::PredictionResult> evaluateTargets(
         evaluator.addTarget(target);
     }
 
-    return evaluator.evaluate(collector, events, analyzer, frame_duration);
+    // New API: evaluates frame targets first to get boom frame,
+    // then passes it to score targets as reference
+    return evaluator.evaluate(collector, frame_duration);
 }
 
 // Get boom params from targets, or return empty params for defaults
@@ -701,8 +702,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     // Populate multi-target predictions using TargetEvaluator
     if (!config_.targets.empty()) {
         results.predictions = evaluateTargets(
-            config_.targets, metrics_collector_, event_detector_,
-            causticness_analyzer_, frame_duration);
+            config_.targets, metrics_collector_, frame_duration);
     } else {
         // Use default predictions (backward compat)
         double boom_seconds = results.boom_frame ? *results.boom_frame * frame_duration : 0.0;
@@ -777,9 +777,8 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     if (causticness_analyzer_.hasResults()) {
         auto const& json = causticness_analyzer_.toJSON();
         auto const& m = json["metrics"];
-        std::cout << "Causticness: " << std::setprecision(2) << causticness_analyzer_.score()
-                  << " (peak=" << m.value("peak_causticness", 0.0)
-                  << ", avg=" << m.value("average_causticness", 0.0)
+        std::cout << "Signal Quality: " << std::setprecision(2) << causticness_analyzer_.score()
+                  << " (peak=" << m.value("peak_value", 0.0)
                   << ", clarity=" << m.value("peak_clarity_score", 0.0) << ")\n";
     }
 
@@ -873,8 +872,7 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
     // Populate predictions using TargetEvaluator (consistent with run())
     if (!config_.targets.empty()) {
         results.predictions = evaluateTargets(
-            config_.targets, metrics_collector_, event_detector_,
-            causticness_analyzer_, frame_duration);
+            config_.targets, metrics_collector_, frame_duration);
     } else {
         // Use default predictions (backward compat)
         // Note: chaos is only detected via [targets.chaos] now, not EventDetector

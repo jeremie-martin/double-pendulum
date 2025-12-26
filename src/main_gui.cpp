@@ -2460,20 +2460,22 @@ int main(int argc, char* argv[]) {
 
             ImGui::Separator();
 
-            // Causticness details
-            double peak = caustic_results.value("peak_causticness", 0.0);
-            double avg = caustic_results.value("average_causticness", 0.0);
-            int peak_frame = caustic_results.value("peak_frame", 0);
-            double time_above = caustic_results.value("time_above_threshold", 0.0);
+            // Signal analysis details
+            auto const& metrics = caustic_results["metrics"];
+            double peak = metrics.value("peak_value", 0.0);
+            int peak_frame = metrics.value("peak_frame", 0);
+            double time_above = metrics.value("time_above_threshold", 0.0);
 
             // Use cached frame_duration for accurate time display
             double peak_seconds = static_cast<double>(peak_frame) * state.frame_duration;
             ImGui::Text("Peak: %.1f @ %.2fs", peak, peak_seconds);
-            ImGui::Text("Average: %.1f | Time above threshold: %.1fs", avg, time_above);
+            if (time_above > 0.0) {
+                ImGui::Text("Time above threshold: %.1fs", time_above);
+            }
 
             // Peak clarity (important for filtering)
-            double peak_clarity = caustic_results.value("peak_clarity_score", 1.0);
-            int competing_peaks = caustic_results.value("competing_peaks_count", 0);
+            double peak_clarity = metrics.value("peak_clarity_score", 1.0);
+            int competing_peaks = metrics.value("competing_peaks_count", 0);
             ImVec4 clarity_color = peak_clarity < 0.6f ? ImVec4(0.8f, 0.2f, 0.2f, 1.0f) :
                                    peak_clarity < 0.8f ? ImVec4(0.8f, 0.8f, 0.2f, 1.0f) :
                                                          ImVec4(0.2f, 0.8f, 0.2f, 1.0f);

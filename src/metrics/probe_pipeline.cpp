@@ -158,15 +158,13 @@ void ProbePipeline::feedGPUFrame(GPUMetricsBundle const& gpu_metrics) {
 }
 
 void ProbePipeline::runAnalyzers() {
-    if (signal_analyzer_enabled_) {
+    if (signal_analyzer_enabled_ && !boom_params_.metric_name.empty()) {
         // Set frame duration if available
         if (frame_duration_ > 0.0) {
             signal_analyzer_->setFrameDuration(frame_duration_);
         }
         // Use boom_params_.metric_name for signal analysis
-        if (!boom_params_.metric_name.empty()) {
-            signal_analyzer_->setMetricName(boom_params_.metric_name);
-        }
+        signal_analyzer_->setMetricName(boom_params_.metric_name);
         signal_analyzer_->analyze(collector_, event_detector_);
     }
 }

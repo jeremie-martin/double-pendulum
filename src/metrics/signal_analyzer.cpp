@@ -185,7 +185,15 @@ void SignalAnalyzer::computePostReferenceArea(std::vector<double> const& values)
         ref_frame = metrics_.peak_frame;
     }
 
-    double remaining_seconds = (values.size() - ref_frame) * frame_duration_;
+    // Clamp ref_frame to valid range to prevent underflow
+    if (ref_frame < 0 || static_cast<size_t>(ref_frame) >= values.size()) {
+        metrics_.post_ref_area = 0.0;
+        metrics_.post_ref_area_normalized = 0.0;
+        metrics_.post_ref_duration = 0.0;
+        return;
+    }
+
+    double remaining_seconds = (values.size() - static_cast<size_t>(ref_frame)) * frame_duration_;
     double window_seconds = std::min(post_ref_window_seconds_, remaining_seconds);
     int window_frames = static_cast<int>(window_seconds / frame_duration_);
 
