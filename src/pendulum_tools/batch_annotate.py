@@ -338,23 +338,54 @@ class MainWindow(QMainWindow):
         upload_layout = QVBoxLayout(upload_group)
 
         # Title
-        upload_layout.addWidget(QLabel("Title:"))
+        title_row = QHBoxLayout()
+        title_row.addWidget(QLabel("Title:"))
         self.title_edit = QLineEdit()
         self.title_edit.setReadOnly(True)
-        upload_layout.addWidget(self.title_edit)
+        title_row.addWidget(self.title_edit)
+        self.copy_title_btn = QPushButton("Copy")
+        self.copy_title_btn.setFixedWidth(50)
+        self.copy_title_btn.clicked.connect(lambda: self._copy_to_clipboard(self.title_edit.text()))
+        title_row.addWidget(self.copy_title_btn)
+        upload_layout.addLayout(title_row)
 
         # Description
-        upload_layout.addWidget(QLabel("Description:"))
+        desc_header = QHBoxLayout()
+        desc_header.addWidget(QLabel("Description:"))
+        desc_header.addStretch()
+        self.copy_desc_btn = QPushButton("Copy")
+        self.copy_desc_btn.setFixedWidth(50)
+        self.copy_desc_btn.clicked.connect(lambda: self._copy_to_clipboard(self.desc_edit.toPlainText()))
+        desc_header.addWidget(self.copy_desc_btn)
+        upload_layout.addLayout(desc_header)
         self.desc_edit = QTextEdit()
         self.desc_edit.setReadOnly(True)
         self.desc_edit.setMaximumHeight(80)
         upload_layout.addWidget(self.desc_edit)
 
-        # Video path
-        upload_layout.addWidget(QLabel("Video Path:"))
-        self.path_edit = QLineEdit()
-        self.path_edit.setReadOnly(True)
-        upload_layout.addWidget(self.path_edit)
+        # Video path (relative)
+        path_rel_row = QHBoxLayout()
+        path_rel_row.addWidget(QLabel("Path (rel):"))
+        self.path_rel_edit = QLineEdit()
+        self.path_rel_edit.setReadOnly(True)
+        path_rel_row.addWidget(self.path_rel_edit)
+        self.copy_rel_btn = QPushButton("Copy")
+        self.copy_rel_btn.setFixedWidth(50)
+        self.copy_rel_btn.clicked.connect(lambda: self._copy_to_clipboard(self.path_rel_edit.text()))
+        path_rel_row.addWidget(self.copy_rel_btn)
+        upload_layout.addLayout(path_rel_row)
+
+        # Video path (absolute)
+        path_abs_row = QHBoxLayout()
+        path_abs_row.addWidget(QLabel("Path (abs):"))
+        self.path_abs_edit = QLineEdit()
+        self.path_abs_edit.setReadOnly(True)
+        path_abs_row.addWidget(self.path_abs_edit)
+        self.copy_abs_btn = QPushButton("Copy")
+        self.copy_abs_btn.setFixedWidth(50)
+        self.copy_abs_btn.clicked.connect(lambda: self._copy_to_clipboard(self.path_abs_edit.text()))
+        path_abs_row.addWidget(self.copy_abs_btn)
+        upload_layout.addLayout(path_abs_row)
 
         right_layout.addWidget(upload_group)
 
@@ -458,7 +489,8 @@ class MainWindow(QMainWindow):
             self.delete_btn.setEnabled(False)
             self.title_edit.clear()
             self.desc_edit.clear()
-            self.path_edit.clear()
+            self.path_rel_edit.clear()
+            self.path_abs_edit.clear()
             return
 
         # Update info - load full metadata for details
@@ -511,7 +543,18 @@ Processed: {'Yes' if video.has_processed else 'No'} | Music: {music_str}{extra_i
         self.delete_btn.setEnabled(True)
 
         # Update manual upload info
-        self.path_edit.setText(str(video.best_video_path) if video.best_video_path else "")
+        if video.best_video_path:
+            self.path_abs_edit.setText(str(video.best_video_path.resolve()))
+            if self.batch_dir:
+                try:
+                    self.path_rel_edit.setText(str(video.best_video_path.relative_to(self.batch_dir.parent)))
+                except ValueError:
+                    self.path_rel_edit.setText(str(video.best_video_path))
+            else:
+                self.path_rel_edit.setText(str(video.best_video_path))
+        else:
+            self.path_rel_edit.setText("")
+            self.path_abs_edit.setText("")
         try:
             metadata = VideoMetadata.from_file(video.metadata_path)
             self.title_edit.setText(generate_title(metadata))
@@ -528,6 +571,12 @@ Processed: {'Yes' if video.has_processed else 'No'} | Music: {music_str}{extra_i
         frame = self.boom_spin.value()
         seconds = frame / self.current_video.video_fps
         self.boom_seconds_label.setText(f"({seconds:.2f}s)")
+
+    def _copy_to_clipboard(self, text: str) -> None:
+        """Copy text to clipboard and show confirmation."""
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
+        self.statusBar().showMessage("Copied to clipboard", 1500)
 
     def _update_music_combo(self) -> None:
         """Update music dropdown with valid tracks."""
