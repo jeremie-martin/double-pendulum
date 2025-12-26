@@ -312,6 +312,13 @@ class MainWindow(QMainWindow):
 
         right_layout.addLayout(process_row)
 
+        # Upload button
+        self.upload_btn = QPushButton("Upload to YouTube")
+        self.upload_btn.setEnabled(False)
+        self.upload_btn.clicked.connect(self._upload_video)
+        self.upload_btn.setStyleSheet("background: #FF0000; color: white; padding: 8px;")
+        right_layout.addWidget(self.upload_btn)
+
         # Delete button
         self.delete_btn = QPushButton("Delete Video")
         self.delete_btn.setEnabled(False)
@@ -408,6 +415,7 @@ class MainWindow(QMainWindow):
             self.add_music_btn.setEnabled(False)
             self.process_btn.setEnabled(False)
             self.process_music_btn.setEnabled(False)
+            self.upload_btn.setEnabled(False)
             self.delete_btn.setEnabled(False)
             return
 
@@ -441,6 +449,7 @@ Processed: {'Yes' if video.has_processed else 'No'} | Music: {'Yes' if video.has
         self.add_music_btn.setEnabled(has_boom and self.music_db is not None)
         self.process_btn.setEnabled(video.has_video and has_boom)
         self.process_music_btn.setEnabled(video.has_video and has_boom and self.music_db is not None)
+        self.upload_btn.setEnabled(video.best_video_path is not None)
         self.delete_btn.setEnabled(True)
 
     def _update_boom_label(self) -> None:
@@ -597,6 +606,12 @@ Processed: {'Yes' if video.has_processed else 'No'} | Music: {'Yes' if video.has
         track_id = self._get_selected_track_id()
         self._run_cli_command("process", music=True, track_id=track_id)
 
+    def _upload_video(self) -> None:
+        """Upload the current video to YouTube."""
+        if not self.current_video:
+            return
+        self._run_cli_command("upload")
+
     def _run_cli_command(self, command: str, subcommand: str = "", music: bool = False, track_id: Optional[str] = None) -> None:
         """Run a pendulum-tools CLI command."""
         if not self.current_video:
@@ -615,6 +630,8 @@ Processed: {'Yes' if video.has_processed else 'No'} | Music: {'Yes' if video.has
                 cmd.append("--music")
                 if track_id:
                     cmd.extend(["--track", track_id])
+        elif command == "upload":
+            cmd = ["uv", "run", "pendulum-tools", "upload", video_dir]
         else:
             return
 
