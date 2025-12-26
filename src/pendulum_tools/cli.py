@@ -1,4 +1,4 @@
-"""Command-line interface for the pendulum uploader."""
+"""Command-line interface for pendulum-tools."""
 
 from __future__ import annotations
 
@@ -29,6 +29,20 @@ from .processing.thumbnails import extract_thumbnails
 console = Console()
 
 
+def get_video_path(video_dir: Path) -> Path:
+    """Get the appropriate video file from a directory.
+
+    Prefers video.mp4, falls back to video_raw.mp4.
+    """
+    video_path = video_dir / "video.mp4"
+    if video_path.exists():
+        return video_path
+    raw_path = video_dir / "video_raw.mp4"
+    if raw_path.exists():
+        return raw_path
+    raise FileNotFoundError(f"No video file found in {video_dir}")
+
+
 def get_template_names() -> list[str]:
     """Get available template names, or empty list if config not found."""
     try:
@@ -39,13 +53,274 @@ def get_template_names() -> list[str]:
 
 
 @click.group()
-@click.version_option(version="0.1.0")
+@click.version_option(version="0.2.0")
 def main():
-    """Double Pendulum YouTube Uploader.
+    """Double Pendulum Post-Processing and Upload Tools.
 
-    Upload pendulum simulation videos to YouTube with auto-generated metadata.
+    Tools for adding music, applying effects, and uploading videos to YouTube.
     """
     pass
+
+
+# =============================================================================
+# Music Commands
+# =============================================================================
+
+
+@main.group()
+def music():
+    """Music management commands."""
+    pass
+
+
+@music.command(name="list")
+@click.option(
+    "--music-dir",
+    "-d",
+    type=click.Path(exists=True, path_type=Path),
+    default=Path("music"),
+    help="Music database directory",
+)
+def music_list(music_dir: Path):
+    """List all available music tracks."""
+    from .music import MusicManager
+
+    try:
+        manager = MusicManager(music_dir)
+    except FileNotFoundError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise SystemExit(1)
+
+    console.print()
+    console.print("[bold]Available Music Tracks:[/bold]")
+    console.print()
+
+    table = Table()
+    table.add_column("ID", style="cyan")
+    table.add_column("Title")
+    table.add_column("Drop Time", style="green")
+    table.add_column("File")
+
+    for track in manager.tracks:
+        table.add_row(
+            track.id,
+            track.title,
+            f"{track.drop_time_seconds:.1f}s",
+            track.filepath.name,
+        )
+
+    console.print(table)
+    console.print(f"\n[dim]Total: {len(manager.tracks)} tracks[/dim]")
+
+
+@music.command(name="add")
+@click.argument("video_dir", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--track",
+    "-t",
+    type=str,
+    default=None,
+    help="Track ID (omit for auto-select based on boom timing)",
+)
+@click.option(
+    "--music-dir",
+    "-d",
+    type=click.Path(exists=True, path_type=Path),
+    default=Path("music"),
+    help="Music database directory",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Output path (default: video_dir/video.mp4)",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Show what would be done without executing",
+)
+def music_add(
+    video_dir: Path,
+    track: str | None,
+    music_dir: Path,
+    output: Path | None,
+    dry_run: bool,
+):
+    """Add music to video (lossless mux).
+
+    Creates video.mp4 from video_raw.mp4 with music track synchronized
+    to the boom moment.
+
+    If --track is not specified, automatically selects a track where
+    the music drop happens after the visual boom.
+    """
+    from .music import MusicManager
+
+    # Load metadata
+    metadata_path = video_dir / "metadata.json"
+    if not metadata_path.exists():
+        console.print(f"[red]Error:[/red] metadata.json not found in {video_dir}")
+        raise SystemExit(1)
+
+    try:
+        metadata = VideoMetadata.from_file(metadata_path)
+    except Exception as e:
+        console.print(f"[red]Error loading metadata:[/red] {e}")
+        raise SystemExit(1)
+
+    # Find input video
+    raw_video = video_dir / "video_raw.mp4"
+    if not raw_video.exists():
+        # Fall back to video.mp4 if video_raw.mp4 doesn't exist
+        raw_video = video_dir / "video.mp4"
+        if not raw_video.exists():
+            console.print(f"[red]Error:[/red] No video file found in {video_dir}")
+            raise SystemExit(1)
+
+    # Load music manager
+    try:
+        manager = MusicManager(music_dir)
+    except FileNotFoundError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise SystemExit(1)
+
+    # Get boom info
+    if not metadata.boom_seconds:
+        console.print("[red]Error:[/red] No boom detected in metadata")
+        raise SystemExit(1)
+
+    boom_frame = metadata.results.boom_frame if metadata.results else 0
+    boom_seconds = metadata.boom_seconds
+
+    # Select track
+    if track:
+        selected_track = manager.get_track(track)
+        if not selected_track:
+            console.print(f"[red]Error:[/red] Track not found: {track}")
+            console.print("Use 'pendulum-tools music list' to see available tracks")
+            raise SystemExit(1)
+    else:
+        # Auto-select based on boom timing
+        selected_track = manager.pick_track_for_boom(boom_seconds)
+        if not selected_track:
+            console.print(
+                f"[yellow]Warning:[/yellow] No tracks with drop > {boom_seconds:.1f}s"
+            )
+            console.print("Using random track (sync may not be optimal)")
+            selected_track = manager.random_track()
+
+    # Determine output path
+    output_path = output or (video_dir / "video.mp4")
+
+    console.print()
+    console.print("[bold]Music Addition:[/bold]")
+    console.print(f"  Input: {raw_video}")
+    console.print(f"  Output: {output_path}")
+    console.print(f"  Track: {selected_track.title} ({selected_track.id})")
+    console.print(f"  Boom: {boom_seconds:.2f}s (frame {boom_frame})")
+    console.print(f"  Drop: {selected_track.drop_time_seconds:.2f}s")
+
+    if dry_run:
+        console.print()
+        console.print("[yellow]Dry run - not executing[/yellow]")
+        return
+
+    # Mux video with audio
+    console.print()
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        progress.add_task("Muxing audio...", total=None)
+
+        success = MusicManager.mux_with_audio(
+            video_path=raw_video,
+            audio_path=selected_track.filepath,
+            output_path=output_path,
+            boom_frame=boom_frame,
+            drop_time_ms=selected_track.drop_time_ms,
+            video_fps=metadata.config.video_fps,
+        )
+
+    if success:
+        console.print("[green]Music added successfully![/green]")
+        console.print(f"  Output: {output_path}")
+
+        # Update metadata
+        MusicManager.update_metadata_with_music(metadata_path, selected_track)
+        console.print("  Metadata updated")
+    else:
+        console.print("[red]Failed to add music[/red]")
+        raise SystemExit(1)
+
+
+@music.command(name="sync")
+@click.argument("video_dir", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--music-dir",
+    "-d",
+    type=click.Path(exists=True, path_type=Path),
+    default=Path("music"),
+    help="Music database directory",
+)
+def music_sync(video_dir: Path, music_dir: Path):
+    """Show which tracks are valid for this video's boom timing.
+
+    Lists all tracks and indicates which ones have their drop
+    after the visual boom (suitable for sync).
+    """
+    from .music import MusicManager
+
+    # Load metadata
+    metadata_path = video_dir / "metadata.json"
+    if not metadata_path.exists():
+        console.print(f"[red]Error:[/red] metadata.json not found in {video_dir}")
+        raise SystemExit(1)
+
+    try:
+        metadata = VideoMetadata.from_file(metadata_path)
+    except Exception as e:
+        console.print(f"[red]Error loading metadata:[/red] {e}")
+        raise SystemExit(1)
+
+    # Load music manager
+    try:
+        manager = MusicManager(music_dir)
+    except FileNotFoundError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise SystemExit(1)
+
+    boom_seconds = metadata.boom_seconds or 0
+
+    console.print()
+    console.print(f"[bold]Boom time:[/bold] {boom_seconds:.2f}s")
+    console.print()
+
+    table = Table(title="Track Compatibility")
+    table.add_column("ID", style="cyan")
+    table.add_column("Title")
+    table.add_column("Drop Time")
+    table.add_column("Status")
+
+    valid_count = 0
+    for track in manager.tracks:
+        is_valid = track.drop_time_seconds > boom_seconds
+        status = "[green]OK[/green]" if is_valid else "[red]Too early[/red]"
+        if is_valid:
+            valid_count += 1
+
+        table.add_row(
+            track.id,
+            track.title,
+            f"{track.drop_time_seconds:.1f}s",
+            status,
+        )
+
+    console.print(table)
+    console.print(f"\n[dim]Valid tracks: {valid_count}/{len(manager.tracks)}[/dim]")
 
 
 @main.command()
@@ -183,13 +458,15 @@ def upload(video_dir: Path, credentials: Path, privacy: str, dry_run: bool):
 def batch(batch_dir: Path, credentials: Path, privacy: str, limit: int, dry_run: bool):
     """Upload all videos from a batch directory.
 
-    Finds all subdirectories containing metadata.json and video.mp4.
+    Finds all subdirectories containing metadata.json and a video file.
     """
-    # Find all video directories
+    # Find all video directories (must have metadata and a video file)
     video_dirs = []
     for item in batch_dir.iterdir():
         if item.is_dir():
-            if (item / "metadata.json").exists() and (item / "video.mp4").exists():
+            has_metadata = (item / "metadata.json").exists()
+            has_video = (item / "video.mp4").exists() or (item / "video_raw.mp4").exists()
+            if has_metadata and has_video:
                 video_dirs.append(item)
 
     video_dirs.sort()
@@ -373,7 +650,7 @@ def list_templates():
     "-o",
     type=click.Path(path_type=Path),
     default=None,
-    help="Output directory (default: video_dir/processed/)",
+    help="Output directory for auxiliary files (default: video_dir/)",
 )
 @click.option(
     "--template",
@@ -439,25 +716,27 @@ def process(
 ):
     """Process video with motion effects and text overlays.
 
+    Reads video.mp4 (or video_raw.mp4) and outputs video_processed.mp4.
+
     Templates define motion effects (slow zoom, boom punch, shake) and
     caption timing with randomly selected text from pools.
 
     Examples:
 
         # Basic processing with default template
-        pendulum-upload process /path/to/video_0000
+        pendulum-tools process /path/to/video_0000
 
         # Full Shorts treatment with blurred background
-        pendulum-upload process /path/to/video_0000 --shorts --blur-bg -t hype_mrbeast
+        pendulum-tools process /path/to/video_0000 --shorts --blur-bg -t hype_mrbeast
 
         # Use dramatic minimal template (motion only, no text)
-        pendulum-upload process /path/to/video_0000 -t dramatic_minimal
+        pendulum-tools process /path/to/video_0000 -t dramatic_minimal
 
         # Random template selection
-        pendulum-upload process /path/to/video_0000 -t random
+        pendulum-tools process /path/to/video_0000 -t random
 
         # Preview FFmpeg command
-        pendulum-upload process /path/to/video_0000 --dry-run
+        pendulum-tools process /path/to/video_0000 --dry-run
     """
     # Build processing config
     config = ProcessingConfig(
@@ -577,24 +856,26 @@ def thumbnail(video_dir: Path, output: Path | None, timestamps: str):
     Examples:
 
         # Extract default thumbnails (pre_boom, boom, best)
-        pendulum-upload thumbnail /path/to/video_0000
+        pendulum-tools thumbnail /path/to/video_0000
 
         # Extract at specific timestamps
-        pendulum-upload thumbnail /path/to/video_0000 -t "boom,10.5"
+        pendulum-tools thumbnail /path/to/video_0000 -t "boom,10.5"
 
         # Save to custom directory
-        pendulum-upload thumbnail /path/to/video_0000 -o /path/to/thumbs/
+        pendulum-tools thumbnail /path/to/video_0000 -o /path/to/thumbs/
     """
     # Load metadata
     metadata_path = video_dir / "metadata.json"
-    video_path = video_dir / "video.mp4"
 
     if not metadata_path.exists():
         console.print(f"[red]Error:[/red] metadata.json not found in {video_dir}")
         raise SystemExit(1)
 
-    if not video_path.exists():
-        console.print(f"[red]Error:[/red] video.mp4 not found in {video_dir}")
+    # Find video file (prefer video.mp4, fallback to video_raw.mp4)
+    try:
+        video_path = get_video_path(video_dir)
+    except FileNotFoundError:
+        console.print(f"[red]Error:[/red] No video file found in {video_dir}")
         raise SystemExit(1)
 
     try:
@@ -686,25 +967,28 @@ def batch_process(
 ):
     """Process all videos in a batch directory.
 
-    Finds all subdirectories containing video.mp4 and metadata.json,
-    and processes each with the specified options.
+    Finds all subdirectories containing video.mp4 (or video_raw.mp4) and
+    metadata.json, and processes each with the specified options.
+    Outputs video_processed.mp4 in each video directory.
 
     Examples:
 
         # Process entire batch for Shorts with blurred background
-        pendulum-upload batch-process /path/to/batch_output --shorts --blur-bg
+        pendulum-tools batch-process /path/to/batch_output --shorts --blur-bg
 
         # Process first 5 videos with random templates
-        pendulum-upload batch-process /path/to/batch_output --limit 5 -t random
+        pendulum-tools batch-process /path/to/batch_output --limit 5 -t random
 
         # Use specific template for all
-        pendulum-upload batch-process /path/to/batch_output -t hype_mrbeast
+        pendulum-tools batch-process /path/to/batch_output -t hype_mrbeast
     """
-    # Find all video directories
+    # Find all video directories (must have metadata and a video file)
     video_dirs = []
     for item in batch_dir.iterdir():
         if item.is_dir():
-            if (item / "metadata.json").exists() and (item / "video.mp4").exists():
+            has_metadata = (item / "metadata.json").exists()
+            has_video = (item / "video.mp4").exists() or (item / "video_raw.mp4").exists()
+            if has_metadata and has_video:
                 video_dirs.append(item)
 
     video_dirs.sort()

@@ -486,7 +486,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     // Setup video writer if needed
     std::unique_ptr<VideoWriter> video_writer;
     if (config_.output.format == OutputFormat::Video) {
-        std::string video_path = run_directory_ + "/video.mp4";
+        std::string video_path = run_directory_ + "/video_raw.mp4";
         video_writer =
             std::make_unique<VideoWriter>(width, height, config_.output.video_fps, config_.output);
         if (!video_writer->open(video_path)) {
@@ -723,7 +723,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     // Store output paths in results
     results.output_directory = run_directory_;
     if (config_.output.format == OutputFormat::Video) {
-        results.video_path = run_directory_ + "/video.mp4";
+        results.video_path = run_directory_ + "/video_raw.mp4";
     }
 
     // Determine output path for display

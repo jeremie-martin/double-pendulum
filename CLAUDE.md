@@ -207,7 +207,6 @@ Filters use a target-based constraint system that references `[targets.X]` secti
 | Criterion | Purpose |
 |-----------|---------|
 | `min_uniformity` | Minimum distribution uniformity (0=concentrated, 1=uniform, 0.9 recommended) |
-| `require_valid_music` | Fail if no music track has drop > boom time |
 
 **Target Constraints** (`[filter.targets.X]`):
 | Field | Purpose |
@@ -428,49 +427,95 @@ Optional: SDL2 (GUI), FFmpeg (video output)
 - I/O can dominate for PNG output (use video format)
 - 1M pendulums @ 4K: ~5s/frame (RTX 4090)
 
-## YouTube Uploader (Python)
+## Pendulum Tools (Python)
 
-A standalone Python tool for uploading videos to YouTube with auto-generated metadata.
+Python tools for post-processing and uploading double pendulum videos. Handles music, effects, and YouTube uploads.
 
 ### Location
-`youtube-uploader/` - Python project managed with `uv`
+Root level (`pyproject.toml` at repo root) - Python project managed with `uv`
 
 ### Setup
 ```bash
-cd youtube-uploader
 uv sync
 # Place OAuth credentials in credentials/client_secrets.json
 ```
 
+### Output File Naming
+
+| File | Source | Description |
+|------|--------|-------------|
+| `video_raw.mp4` | C++ | Silent video from simulation |
+| `video.mp4` | Python | With music only (lossless mux) |
+| `video_processed.mp4` | Python | With music + effects (re-encoded) |
+
+Files are overwritten on re-run, no nested directories.
+
 ### Commands
 ```bash
-# Preview generated metadata
-uv run pendulum-upload preview /path/to/video_dir
+# Music management
+pendulum-tools music list                    # List all tracks
+pendulum-tools music add /path/to/video     # Add music → video.mp4
+pendulum-tools music sync /path/to/video    # Show valid tracks for boom timing
 
-# Upload single video
-uv run pendulum-upload upload /path/to/video_dir --privacy unlisted
+# Video processing (effects + subtitles)
+pendulum-tools process /path/to/video       # Apply effects → video_processed.mp4
+pendulum-tools batch-process /path/to/batch # Process entire batch
 
-# Upload entire batch
-uv run pendulum-upload batch /path/to/batch_output --limit 10
+# YouTube upload
+pendulum-tools upload /path/to/video --privacy unlisted
+pendulum-tools batch /path/to/batch --limit 10
 
-# Dry run (no upload)
-uv run pendulum-upload upload /path/to/video_dir --dry-run
+# Utilities
+pendulum-tools thumbnail /path/to/video    # Extract thumbnails
+pendulum-tools preview /path/to/video      # Preview upload metadata
+pendulum-tools list-templates              # Show effect templates
 ```
 
 ### Key Files
 | File | Purpose |
 |------|---------|
-| `src/pendulum_uploader/cli.py` | Click CLI commands |
-| `src/pendulum_uploader/uploader.py` | YouTube API integration |
-| `src/pendulum_uploader/templates.py` | Title/description/tag generation |
-| `src/pendulum_uploader/models.py` | Pydantic models for metadata.json |
+| `src/pendulum_tools/cli.py` | Click CLI commands |
+| `src/pendulum_tools/uploader.py` | YouTube API integration |
+| `src/pendulum_tools/music/manager.py` | Music selection and FFmpeg muxing |
+| `src/pendulum_tools/music/database.py` | Music track database (database.json) |
+| `src/pendulum_tools/processing/pipeline.py` | Video effects pipeline |
+| `src/pendulum_tools/processing/templates.py` | Caption/motion templates |
+| `src/pendulum_tools/models.py` | Pydantic models for metadata.json |
 
-### Music Selection with Boom Timing
+### Music and Boom Timing
 
-The batch generator now ensures that music drops happen AFTER the visual boom:
+Music is added to videos using lossless FFmpeg muxing. The music system ensures drops sync with visual booms:
 
-1. After rendering, `boom_seconds` is calculated
-2. `pickMusicTrackForBoom(boom_seconds)` filters tracks where `drop_time > boom_seconds`
-3. If no valid track and `require_valid_music = true`, video fails and retries with new parameters
+1. After simulation, `boom_seconds` is available in metadata.json
+2. `pendulum-tools music add` can auto-select tracks where `drop_time > boom_seconds`
+3. Audio is offset so the drop aligns with the boom frame
 
-This ensures the visual climax always syncs with (or leads) the music drop.
+```python
+from pendulum_tools.music import MusicManager
+
+manager = MusicManager("music")
+track = manager.pick_track_for_boom(boom_seconds=10.5)
+
+if track:
+    MusicManager.mux_with_audio(
+        video_path=Path("video_raw.mp4"),
+        audio_path=track.filepath,
+        output_path=Path("video.mp4"),
+        boom_frame=630,
+        drop_time_ms=track.drop_time_ms,
+        video_fps=60,
+    )
+```
+
+### Effect Templates
+
+Templates define motion effects and caption timing. See `config/templates.toml`:
+
+| Template | Motion Effects | Captions |
+|----------|----------------|----------|
+| `viral_science` | Slow zoom + boom punch + shake | Science/chaos hooks |
+| `hype_mrbeast` | Aggressive zoom + extra shake | Hype text |
+| `dramatic_minimal` | Subtle zoom + punch | No captions |
+| `asmr_calm` | Very slow zoom only | Minimal |
+
+Use `pendulum-tools list-templates` to see all available templates.

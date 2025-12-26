@@ -3,7 +3,6 @@
 #include "config.h"
 #include "metrics/probe_filter.h"
 #include "metrics/probe_pipeline.h"
-#include "music_manager.h"
 #include "optimize/prediction_target.h"
 #include "preset_library.h"
 
@@ -81,7 +80,6 @@ struct FilterCriteria {
 
     // General constraints (not target-based)
     double min_uniformity = 0.0;     // Minimum uniformity (0 = no requirement, 0.9 recommended)
-    bool require_valid_music = false; // Fail if no music track has drop > boom time
 
     // Check if filtering is enabled (any non-default values)
     bool isEnabled() const {
@@ -127,11 +125,6 @@ struct BatchConfig {
 
     // Base config (for parameters not being varied)
     Config base_config;
-
-    // Music settings
-    std::string music_database = "music";
-    bool random_music = true;
-    std::string fixed_track_id; // If random_music is false
 
     // Probe settings for pre-filtering
     int probe_pendulum_count = 1000;  // Pendulum count for fast probing
@@ -195,7 +188,6 @@ public:
 
 private:
     BatchConfig config_;
-    MusicManager music_;
     std::mt19937 rng_;
     std::filesystem::path batch_dir_;
     BatchProgress progress_;
@@ -213,13 +205,6 @@ private:
     // Run probe simulation and check if it passes filter criteria
     // Returns pair of (passes, probe_results)
     std::pair<bool, metrics::ProbePhaseResults> runProbe(Config const& config);
-
-    // Pick a random music track (legacy, doesn't check boom timing)
-    std::optional<MusicTrack> pickMusicTrack();
-
-    // Pick a music track where drop_time > boom_seconds
-    // Returns nullopt if no valid track found (triggers video failure/retry)
-    std::optional<MusicTrack> pickMusicTrackForBoom(double boom_seconds);
 
     // Save progress after each video
     void saveProgress();

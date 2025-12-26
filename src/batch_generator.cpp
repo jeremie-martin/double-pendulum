@@ -111,19 +111,6 @@ BatchConfig BatchConfig::load(std::string const& path) {
             }
         }
 
-        // Music settings
-        if (auto music = tbl["music"].as_table()) {
-            if (auto db = music->get("database")) {
-                config.music_database = db->value<std::string>().value_or("music");
-            }
-            if (auto rand = music->get("random_selection")) {
-                config.random_music = rand->value<bool>().value_or(true);
-            }
-            if (auto track = music->get("track_id")) {
-                config.fixed_track_id = track->value<std::string>().value_or("");
-            }
-        }
-
         // Probe settings
         if (auto probe = tbl["probe"].as_table()) {
             config.probe_enabled = true; // Enable probing if section exists
@@ -149,9 +136,6 @@ BatchConfig BatchConfig::load(std::string const& path) {
             // General constraints (non-target)
             if (auto min_unif = filter->get("min_uniformity")) {
                 config.filter.min_uniformity = min_unif->value<double>().value_or(0.0);
-            }
-            if (auto req_music = filter->get("require_valid_music")) {
-                config.filter.require_valid_music = req_music->value<bool>().value_or(false);
             }
 
             // Target-based constraints: [filter.targets.X]
@@ -325,11 +309,6 @@ void BatchGenerator::setupBatchDirectory() {
 void BatchGenerator::run() {
     setupBatchDirectory();
 
-    // Load music database
-    if (!music_.load(config_.music_database)) {
-        std::cerr << "Warning: Could not load music database\n";
-    }
-
     std::cout << "\n=== Starting Batch Generation ===\n";
     std::cout << "Total videos to generate: " << config_.count << "\n\n";
 
@@ -381,11 +360,6 @@ void BatchGenerator::resume() {
     if (!loadProgress()) {
         std::cerr << "Failed to load progress file\n";
         return;
-    }
-
-    // Load music database
-    if (!music_.load(config_.music_database)) {
-        std::cerr << "Warning: Could not load music database\n";
     }
 
     int start_index = progress_.completed + progress_.failed;
@@ -492,66 +466,6 @@ bool BatchGenerator::generateOne(int index) {
             std::cout << "\rFrame " << current << "/" << total << std::flush;
         });
 
-        // Calculate boom time in VIDEO seconds (for music sync)
-        // Note: This is different from simulation time - video time = frame / fps
-        double boom_video_seconds = 0.0;
-        if (results.boom_frame) {
-            boom_video_seconds = static_cast<double>(*results.boom_frame) / config.output.video_fps;
-        }
-
-        // Mux with music if we have tracks and a boom frame
-        std::string final_video_path = results.video_path;
-        if (results.boom_frame && music_.trackCount() > 0) {
-            auto track = pickMusicTrackForBoom(boom_video_seconds);
-            if (track) {
-                std::filesystem::path video_path = results.video_path;
-                std::filesystem::path output_path =
-                    video_path.parent_path() / (video_path.stem().string() + "_with_music.mp4");
-
-                std::cout << "\nAdding music: " << track->title << "\n";
-                if (MusicManager::muxWithAudio(video_path, track->filepath, output_path,
-                                               *results.boom_frame, track->drop_time_ms,
-                                               config.output.video_fps)) {
-                    // Replace original with muxed version
-                    std::filesystem::remove(video_path);
-                    std::filesystem::rename(output_path, video_path);
-
-                    // Update metadata.json with music track info
-                    std::filesystem::path metadata_path =
-                        std::filesystem::path(config.output.directory) / "metadata.json";
-                    if (std::filesystem::exists(metadata_path)) {
-                        // Read existing metadata
-                        std::ifstream in(metadata_path);
-                        std::string content((std::istreambuf_iterator<char>(in)),
-                                            std::istreambuf_iterator<char>());
-                        in.close();
-
-                        // Insert music info before the closing brace
-                        size_t pos = content.rfind('}');
-                        if (pos != std::string::npos) {
-                            std::ostringstream music_json;
-                            music_json << ",\n  \"music\": {\n";
-                            music_json << "    \"track_id\": \"" << track->id << "\",\n";
-                            music_json << "    \"title\": \"" << track->title << "\",\n";
-                            music_json << "    \"drop_time_ms\": " << track->drop_time_ms << "\n";
-                            music_json << "  }\n";
-                            content.replace(pos, 1, music_json.str() + "}");
-
-                            std::ofstream out(metadata_path);
-                            out << content;
-                        }
-                    }
-                }
-            } else if (config_.filter.require_valid_music) {
-                // No valid music track found (drop not after boom) - fail and retry
-                std::cout << "\nNo music track with drop > " << std::fixed << std::setprecision(1)
-                          << boom_video_seconds << "s (video time) - failing video for retry\n";
-                // Clean up the rendered video
-                std::filesystem::remove(results.video_path);
-                return false;
-            }
-        }
-
         auto end_time = std::chrono::steady_clock::now();
         double duration = std::chrono::duration<double>(end_time - start_time).count();
 
@@ -575,14 +489,14 @@ bool BatchGenerator::generateOne(int index) {
             ? *results.boom_frame * config.simulation.frameDuration() : 0.0;
 
         RunResult result{
-            video_name, final_video_path, true, results.boom_frame, boom_sim_seconds,
+            video_name, results.video_path, true, results.boom_frame, boom_sim_seconds,
             chaos_frame, chaos_seconds, boom_quality,
             duration, results.final_uniformity, probe_retries, simulation_speed};
         progress_.results.push_back(result);
         progress_.completed_ids.push_back(video_name);
 
         // Create symlink to video in batch root
-        createVideoSymlink(final_video_path, video_name + ".mp4");
+        createVideoSymlink(results.video_path, video_name + ".mp4");
 
         return true;
 
@@ -696,54 +610,6 @@ std::pair<bool, metrics::ProbePhaseResults> BatchGenerator::runProbe(Config cons
     results.rejection_reason = filter_result.reason;
 
     return {filter_result.passed, results};
-}
-
-std::optional<MusicTrack> BatchGenerator::pickMusicTrack() {
-    if (music_.tracks().empty()) {
-        return std::nullopt;
-    }
-
-    if (config_.random_music) {
-        return music_.randomTrack();
-    } else if (!config_.fixed_track_id.empty()) {
-        return music_.getTrack(config_.fixed_track_id);
-    }
-
-    return std::nullopt;
-}
-
-std::optional<MusicTrack> BatchGenerator::pickMusicTrackForBoom(double boom_seconds) {
-    if (music_.tracks().empty()) {
-        return std::nullopt;
-    }
-
-    // Filter: only tracks where drop happens AFTER boom
-    std::vector<MusicTrack const*> valid_tracks;
-    for (auto const& track : music_.tracks()) {
-        if (track.dropTimeSeconds() > boom_seconds) {
-            valid_tracks.push_back(&track);
-        }
-    }
-
-    if (valid_tracks.empty()) {
-        return std::nullopt; // No valid tracks - will trigger retry
-    }
-
-    // Random selection from valid tracks
-    if (config_.random_music) {
-        std::uniform_int_distribution<size_t> dist(0, valid_tracks.size() - 1);
-        return *valid_tracks[dist(rng_)];
-    } else if (!config_.fixed_track_id.empty()) {
-        // Check if fixed track is valid for this boom time
-        for (auto const* track : valid_tracks) {
-            if (track->id == config_.fixed_track_id) {
-                return *track;
-            }
-        }
-        return std::nullopt; // Fixed track not valid for this boom time
-    }
-
-    return std::nullopt;
 }
 
 void BatchGenerator::saveProgress() {

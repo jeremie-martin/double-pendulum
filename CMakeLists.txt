@@ -42,7 +42,6 @@ set(CORE_SOURCES
     src/simulation.cpp
     src/simulation_data.cpp
     src/video_writer.cpp
-    src/music_manager.cpp
     src/batch_generator.cpp
     src/preset_library.cpp
     src/headless_gl.cpp

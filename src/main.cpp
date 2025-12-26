@@ -1,6 +1,5 @@
 #include "batch_generator.h"
 #include "enum_strings.h"
-#include "music_manager.h"
 #include "simulation.h"
 
 #include <filesystem>
@@ -26,9 +25,6 @@ void printUsage(char const* program) {
     std::cout << "Double Pendulum Simulation (GPU)\n\n"
               << "Usage:\n"
               << "  " << program << " [config.toml] [options]  Run simulation or batch\n"
-              << "  " << program << " --add-music <video> <track-id> <boom-frame> <fps>\n"
-              << "                                      Add music to existing video\n"
-              << "  " << program << " --list-tracks           List available music tracks\n"
               << "  " << program << " -h, --help              Show this help\n\n"
               << "Config auto-detection:\n"
               << "  If config contains [batch] section, runs batch generation\n"
@@ -37,7 +33,6 @@ void printUsage(char const* program) {
               << "  --set <key>=<value>    Override config parameter (can be used multiple times)\n"
               << "  --analysis             Enable analysis mode (extended statistics)\n"
               << "  --save-data            Save raw simulation data for metric iteration\n"
-              << "  --music <track|random> Add music synced to chaos onset\n"
               << "  --resume               Resume interrupted batch\n\n"
               << "Parameter keys use dot notation: section.parameter\n"
               << "  Sections: physics, simulation, render, post_process, color, detection, output\n\n"
@@ -45,17 +40,14 @@ void printUsage(char const* program) {
               << "  " << program << " config/default.toml\n"
               << "  " << program << " config/default.toml --set simulation.pendulum_count=50000\n"
               << "  " << program << " config/default.toml --set post_process.exposure=2.0 --analysis\n"
-              << "  " << program << " config/default.toml --music random\n"
               << "  " << program << " config/batch.toml\n"
               << "  " << program << " config/batch.toml --resume\n"
-              << "  " << program << " config/batch.toml --set render.width=1920\n"
-              << "  " << program << " --add-music output/run_xxx/video.mp4 petrunko 32 60\n";
+              << "  " << program << " config/batch.toml --set render.width=1920\n";
 }
 
 // Parsed command-line options
 struct CLIOptions {
     std::string config_path = "config/default.toml";
-    std::string music_track;
     std::vector<std::pair<std::string, std::string>> overrides;
     bool analysis = false;
     bool save_data = false;  // Save raw simulation data for metric iteration
@@ -128,9 +120,6 @@ int runSimulation(CLIOptions const& opts) {
     if (config.analysis.enabled) {
         std::cout << "  Analysis:       enabled\n";
     }
-    if (!opts.music_track.empty()) {
-        std::cout << "  Music:          " << opts.music_track << "\n";
-    }
     std::cout << "\n";
 
     // Run simulation
@@ -142,92 +131,7 @@ int runSimulation(CLIOptions const& opts) {
         return 1;
     }
 
-    // Add music if requested and we have a video with boom_frame
-    if (!opts.music_track.empty() && !results.video_path.empty() && results.boom_frame) {
-        MusicManager music;
-        if (!music.load("music")) {
-            std::cerr << "Failed to load music database\n";
-            return 1;
-        }
-
-        std::optional<MusicTrack> track;
-        if (opts.music_track == "random") {
-            if (music.trackCount() > 0) {
-                track = music.randomTrack();
-            }
-        } else {
-            track = music.getTrack(opts.music_track);
-        }
-
-        if (!track) {
-            std::cerr << "Track not found: " << opts.music_track << "\n";
-            std::cerr << "Use --list-tracks to see available tracks\n";
-            return 1;
-        }
-
-        std::filesystem::path video_path = results.video_path;
-        std::filesystem::path output_path =
-            video_path.parent_path() / (video_path.stem().string() + "_with_music.mp4");
-
-        std::cout << "\nAdding music: " << track->title << "\n";
-        if (MusicManager::muxWithAudio(video_path, track->filepath, output_path,
-                                       *results.boom_frame, track->drop_time_ms,
-                                       config.output.video_fps)) {
-            // Replace original with muxed version
-            std::filesystem::remove(video_path);
-            std::filesystem::rename(output_path, video_path);
-            std::cout << "Music added successfully!\n";
-        } else {
-            std::cerr << "Failed to add music\n";
-            return 1;
-        }
-    }
-
     return 0;
-}
-
-int listTracks() {
-    MusicManager music;
-    if (!music.load("music")) {
-        std::cerr << "Failed to load music database\n";
-        return 1;
-    }
-
-    std::cout << "\nAvailable tracks:\n";
-    for (auto const& track : music.tracks()) {
-        std::cout << "  " << track.id << "\n"
-                  << "    Title: " << track.title << "\n"
-                  << "    File: " << track.filepath << "\n"
-                  << "    Drop: " << track.drop_time_ms << "ms (" << track.dropTimeSeconds()
-                  << "s)\n\n";
-    }
-
-    return 0;
-}
-
-int addMusic(std::string const& video_path, std::string const& track_id, int boom_frame, int fps) {
-    MusicManager music;
-    if (!music.load("music")) {
-        std::cerr << "Failed to load music database\n";
-        return 1;
-    }
-
-    auto track = music.getTrack(track_id);
-    if (!track) {
-        std::cerr << "Track not found: " << track_id << "\n";
-        std::cerr << "Use --list-tracks to see available tracks\n";
-        return 1;
-    }
-
-    // Generate output path
-    std::filesystem::path video(video_path);
-    std::filesystem::path output =
-        video.parent_path() / (video.stem().string() + "_with_music" + video.extension().string());
-
-    bool success = MusicManager::muxWithAudio(video_path, track->filepath, output, boom_frame,
-                                              track->drop_time_ms, fps);
-
-    return success ? 0 : 1;
 }
 
 // Parse --set key=value argument
@@ -278,23 +182,6 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    if (arg == "--list-tracks") {
-        return listTracks();
-    }
-
-    if (arg == "--add-music") {
-        if (argc < 6) {
-            std::cerr << "Usage: " << argv[0]
-                      << " --add-music <video> <track-id> <boom-frame> <fps>\n";
-            return 1;
-        }
-        std::string video = argv[2];
-        std::string track_id = argv[3];
-        int boom_frame = std::stoi(argv[4]);
-        int fps = std::stoi(argv[5]);
-        return addMusic(video, track_id, boom_frame, fps);
-    }
-
     // Treat argument as config path
     std::string config_path = arg;
     bool resume = false;
@@ -308,8 +195,6 @@ int main(int argc, char* argv[]) {
         std::string opt = argv[i];
         if (opt == "--resume") {
             resume = true;
-        } else if (opt == "--music" && i + 1 < argc) {
-            opts.music_track = argv[++i];
         } else if (opt == "--set" && i + 1 < argc) {
             auto parsed = parseSetArg(argv[++i]);
             if (!parsed) return 1;

@@ -21,7 +21,3 @@ output_directory = "grid_output"
 # "post_process.gamma" = [1.8, 2.2, 2.6]
 # "physics.initial_angle1_deg" = [150, 170, 180]
 # "simulation.physics_quality" = ["medium", "high", "ultra"]
-
-[music]
-database = "music"
-random_selection = false  # No music for quick tests

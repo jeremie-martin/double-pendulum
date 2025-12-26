@@ -30,7 +30,6 @@ initial_velocity2 = [-0.05, 0.05]
 [filter]
 # General constraints (non-target)
 min_uniformity = 0.9       # Minimum distribution uniformity (0=concentrated, 1=uniform)
-require_valid_music = true # Fail if no music track has drop > boom time
 
 # Target-based constraints (reference [targets.X] by name)
 [filter.targets.boom]
@@ -40,11 +39,6 @@ required = true            # Reject simulations with no detectable boom
 
 # [filter.targets.boom_quality]
 # min_score = 0.6          # Minimum quality score for boom
-
-[music]
-database = "music"
-random_selection = true
-# track_id = "petrunko"  # Use this instead of random_selection for fixed track
 
 # Randomization settings - which presets to randomly select from
 # Names must match presets defined in the preset library

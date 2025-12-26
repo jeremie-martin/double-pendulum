@@ -64,7 +64,7 @@ class ProcessingPipeline:
         """Initialize the processing pipeline.
 
         Args:
-            video_dir: Directory containing video.mp4 and metadata.json
+            video_dir: Directory containing video.mp4 or video_raw.mp4 and metadata.json
             config: Processing configuration (uses defaults if not provided)
         """
         self.video_dir = Path(video_dir)
@@ -77,10 +77,12 @@ class ProcessingPipeline:
 
         self.metadata = VideoMetadata.from_file(metadata_path)
 
-        # Locate input video
+        # Locate input video: prefer video.mp4, fallback to video_raw.mp4
         self.input_video = self.video_dir / "video.mp4"
         if not self.input_video.exists():
-            raise FileNotFoundError(f"video.mp4 not found in {video_dir}")
+            self.input_video = self.video_dir / "video_raw.mp4"
+        if not self.input_video.exists():
+            raise FileNotFoundError(f"No video file found in {video_dir}")
 
         # Load template system
         self.template_lib, self.text_pools = load_template_system()
@@ -99,27 +101,28 @@ class ProcessingPipeline:
         3. ASS subtitles from resolved template
 
         Args:
-            output_dir: Output directory (default: video_dir/processed/)
+            output_dir: Output directory for auxiliary files (default: video_dir)
             dry_run: If True, print FFmpeg command without executing
             force: If True, overwrite existing processed output
 
         Returns:
             ProcessingResult with success status and output paths
         """
-        # Set up output directory
-        output_dir = output_dir or (self.video_dir / "processed")
-
-        if output_dir.exists() and not force and not dry_run:
-            return ProcessingResult(
-                success=False,
-                output_dir=output_dir,
-                error="Output directory already exists. Use --force to overwrite.",
-            )
+        # Output directory for auxiliary files (captions.ass, thumbnails)
+        output_dir = output_dir or self.video_dir
 
         if not dry_run:
             output_dir.mkdir(parents=True, exist_ok=True)
 
-        output_video = output_dir / "video.mp4"
+        # Output video is always video_processed.mp4 in the video directory
+        output_video = self.video_dir / "video_processed.mp4"
+
+        if output_video.exists() and not force and not dry_run:
+            return ProcessingResult(
+                success=False,
+                output_dir=output_dir,
+                error=f"{output_video.name} already exists. Use --force to overwrite.",
+            )
 
         # Load template
         template_name = self.config.template

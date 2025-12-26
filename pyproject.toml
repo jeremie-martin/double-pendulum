@@ -1,7 +1,7 @@
 [project]
-name = "pendulum-uploader"
-version = "0.1.0"
-description = "YouTube uploader for double pendulum simulations"
+name = "pendulum-tools"
+version = "0.2.0"
+description = "Post-processing and upload tools for double pendulum simulations"
 readme = "README.md"
 authors = [
     { name = "Jérémie Martin", email = "martin.jeremie42@gmail.com" }
@@ -18,18 +18,18 @@ dependencies = [
     "pandas>=2.3.3",
     "matplotlib>=3.10.8",
     "numpy>=2.4.0",
-    "pyqt5>=5.15.11",
+    "pyqt6>=6.10.1",
 ]
 
 [project.scripts]
-pendulum-upload = "pendulum_uploader.cli:main"
+pendulum-tools = "pendulum_tools.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pendulum_uploader"]
+packages = ["src/pendulum_tools"]
 
 [tool.uv]
 dev-dependencies = [
