@@ -234,6 +234,54 @@ private:
     // High at caustics (local structure), low in chaos (random)
     double computeLocalCoherence(std::vector<double> const& x2s,
                                  std::vector<double> const& y2s) const;
+
+    // === VELOCITY-BASED METRICS ===
+    // These require angular velocities (omega1, omega2) and use tip velocities
+    // to detect the "boom moment" characterized by opposing motion
+
+    // Compute tip velocities from angles and angular velocities
+    // Returns (vx2, vy2) for each pendulum
+    void computeTipVelocities(std::vector<double> const& th1s,
+                              std::vector<double> const& th2s,
+                              std::vector<double> const& w1s,
+                              std::vector<double> const& w2s,
+                              double L1, double L2,
+                              std::vector<double>& vx2s,
+                              std::vector<double>& vy2s) const;
+
+    // Velocity dispersion: how spread out are velocity directions?
+    // Uses circular statistics on velocity direction angles
+    // 0 = all same direction, 1 = uniformly spread
+    double computeVelocityDispersion(std::vector<double> const& vx2s,
+                                     std::vector<double> const& vy2s) const;
+
+    // Speed variance: normalized variance of tip speeds
+    // High when some pendulums fast, others slow
+    double computeSpeedVariance(std::vector<double> const& vx2s,
+                                std::vector<double> const& vy2s) const;
+
+    // Velocity bimodality: detects "half left, half right" pattern
+    // High when two distinct groups moving in opposite directions
+    double computeVelocityBimodality(std::vector<double> const& vx2s,
+                                     std::vector<double> const& vy2s) const;
+
+    // Angular momentum spread: circular spread of L = r × p for each pendulum
+    // High when angular momenta point in different directions
+    double computeAngularMomentumSpread(std::vector<double> const& th1s,
+                                        std::vector<double> const& th2s,
+                                        std::vector<double> const& w1s,
+                                        std::vector<double> const& w2s,
+                                        double L1, double L2,
+                                        double M1, double M2) const;
+
+    // Acceleration dispersion: how spread out are tip accelerations?
+    // Computed from angular accelerations (derived from ω changes)
+    double computeAccelerationDispersion(std::vector<double> const& th1s,
+                                         std::vector<double> const& th2s,
+                                         std::vector<double> const& w1s,
+                                         std::vector<double> const& w2s,
+                                         double L1, double L2, double G) const;
+
 };
 
 // Standard metric names (use these constants for consistency)
@@ -266,6 +314,13 @@ constexpr const char* TrajectorySmoothness = "trajectory_smoothness";  // Predic
 constexpr const char* Curvature = "curvature";  // Mean curvature of θ→(x,y) mapping
 constexpr const char* TrueFolds = "true_folds";  // Count of actual trajectory crossings
 constexpr const char* LocalCoherence = "local_coherence";  // Neighbor distance vs random distance
+
+// Velocity-based metrics (for boom detection)
+constexpr const char* VelocityDispersion = "velocity_dispersion";  // How spread out velocity directions are
+constexpr const char* SpeedVariance = "speed_variance";            // Variance of tip speeds
+constexpr const char* VelocityBimodality = "velocity_bimodality";  // Two groups going opposite directions
+constexpr const char* AngularMomentumSpread = "angular_momentum_spread";  // Spread of angular momenta
+constexpr const char* AccelerationDispersion = "acceleration_dispersion";  // How spread out accelerations are
 
 // GPU metrics (simplified)
 constexpr const char* MaxValue = "max_value";

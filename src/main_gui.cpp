@@ -93,6 +93,17 @@ struct MetricFlags {
     bool true_folds_deriv = false;
     bool local_coh = false;    // Local coherence
     bool local_coh_deriv = false;
+    // Velocity-based metrics
+    bool vel_dispersion = false;   // Velocity direction dispersion
+    bool vel_dispersion_deriv = false;
+    bool vel_bimodality = false;   // Velocity bimodality (half left/right)
+    bool vel_bimodality_deriv = false;
+    bool speed_variance = false;   // Speed variance (CV of speeds)
+    bool speed_variance_deriv = false;
+    bool ang_momentum = false;     // Angular momentum spread
+    bool ang_momentum_deriv = false;
+    bool accel_dispersion = false; // Acceleration dispersion
+    bool accel_dispersion_deriv = false;
 };
 
 // Export state (thread-safe)
@@ -168,7 +179,9 @@ inline std::vector<std::string> const& getAllBoomMetrics() {
         "spatial_concentration", "fold_causticness", "organization_causticness",
         "r1_concentration", "r2_concentration", "joint_concentration",
         "trajectory_smoothness", "curvature", "true_folds",
-        "local_coherence", "variance"
+        "local_coherence", "variance",
+        "velocity_dispersion", "velocity_bimodality", "speed_variance",
+        "angular_momentum_spread", "acceleration_dispersion"
     };
     return metrics;
 }
@@ -357,7 +370,12 @@ std::string shortenMetricName(std::string const& name) {
         {"curvature", "Curve"},
         {"true_folds", "Folds"},
         {"local_coherence", "Local"},
-        {"variance", "Var"}
+        {"variance", "Var"},
+        {"velocity_dispersion", "VelDisp"},
+        {"velocity_bimodality", "VelBimod"},
+        {"speed_variance", "SpdVar"},
+        {"angular_momentum_spread", "AngMom"},
+        {"acceleration_dispersion", "AccelDisp"}
     };
     auto it = short_names.find(name);
     return it != short_names.end() ? it->second : name;
@@ -1201,6 +1219,128 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
             if (!derivs.empty()) {
                 auto normalized = normalizeData(derivs);
                 ImPlot::PlotLine("LocalCoh'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // ============== VELOCITY-BASED METRICS ==============
+
+        // Plot velocity dispersion (Y2 - normalized 0-1)
+        auto const* vdisp_series = state.metrics_collector.getMetric(metrics::MetricNames::VelocityDispersion);
+        if (state.detailed_flags.vel_dispersion && vdisp_series != nullptr && !vdisp_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            auto const& values = vdisp_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), 2.0f);  // Red
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("VelDisp", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("VelDisp", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.vel_dispersion_deriv && vdisp_series != nullptr && vdisp_series->size() > 1) {
+            auto derivs = vdisp_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.3f, 0.3f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("VelDisp'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // Plot velocity bimodality (Y2 - normalized 0-1)
+        auto const* vbimod_series = state.metrics_collector.getMetric(metrics::MetricNames::VelocityBimodality);
+        if (state.detailed_flags.vel_bimodality && vbimod_series != nullptr && !vbimod_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            auto const& values = vbimod_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), 2.0f);  // Gold
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("VelBimod", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("VelBimod", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.vel_bimodality_deriv && vbimod_series != nullptr && vbimod_series->size() > 1) {
+            auto derivs = vbimod_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.8f, 0.2f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("VelBimod'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // Plot speed variance (Y2 - normalized 0-1)
+        auto const* spdvar_series = state.metrics_collector.getMetric(metrics::MetricNames::SpeedVariance);
+        if (state.detailed_flags.speed_variance && spdvar_series != nullptr && !spdvar_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            auto const& values = spdvar_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(0.8f, 0.5f, 0.2f, 1.0f), 2.0f);  // Brown/Orange
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("SpdVar", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("SpdVar", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.speed_variance_deriv && spdvar_series != nullptr && spdvar_series->size() > 1) {
+            auto derivs = spdvar_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.8f, 0.5f, 0.2f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("SpdVar'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // Plot angular momentum spread (Y2 - normalized 0-1)
+        auto const* angmom_series = state.metrics_collector.getMetric(metrics::MetricNames::AngularMomentumSpread);
+        if (state.detailed_flags.ang_momentum && angmom_series != nullptr && !angmom_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            auto const& values = angmom_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(0.6f, 0.2f, 0.8f, 1.0f), 2.0f);  // Purple
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("AngMom", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("AngMom", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.ang_momentum_deriv && angmom_series != nullptr && angmom_series->size() > 1) {
+            auto derivs = angmom_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.6f, 0.2f, 0.8f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("AngMom'", frames.data() + 1, normalized.data(), derivs.size());
+            }
+        }
+
+        // Plot acceleration dispersion (Y2 - normalized 0-1)
+        auto const* accel_series = state.metrics_collector.getMetric(metrics::MetricNames::AccelerationDispersion);
+        if (state.detailed_flags.accel_dispersion && accel_series != nullptr && !accel_series->empty()) {
+            if (s_plot_mode == PlotMode::MultiAxis) {
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            }
+            auto const& values = accel_series->values();
+            ImPlot::SetNextLineStyle(ImVec4(0.2f, 0.8f, 0.6f, 1.0f), 2.0f);  // Teal
+            if (s_plot_mode == PlotMode::Normalized) {
+                auto normalized = normalizeData(values);
+                ImPlot::PlotLine("AccelDisp", frames.data(), normalized.data(), normalized.size());
+            } else {
+                ImPlot::PlotLine("AccelDisp", frames.data(), values.data(), values.size());
+            }
+        }
+        if (state.detailed_flags.accel_dispersion_deriv && accel_series != nullptr && accel_series->size() > 1) {
+            auto derivs = accel_series->derivativeHistory();
+            ImPlot::SetNextLineStyle(ImVec4(0.2f, 0.8f, 0.6f, 0.4f), 1.0f);
+            if (!derivs.empty()) {
+                auto normalized = normalizeData(derivs);
+                ImPlot::PlotLine("AccelDisp'", frames.data() + 1, normalized.data(), derivs.size());
             }
         }
 
@@ -3033,6 +3173,19 @@ int main(int argc, char* argv[]) {
         ImGui::SameLine();
         metricWithDeriv("LocalCoh", &state.detailed_flags.local_coh, &state.detailed_flags.local_coh_deriv, "lcoh");
 
+        // Sixth row: velocity-based metrics
+        ImGui::Text("Vel:");
+        ImGui::SameLine();
+        metricWithDeriv("Disp", &state.detailed_flags.vel_dispersion, &state.detailed_flags.vel_dispersion_deriv, "vdisp");
+        ImGui::SameLine();
+        metricWithDeriv("Bimod", &state.detailed_flags.vel_bimodality, &state.detailed_flags.vel_bimodality_deriv, "vbimod");
+        ImGui::SameLine();
+        metricWithDeriv("SpdVar", &state.detailed_flags.speed_variance, &state.detailed_flags.speed_variance_deriv, "spdvar");
+        ImGui::SameLine();
+        metricWithDeriv("AngMom", &state.detailed_flags.ang_momentum, &state.detailed_flags.ang_momentum_deriv, "angmom");
+        ImGui::SameLine();
+        metricWithDeriv("Accel", &state.detailed_flags.accel_dispersion, &state.detailed_flags.accel_dispersion_deriv, "accel");
+
         // Full metric graph
         ImVec2 metrics_graph_size = ImGui::GetContentRegionAvail();
         metrics_graph_size.y = std::max(150.0f, metrics_graph_size.y - 100.0f);
@@ -3092,6 +3245,18 @@ int main(int argc, char* argv[]) {
             ImGui::TableNextRow();
             showMetric("TrueFold", metrics::MetricNames::TrueFolds);
             showMetric("LocalCoh", metrics::MetricNames::LocalCoherence);
+
+            // Velocity metrics
+            ImGui::TableNextRow();
+            showMetric("VelDisp", metrics::MetricNames::VelocityDispersion);
+            showMetric("VelBimod", metrics::MetricNames::VelocityBimodality);
+
+            ImGui::TableNextRow();
+            showMetric("SpdVar", metrics::MetricNames::SpeedVariance);
+            showMetric("AngMom", metrics::MetricNames::AngularMomentumSpread);
+
+            ImGui::TableNextRow();
+            showMetric("AccelDisp", metrics::MetricNames::AccelerationDispersion);
 
             ImGui::EndTable();
         }

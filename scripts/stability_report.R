@@ -41,6 +41,8 @@ METRIC_CATEGORIES <- list(
                               "r2_concentration", "joint_concentration"),
   "Causticness (Spatial)" = c("spatial_concentration", "fold_causticness"),
   "Local Coherence" = c("trajectory_smoothness", "curvature", "true_folds", "local_coherence"),
+  "Velocity" = c("velocity_dispersion", "velocity_bimodality", "speed_variance",
+                 "angular_momentum_spread", "acceleration_dispersion"),
   "Other" = c("total_energy")
 )
 
@@ -382,20 +384,16 @@ plot_metric_deviation <- function(data, metric_name) {
     theme_stability()
 }
 
-# Combined comparison + deviation plot
+# Comparison plot (values only)
 plot_metric_analysis <- function(data, metric_name, report_dir) {
   p1 <- plot_metric_comparison(data, metric_name)
-  p2 <- plot_metric_deviation(data, metric_name)
 
-  if (is.null(p1) || is.null(p2)) return(FALSE)
+  if (is.null(p1)) return(FALSE)
 
-  # Save both plots
   filename_base <- gsub("_", "-", metric_name)
 
   ggsave(file.path(report_dir, paste0("metric_", filename_base, "_values.png")),
          p1, width = 10, height = 5, dpi = 300)
-  ggsave(file.path(report_dir, paste0("metric_", filename_base, "_deviation.png")),
-         p2, width = 10, height = 5, dpi = 300)
 
   return(TRUE)
 }
@@ -899,7 +897,7 @@ generate_index <- function(report_dir, metrics_dir, metrics, summary_data, abs_s
 
   html <- paste0(html, '
   <h2>Individual Metrics</h2>
-  <p>Detailed time series comparison and deviation plots for each metric:</p>
+  <p>Detailed time series comparison plots for each metric:</p>
 ')
 
   # Add links to each metric
@@ -914,10 +912,9 @@ generate_index <- function(report_dir, metrics_dir, metrics, summary_data, abs_s
     <h3>%s <span class="%s">[%s]</span></h3>
     <div class="plot-grid">
       <div class="plot-container"><img src="metrics/metric_%s_values.png" alt="%s values"></div>
-      <div class="plot-container"><img src="metrics/metric_%s_deviation.png" alt="%s deviation"></div>
     </div>
   </div>
-', m, grade_class, grade, filename_base, m, filename_base, m))
+', m, grade_class, grade, filename_base, m))
   }
 
   html <- paste0(html, '

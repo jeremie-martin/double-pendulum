@@ -250,6 +250,73 @@ Early in simulation, pendulums are bunched together:
 
 ---
 
+## Category 6: Velocity-Based Metrics (NEW)
+
+These metrics use angular velocities (ω1, ω2) to compute tip velocities and analyze their distribution.
+They capture the *dynamics* of the boom moment rather than just positions.
+
+### 22. `velocity_dispersion`
+- **Purpose**: How spread out are velocity DIRECTIONS?
+- **Formula**: `1 - R` where R = mean resultant length of velocity direction angles
+- **N-independence**: ✅ Yes - circular statistics normalized by N
+- **Range**: [0, 1] (0=all same direction, 1=uniform/dispersed)
+- **Stability**: A+ (0.1% CV overall, 0.1% at boom)
+- **Boom behavior**: Moderate (~0.78) at boom
+- **Verdict**: ✅ Excellent stability
+
+### 23. `velocity_bimodality`
+- **Purpose**: Detects "half left, half right" opposing velocity pattern
+- **Formula**: `(gap / 2σ) × balance` where gap = separation of positive/negative projections
+- **N-independence**: ✅ Yes - based on statistical properties
+- **Range**: [0, 1]
+- **Stability**: A+ (0.1% CV overall, 0.1% at boom)
+- **Boom behavior**: HIGH (~0.79) at boom - strong bimodal pattern detected!
+- **Peak timing**: Actually peaks ~1.2s BEFORE boom (frame 453 vs 527)
+- **Analysis**: This detects the *divergence moment* when pendulums start separating,
+  which precedes the visual caustic formation
+- **Verdict**: ✅ Excellent - best detector of opposing motion
+
+### 24. `speed_variance`
+- **Purpose**: Normalized variance of tip speeds (CV of speeds)
+- **Formula**: `std(speeds) / mean(speeds)`, clamped to [0, 1]
+- **N-independence**: ✅ Yes - CV is scale-free
+- **Range**: [0, 1]
+- **Stability**: A+ (0.1% CV overall, 0.2% at boom)
+- **Boom behavior**: Moderate (~0.60) at boom, decreases toward chaos
+- **Verdict**: ✅ Excellent stability
+
+### 25. `angular_momentum_spread`
+- **Purpose**: Spread of angular momenta about the pivot
+- **Formula**: Balance of clockwise/counterclockwise rotation + magnitude variance
+- **N-independence**: ✅ Yes - normalized by N
+- **Range**: [0, 1]
+- **Boom behavior**: High when half rotate CW, half CCW
+- **Verdict**: TBD (new metric)
+
+### 26. `acceleration_dispersion`
+- **Purpose**: How spread out are tip accelerations?
+- **Formula**: `1 - R` where R = mean resultant length of acceleration direction angles
+- **N-independence**: ✅ Yes - circular statistics normalized by N
+- **Range**: [0, 1]
+- **Boom behavior**: Captures force/torque divergence
+- **Verdict**: TBD (new metric)
+
+### Key Insight: Velocity vs Position Metrics
+
+Position-based metrics (causticness, etc.) detect the *visual caustic* - when pendulums
+spatially cluster in fold patterns.
+
+Velocity-based metrics detect the *dynamics* that create caustics:
+1. **Early phase**: All velocities aligned (low dispersion, low bimodality)
+2. **Pre-boom (~1.2s before)**: Velocities diverge into two groups (peak bimodality)
+3. **Boom**: Caustic forms as diverging groups cross paths
+4. **Chaos**: Random velocities (high dispersion, moderate bimodality)
+
+The `velocity_bimodality` peak PRECEDES the causticness peak, making it potentially
+useful for predicting boom timing.
+
+---
+
 ## Recommendations for Future Work
 
 ### Potential Improvements (Low Priority)
@@ -261,5 +328,8 @@ Early in simulation, pendulums are bunched together:
 Based on stability analysis, these are the most reliable at N=1000:
 1. `circular_spread` - 0.1% CV overall, 0.1% at boom
 2. `variance` - 0.4% CV overall, 0.1% at boom
-3. `r1_concentration` - 1.8% CV overall, 0.0% at boom
-4. `cv_causticness` - 22.1% overall, 4.7% at boom (good for boom detection)
+3. `velocity_bimodality` - 0.1% CV overall, 0.1% at boom (NEW - excellent!)
+4. `velocity_dispersion` - 0.1% CV overall, 0.1% at boom (NEW)
+5. `speed_variance` - 0.1% CV overall, 0.2% at boom (NEW)
+6. `r1_concentration` - 1.8% CV overall, 0.0% at boom
+7. `cv_causticness` - 22.1% overall, 4.7% at boom (good for boom detection)

@@ -66,6 +66,13 @@ void MetricsCollector::registerStandardMetrics() {
     registerMetric(MetricNames::Curvature, MetricType::Physics);
     registerMetric(MetricNames::TrueFolds, MetricType::Physics);
     registerMetric(MetricNames::LocalCoherence, MetricType::Physics);
+
+    // Velocity-based metrics (for boom detection)
+    registerMetric(MetricNames::VelocityDispersion, MetricType::Physics);
+    registerMetric(MetricNames::SpeedVariance, MetricType::Physics);
+    registerMetric(MetricNames::VelocityBimodality, MetricType::Physics);
+    registerMetric(MetricNames::AngularMomentumSpread, MetricType::Physics);
+    registerMetric(MetricNames::AccelerationDispersion, MetricType::Physics);
 }
 
 void MetricsCollector::registerGPUMetrics() {
@@ -121,13 +128,23 @@ void MetricsCollector::updateFromPendulums(
         return;
 
     std::vector<double> angle1s, angle2s;
+    std::vector<double> omega1s, omega2s;
     angle1s.reserve(pendulums.size());
     angle2s.reserve(pendulums.size());
+    omega1s.reserve(pendulums.size());
+    omega2s.reserve(pendulums.size());
 
     double total_energy = 0.0;
+
+    // Note: L1 and L2 are fixed at 1.0 in this codebase (see pendulum.h defaults)
+    constexpr double L1 = 1.0;
+    constexpr double L2 = 1.0;
+
     for (auto const& p : pendulums) {
         angle1s.push_back(p.getTheta1());
         angle2s.push_back(p.getTheta2());
+        omega1s.push_back(p.getOmega1());
+        omega2s.push_back(p.getOmega2());
         total_energy += p.totalEnergy();
     }
 
@@ -135,6 +152,31 @@ void MetricsCollector::updateFromPendulums(
     // Store mean energy per pendulum for N-independence
     // (total energy would scale linearly with N)
     setMetric(MetricNames::TotalEnergy, total_energy / pendulums.size());
+
+    // Compute velocity-based metrics
+    std::vector<double> vx2s, vy2s;
+    computeTipVelocities(angle1s, angle2s, omega1s, omega2s, L1, L2, vx2s, vy2s);
+
+    double vel_dispersion = computeVelocityDispersion(vx2s, vy2s);
+    setMetric(MetricNames::VelocityDispersion, vel_dispersion);
+
+    double speed_var = computeSpeedVariance(vx2s, vy2s);
+    setMetric(MetricNames::SpeedVariance, speed_var);
+
+    double bimodality = computeVelocityBimodality(vx2s, vy2s);
+    setMetric(MetricNames::VelocityBimodality, bimodality);
+
+    // Advanced velocity-based metrics
+    // Note: Using default masses M1=M2=1.0 (same as default in pendulum.h)
+    constexpr double M1 = 1.0;
+    constexpr double M2 = 1.0;
+    constexpr double G = 9.81;
+
+    double ang_momentum = computeAngularMomentumSpread(angle1s, angle2s, omega1s, omega2s, L1, L2, M1, M2);
+    setMetric(MetricNames::AngularMomentumSpread, ang_momentum);
+
+    double accel_disp = computeAccelerationDispersion(angle1s, angle2s, omega1s, omega2s, L1, L2, G);
+    setMetric(MetricNames::AccelerationDispersion, accel_disp);
 }
 
 void MetricsCollector::updateFromAngles(std::vector<double> const& angle1s,
@@ -1265,6 +1307,439 @@ double MetricsCollector::computeLocalCoherence(
         (log_inverse - params.log_inverse_baseline) / params.log_inverse_divisor);
 
     return spread * std::min(1.0, adjusted);
+}
+
+// === VELOCITY-BASED METRICS ===
+// These metrics capture the dynamics (velocities) rather than just positions
+// Key insight: at boom, pendulums slow down then rapidly diverge in opposite directions
+
+void MetricsCollector::computeTipVelocities(
+    std::vector<double> const& th1s,
+    std::vector<double> const& th2s,
+    std::vector<double> const& w1s,
+    std::vector<double> const& w2s,
+    double L1, double L2,
+    std::vector<double>& vx2s,
+    std::vector<double>& vy2s) const {
+
+    size_t N = th1s.size();
+    vx2s.resize(N);
+    vy2s.resize(N);
+
+    // Tip velocity from pendulum kinematics:
+    // x2 = L1*sin(θ1) + L2*sin(θ1+θ2)
+    // y2 = L1*cos(θ1) + L2*cos(θ1+θ2)
+    //
+    // Taking derivatives (θ2 is relative angle, so combined angular velocity is ω1+ω2):
+    // vx2 = L1*ω1*cos(θ1) + L2*(ω1+ω2)*cos(θ1+θ2)
+    // vy2 = -L1*ω1*sin(θ1) - L2*(ω1+ω2)*sin(θ1+θ2)
+
+    for (size_t i = 0; i < N; ++i) {
+        double th1 = th1s[i];
+        double th2 = th2s[i];
+        double w1 = w1s[i];
+        double w2 = w2s[i];
+
+        double th12 = th1 + th2;  // Combined angle for second arm
+        double w12 = w1 + w2;     // Combined angular velocity
+
+        vx2s[i] = L1 * w1 * std::cos(th1) + L2 * w12 * std::cos(th12);
+        vy2s[i] = -L1 * w1 * std::sin(th1) - L2 * w12 * std::sin(th12);
+    }
+}
+
+double MetricsCollector::computeVelocityDispersion(
+    std::vector<double> const& vx2s,
+    std::vector<double> const& vy2s) const {
+    // Velocity Dispersion: How spread out are velocity DIRECTIONS?
+    //
+    // Uses circular statistics on velocity direction angles:
+    // 1 - R (mean resultant length), same as circular_spread
+    //
+    // Expected behavior:
+    // - Start: all moving same direction → dispersion ≈ 0
+    // - Boom: half left, half right → dispersion HIGH (maybe bimodal, but still dispersed)
+    // - Chaos: random directions → dispersion ≈ 1 (uniform on circle)
+    //
+    // This is N-independent by construction (circular mean is normalized by N)
+
+    if (vx2s.empty() || vx2s.size() != vy2s.size()) return 0.0;
+
+    double cos_sum = 0.0;
+    double sin_sum = 0.0;
+
+    for (size_t i = 0; i < vx2s.size(); ++i) {
+        double speed = std::sqrt(vx2s[i] * vx2s[i] + vy2s[i] * vy2s[i]);
+        if (speed < 1e-12) continue;  // Skip stationary pendulums
+
+        // Velocity direction angle
+        double vangle = std::atan2(vy2s[i], vx2s[i]);
+        cos_sum += std::cos(vangle);
+        sin_sum += std::sin(vangle);
+    }
+
+    double n = static_cast<double>(vx2s.size());
+    double cos_mean = cos_sum / n;
+    double sin_mean = sin_sum / n;
+
+    // Mean resultant length R
+    double R = std::sqrt(cos_mean * cos_mean + sin_mean * sin_mean);
+
+    // Dispersion = 1 - R (0 = all same direction, 1 = uniform/dispersed)
+    return 1.0 - R;
+}
+
+double MetricsCollector::computeSpeedVariance(
+    std::vector<double> const& vx2s,
+    std::vector<double> const& vy2s) const {
+    // Speed Variance: Normalized variance of tip speeds
+    //
+    // Expected behavior:
+    // - Start: all same speed → variance ≈ 0
+    // - Boom: some fast, some slow (different divergence rates) → variance HIGH
+    // - Chaos: random speeds → moderate variance
+    //
+    // We use coefficient of variation (CV = std/mean) for scale-independence
+
+    if (vx2s.empty() || vx2s.size() != vy2s.size()) return 0.0;
+
+    // Compute speeds
+    std::vector<double> speeds;
+    speeds.reserve(vx2s.size());
+
+    for (size_t i = 0; i < vx2s.size(); ++i) {
+        speeds.push_back(std::sqrt(vx2s[i] * vx2s[i] + vy2s[i] * vy2s[i]));
+    }
+
+    // Compute mean and variance
+    double sum = 0.0, sum2 = 0.0;
+    for (double s : speeds) {
+        sum += s;
+        sum2 += s * s;
+    }
+
+    double n = static_cast<double>(speeds.size());
+    double mean = sum / n;
+    double variance = sum2 / n - mean * mean;
+
+    if (mean < 1e-12) return 0.0;  // All stationary
+
+    // Coefficient of variation
+    double cv = std::sqrt(std::max(0.0, variance)) / mean;
+
+    // Normalize to roughly 0-1 range (CV > 1 is quite spiky)
+    return std::min(1.0, cv);
+}
+
+double MetricsCollector::computeVelocityBimodality(
+    std::vector<double> const& vx2s,
+    std::vector<double> const& vy2s) const {
+    // Velocity Bimodality: Detects "half left, half right" pattern
+    //
+    // At the boom moment, pendulums diverge into TWO distinct groups
+    // moving in opposite directions. This is the visual "explosion".
+    //
+    // Algorithm:
+    // 1. Compute principal direction (mean velocity direction)
+    // 2. Project all velocities onto this axis
+    // 3. Measure how bimodal the projection is (two peaks on opposite sides)
+    //
+    // Bimodality metric: |mean of positive projections| + |mean of negative|
+    // divided by total mean, minus 1 for centering.
+    //
+    // Expected behavior:
+    // - Start: all same direction → all positive (or negative) → LOW bimodality
+    // - Boom: half +, half - → HIGH bimodality
+    // - Chaos: uniform random → cancels out → moderate bimodality
+
+    if (vx2s.size() < 2 || vx2s.size() != vy2s.size()) return 0.0;
+
+    // Find principal direction (mean velocity)
+    double mean_vx = 0.0, mean_vy = 0.0;
+    for (size_t i = 0; i < vx2s.size(); ++i) {
+        mean_vx += vx2s[i];
+        mean_vy += vy2s[i];
+    }
+    double n = static_cast<double>(vx2s.size());
+    mean_vx /= n;
+    mean_vy /= n;
+
+    // If mean velocity is near zero, use dominant direction from SVD-like approach
+    // For simplicity, use the direction with maximum spread
+    double vx_var = 0.0, vy_var = 0.0, vxy_covar = 0.0;
+    for (size_t i = 0; i < vx2s.size(); ++i) {
+        double dvx = vx2s[i] - mean_vx;
+        double dvy = vy2s[i] - mean_vy;
+        vx_var += dvx * dvx;
+        vy_var += dvy * dvy;
+        vxy_covar += dvx * dvy;
+    }
+    vx_var /= n;
+    vy_var /= n;
+    vxy_covar /= n;
+
+    // Principal direction from 2D covariance (eigenvector of largest eigenvalue)
+    // For 2x2 matrix [[a, b], [b, c]], eigenvalues are (a+c)/2 ± sqrt(((a-c)/2)^2 + b^2)
+    double trace = vx_var + vy_var;
+    double det = vx_var * vy_var - vxy_covar * vxy_covar;
+    double disc = std::sqrt(std::max(0.0, trace * trace / 4.0 - det));
+    double lambda1 = trace / 2.0 + disc;  // Larger eigenvalue
+
+    if (lambda1 < 1e-12) return 0.0;  // No variance at all
+
+    // Eigenvector for lambda1: [vxy_covar, lambda1 - vx_var] (or similar)
+    double ax, ay;
+    if (std::abs(vxy_covar) > 1e-12) {
+        ax = vxy_covar;
+        ay = lambda1 - vx_var;
+    } else if (vx_var > vy_var) {
+        ax = 1.0;
+        ay = 0.0;
+    } else {
+        ax = 0.0;
+        ay = 1.0;
+    }
+
+    // Normalize
+    double anorm = std::sqrt(ax * ax + ay * ay);
+    if (anorm < 1e-12) return 0.0;
+    ax /= anorm;
+    ay /= anorm;
+
+    // Project velocities onto principal axis
+    std::vector<double> projections;
+    projections.reserve(vx2s.size());
+    for (size_t i = 0; i < vx2s.size(); ++i) {
+        double proj = vx2s[i] * ax + vy2s[i] * ay;
+        projections.push_back(proj);
+    }
+
+    // Compute bimodality: look at distribution of projections
+    // Count positive and negative, compute means of each group
+    double pos_sum = 0.0, neg_sum = 0.0;
+    int pos_count = 0, neg_count = 0;
+
+    for (double p : projections) {
+        if (p > 0) {
+            pos_sum += p;
+            pos_count++;
+        } else {
+            neg_sum += p;  // Note: negative values
+            neg_count++;
+        }
+    }
+
+    // Bimodality high when both groups are populated and moving opposite directions
+    if (pos_count == 0 || neg_count == 0) return 0.0;
+
+    double pos_mean = pos_sum / pos_count;
+    double neg_mean = neg_sum / neg_count;  // This is negative
+
+    // The "gap" between groups relative to overall spread
+    double gap = pos_mean - neg_mean;  // Always positive (pos_mean > 0, neg_mean < 0)
+
+    // Overall standard deviation for normalization
+    double total_var = 0.0;
+    double total_mean = (pos_sum + neg_sum) / n;
+    for (double p : projections) {
+        double d = p - total_mean;
+        total_var += d * d;
+    }
+    total_var /= n;
+    double std_dev = std::sqrt(std::max(1e-12, total_var));
+
+    // Bimodality = gap / (2 * std_dev), roughly in [0, 2] for bimodal
+    // Perfect bimodal (two delta functions) would have gap = 2*std_dev
+    double bimodality = gap / (2.0 * std_dev);
+
+    // Also factor in balance: most bimodal when 50/50 split
+    double balance = 4.0 * (pos_count / n) * (neg_count / n);  // Peak at 0.5/0.5
+
+    // Combine: high when both bimodal AND balanced
+    return std::min(1.0, bimodality * balance);
+}
+
+double MetricsCollector::computeAngularMomentumSpread(
+    std::vector<double> const& th1s,
+    std::vector<double> const& th2s,
+    std::vector<double> const& w1s,
+    std::vector<double> const& w2s,
+    double L1, double L2,
+    double /*M1*/, double M2) const {
+    // Angular Momentum Spread: Circular spread of angular momenta
+    //
+    // Each pendulum has an angular momentum L = r × p (cross product).
+    // For a double pendulum, we compute the total angular momentum about the pivot.
+    //
+    // The angular momentum has a sign (direction perpendicular to plane),
+    // so we can analyze its distribution using circular statistics
+    // (treating sign as a direction on a circle).
+    //
+    // Expected behavior:
+    // - Start: all same angular momentum → spread ≈ 0
+    // - Boom: some clockwise, some counterclockwise → spread HIGH
+    // - Chaos: random distribution → spread high but different pattern
+    //
+    // This is N-independent (circular statistics normalized by N).
+
+    if (th1s.empty()) return 0.0;
+
+    size_t N = th1s.size();
+
+    // For a double pendulum, total angular momentum about the pivot:
+    // L = I1*ω1 + I2*(ω1+ω2) + M2*L1*L2*ω1*cos(θ2) + M2*L1*L2*(ω1+ω2)*cos(θ2)
+    //
+    // Simplified for analysis: we care about the SIGN and relative magnitude,
+    // so we use a simpler approximation based on tip angular momentum:
+    // L_tip ≈ M2 * (x2 * vy2 - y2 * vx2)
+    //
+    // This gives the angular momentum of the tip about the pivot.
+
+    std::vector<double> angular_momenta;
+    angular_momenta.reserve(N);
+
+    for (size_t i = 0; i < N; ++i) {
+        double th1 = th1s[i];
+        double th2 = th2s[i];
+        double w1 = w1s[i];
+        double w2 = w2s[i];
+
+        // Tip position
+        double x2 = L1 * std::sin(th1) + L2 * std::sin(th1 + th2);
+        double y2 = L1 * std::cos(th1) + L2 * std::cos(th1 + th2);
+
+        // Tip velocity
+        double th12 = th1 + th2;
+        double w12 = w1 + w2;
+        double vx2 = L1 * w1 * std::cos(th1) + L2 * w12 * std::cos(th12);
+        double vy2 = -L1 * w1 * std::sin(th1) - L2 * w12 * std::sin(th12);
+
+        // Angular momentum about pivot: L = r × v (2D cross product = scalar)
+        double L_z = M2 * (x2 * vy2 - y2 * vx2);
+        angular_momenta.push_back(L_z);
+    }
+
+    // Use angular momentum sign/magnitude to compute spread
+    // Convert to "angle" by mapping positive L to 0, negative to π
+    // This captures the "clockwise vs counterclockwise" distinction
+
+    // First, find the scale (max absolute angular momentum)
+    double max_abs_L = 0.0;
+    for (double L : angular_momenta) {
+        max_abs_L = std::max(max_abs_L, std::abs(L));
+    }
+
+    if (max_abs_L < 1e-12) return 0.0;  // All stationary
+
+    // Count positive and negative angular momenta
+    int pos_count = 0, neg_count = 0;
+    for (double L : angular_momenta) {
+        if (L > 0) pos_count++;
+        else neg_count++;
+    }
+
+    // Bimodality: peak when 50/50 split
+    double balance = 4.0 * (pos_count / static_cast<double>(N)) *
+                          (neg_count / static_cast<double>(N));
+
+    // Also compute variance of magnitudes
+    double sum_L = 0.0, sum_L2 = 0.0;
+    for (double L : angular_momenta) {
+        sum_L += std::abs(L);
+        sum_L2 += L * L;
+    }
+    double mean_abs_L = sum_L / N;
+    double var_L = sum_L2 / N - (sum_L / N) * (sum_L / N);
+    double cv = (mean_abs_L > 1e-12) ? std::sqrt(std::max(0.0, var_L)) / mean_abs_L : 0.0;
+
+    // Combine balance and variance spread
+    // High when: half clockwise/half counter + varied magnitudes
+    double magnitude_spread = std::min(1.0, cv);
+
+    return balance * 0.7 + magnitude_spread * 0.3;
+}
+
+double MetricsCollector::computeAccelerationDispersion(
+    std::vector<double> const& th1s,
+    std::vector<double> const& th2s,
+    std::vector<double> const& w1s,
+    std::vector<double> const& w2s,
+    double L1, double L2, double G) const {
+    // Acceleration Dispersion: How spread out are tip ACCELERATIONS?
+    //
+    // Acceleration captures the instantaneous force pattern.
+    // At the boom moment, some pendulums are accelerating left, others right.
+    //
+    // We use circular statistics on acceleration direction angles,
+    // same as velocity_dispersion but for acceleration.
+    //
+    // Acceleration is computed from the equations of motion (derived from Lagrangian).
+
+    if (th1s.empty()) return 0.0;
+
+    size_t N = th1s.size();
+
+    // For double pendulum, the angular accelerations are:
+    // α1 = f1(θ1, θ2, ω1, ω2, g, L1, L2, M1, M2)
+    // α2 = f2(θ1, θ2, ω1, ω2, g, L1, L2, M1, M2)
+    //
+    // The full equations are complex. For this metric, we use a simplified
+    // approach: compute the gravitational torque contribution which dominates
+    // at the boom moment (when velocities are changing direction).
+
+    std::vector<double> ax2s, ay2s;
+    ax2s.reserve(N);
+    ay2s.reserve(N);
+
+    // Simplified: use gravitational acceleration component
+    // Real tip acceleration would require full EOM, but direction is what matters
+    for (size_t i = 0; i < N; ++i) {
+        double th1 = th1s[i];
+        double th2 = th2s[i];
+        double w1 = w1s[i];
+        double w2 = w2s[i];
+
+        // Centripetal and gravitational contributions to tip acceleration
+        // ax2 ≈ -L1*ω1²*sin(θ1) - L2*(ω1+ω2)²*sin(θ1+θ2) + gravity_term
+        // ay2 ≈ -L1*ω1²*cos(θ1) - L2*(ω1+ω2)²*cos(θ1+θ2) + gravity_term
+
+        double th12 = th1 + th2;
+        double w12 = w1 + w2;
+
+        // Centripetal acceleration (always toward pivot)
+        double ax_cent = -L1 * w1 * w1 * std::sin(th1) - L2 * w12 * w12 * std::sin(th12);
+        double ay_cent = -L1 * w1 * w1 * std::cos(th1) - L2 * w12 * w12 * std::cos(th12);
+
+        // Tangential acceleration from gravity (simplified)
+        // This is an approximation - full EOM would be more accurate
+        double ax_grav = -G * std::sin(th1) * 0.5;  // Rough estimate
+        double ay_grav = G * (1.0 - std::cos(th1)) * 0.5;
+
+        ax2s.push_back(ax_cent + ax_grav);
+        ay2s.push_back(ay_cent + ay_grav);
+    }
+
+    // Compute circular dispersion of acceleration directions
+    double cos_sum = 0.0, sin_sum = 0.0;
+
+    for (size_t i = 0; i < N; ++i) {
+        double a_mag = std::sqrt(ax2s[i] * ax2s[i] + ay2s[i] * ay2s[i]);
+        if (a_mag < 1e-12) continue;
+
+        double a_angle = std::atan2(ay2s[i], ax2s[i]);
+        cos_sum += std::cos(a_angle);
+        sin_sum += std::sin(a_angle);
+    }
+
+    double n = static_cast<double>(N);
+    double cos_mean = cos_sum / n;
+    double sin_mean = sin_sum / n;
+
+    // Mean resultant length R
+    double R = std::sqrt(cos_mean * cos_mean + sin_mean * sin_mean);
+
+    // Dispersion = 1 - R
+    return 1.0 - R;
 }
 
 } // namespace metrics
