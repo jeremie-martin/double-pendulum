@@ -407,6 +407,12 @@ void Simulation::saveMetricsCSV() {
     auto* curvature = metrics_collector_.getMetric(metrics::MetricNames::Curvature);
     auto* true_folds = metrics_collector_.getMetric(metrics::MetricNames::TrueFolds);
     auto* local_coherence = metrics_collector_.getMetric(metrics::MetricNames::LocalCoherence);
+    // Velocity-based metrics
+    auto* velocity_dispersion = metrics_collector_.getMetric(metrics::MetricNames::VelocityDispersion);
+    auto* speed_variance = metrics_collector_.getMetric(metrics::MetricNames::SpeedVariance);
+    auto* velocity_bimodality = metrics_collector_.getMetric(metrics::MetricNames::VelocityBimodality);
+    auto* angular_momentum_spread = metrics_collector_.getMetric(metrics::MetricNames::AngularMomentumSpread);
+    auto* acceleration_dispersion = metrics_collector_.getMetric(metrics::MetricNames::AccelerationDispersion);
     // GPU and energy metrics
     auto* brightness = metrics_collector_.getMetric(metrics::MetricNames::Brightness);
     auto* coverage = metrics_collector_.getMetric(metrics::MetricNames::Coverage);
@@ -424,12 +430,14 @@ void Simulation::saveMetricsCSV() {
 
     // Write header - CANONICAL COLUMN ORDER for simulation metrics CSV
     // This order is intentional and matches what downstream tools expect.
-    // Physics metrics first, then new caustic metrics, then GPU metrics, then energy.
+    // Physics metrics first, then new caustic metrics, then velocity metrics, then GPU metrics, then energy.
     out << "frame,variance,circular_spread,spread_ratio,angular_range,angular_causticness,"
         << "r1_concentration,r2_concentration,joint_concentration,"
         << "tip_causticness,spatial_concentration,"
         << "cv_causticness,organization_causticness,fold_causticness,"
         << "trajectory_smoothness,curvature,true_folds,local_coherence,"
+        << "velocity_dispersion,speed_variance,velocity_bimodality,"
+        << "angular_momentum_spread,acceleration_dispersion,"
         << "brightness,coverage,total_energy\n";
     out << std::fixed << std::setprecision(6);
 
@@ -456,6 +464,12 @@ void Simulation::saveMetricsCSV() {
         out << "," << getValue(curvature, i);
         out << "," << getValue(true_folds, i);
         out << "," << getValue(local_coherence, i);
+        // Velocity-based metrics
+        out << "," << getValue(velocity_dispersion, i);
+        out << "," << getValue(speed_variance, i);
+        out << "," << getValue(velocity_bimodality, i);
+        out << "," << getValue(angular_momentum_spread, i);
+        out << "," << getValue(acceleration_dispersion, i);
         // GPU and energy metrics
         out << "," << getValue(brightness, i);
         out << "," << getValue(coverage, i);
