@@ -2491,26 +2491,24 @@ int main(int argc, char* argv[]) {
                 ImGui::TextDisabled("(%d competing)", competing_peaks);
             }
 
-            // Post-boom sustain
-            double post_boom_area = caustic_results.value("post_boom_area_normalized", 0.0);
-            ImGui::Text("Post-boom Sustain:");
+            // Post-reference sustain
+            double post_ref_area = metrics.value("post_ref_area_normalized", 0.0);
+            ImGui::Text("Post-ref Sustain:");
             ImGui::SameLine();
-            ImGui::ProgressBar(static_cast<float>(post_boom_area), ImVec2(80, 0));
+            ImGui::ProgressBar(static_cast<float>(post_ref_area), ImVec2(80, 0));
             ImGui::SameLine();
-            ImGui::Text("%.2f", post_boom_area);
+            ImGui::Text("%.2f", post_ref_area);
 
             // Collapsible details
             if (ImGui::TreeNode("Details")) {
-                int frames_above = caustic_results.value("frames_above_threshold", 0);
-                double post_boom_avg = caustic_results.value("post_boom_average", 0.0);
-                double post_boom_peak_val = caustic_results.value("post_boom_peak", 0.0);
-                double threshold = caustic_results.value("threshold", 0.0);
-                double max_competitor_ratio = caustic_results.value("max_competitor_ratio", 0.0);
+                int frames_above = metrics.value("frames_above_threshold", 0);
+                double post_ref_avg = metrics.value("post_ref_average", 0.0);
+                double post_ref_peak_val = metrics.value("post_ref_peak", 0.0);
+                double max_competitor_ratio = metrics.value("max_competitor_ratio", 0.0);
 
-                ImGui::Text("Threshold: %.1f", threshold);
                 ImGui::Text("Frames above threshold: %d", frames_above);
-                ImGui::Text("Post-boom average: %.2f", post_boom_avg);
-                ImGui::Text("Post-boom peak: %.2f", post_boom_peak_val);
+                ImGui::Text("Post-ref average: %.2f", post_ref_avg);
+                ImGui::Text("Post-ref peak: %.2f", post_ref_peak_val);
                 if (competing_peaks > 0) {
                     ImGui::Text("Max competitor ratio: %.2f", max_competitor_ratio);
                 }
