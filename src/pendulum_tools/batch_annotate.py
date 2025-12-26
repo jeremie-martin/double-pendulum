@@ -29,8 +29,10 @@ from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
     QFileDialog,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -38,6 +40,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QSplitter,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -45,6 +48,7 @@ from PyQt6.QtWidgets import (
 from .config import get_config
 from .models import VideoMetadata
 from .music import MusicDatabase, MusicManager, MusicTrack
+from .templates import generate_title, generate_description
 
 
 MPV_COMMAND = "mpv"
@@ -329,6 +333,31 @@ class MainWindow(QMainWindow):
         self.upload_btn.setStyleSheet("background: #FF0000; color: white; padding: 8px;")
         right_layout.addWidget(self.upload_btn)
 
+        # Manual upload info (for when API limits hit)
+        upload_group = QGroupBox("Manual Upload Info (selectable)")
+        upload_layout = QVBoxLayout(upload_group)
+
+        # Title
+        upload_layout.addWidget(QLabel("Title:"))
+        self.title_edit = QLineEdit()
+        self.title_edit.setReadOnly(True)
+        upload_layout.addWidget(self.title_edit)
+
+        # Description
+        upload_layout.addWidget(QLabel("Description:"))
+        self.desc_edit = QTextEdit()
+        self.desc_edit.setReadOnly(True)
+        self.desc_edit.setMaximumHeight(80)
+        upload_layout.addWidget(self.desc_edit)
+
+        # Video path
+        upload_layout.addWidget(QLabel("Video Path:"))
+        self.path_edit = QLineEdit()
+        self.path_edit.setReadOnly(True)
+        upload_layout.addWidget(self.path_edit)
+
+        right_layout.addWidget(upload_group)
+
         # Delete button
         self.delete_btn = QPushButton("Delete Video")
         self.delete_btn.setEnabled(False)
@@ -427,6 +456,9 @@ class MainWindow(QMainWindow):
             self.process_music_btn.setEnabled(False)
             self.upload_btn.setEnabled(False)
             self.delete_btn.setEnabled(False)
+            self.title_edit.clear()
+            self.desc_edit.clear()
+            self.path_edit.clear()
             return
 
         # Update info
@@ -463,6 +495,16 @@ Music: {music_str}"""
         self.process_music_btn.setEnabled(video.has_video and has_boom and self.music_db is not None)
         self.upload_btn.setEnabled(video.best_video_path is not None)
         self.delete_btn.setEnabled(True)
+
+        # Update manual upload info
+        self.path_edit.setText(str(video.best_video_path) if video.best_video_path else "")
+        try:
+            metadata = VideoMetadata.from_file(video.metadata_path)
+            self.title_edit.setText(generate_title(metadata))
+            self.desc_edit.setText(generate_description(metadata))
+        except Exception:
+            self.title_edit.setText("")
+            self.desc_edit.setText("")
 
     def _update_boom_label(self) -> None:
         """Update the boom seconds label."""
