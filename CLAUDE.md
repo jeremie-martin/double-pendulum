@@ -19,10 +19,10 @@ C++20 double pendulum physics simulation with GPU-accelerated rendering. Simulat
 └─────────────┘     │   (Shader)   │
       │             └──────────────┘
       ▼
-┌─────────────┐
-│  Analyzers  │
-│ (Boom,etc.) │
-└─────────────┘
+┌─────────────┐     ┌──────────────┐
+│   Target    │────▶│   Analyzers  │
+│  Evaluator  │     │ (Signal,etc) │
+└─────────────┘     └──────────────┘
 ```
 
 ## Key Files
@@ -37,222 +37,218 @@ C++20 double pendulum physics simulation with GPU-accelerated rendering. Simulat
 | `src/main_stability.cpp` | Metric stability analysis across pendulum counts |
 | `src/simulation_data.cpp` | ZSTD-compressed simulation data I/O |
 | `src/gl_renderer.cpp` | GPU line rendering with GLSL shaders |
-| `src/headless_gl.cpp` | EGL context for headless GPU rendering |
 | `include/pendulum.h` | RK4 physics integration (Lagrangian mechanics) |
 | `include/config.h` | TOML config parsing, all parameters |
-| `include/simulation_data.h` | Binary data format and Reader/Writer classes |
-| `include/batch_generator.h` | Batch config, filter criteria, probe filter |
-| `include/metrics/` | Unified metrics system (see Metrics System below) |
-| `include/metrics/metrics_init.h` | Helper for initializing metrics system |
-
-## Rendering Pipeline
-
-1. **Line Drawing**: Pendulum arms → GPU quads with smoothstep AA
-2. **Accumulation**: Additive blending to RGBA32F texture
-3. **Post-Processing** (GPU shader):
-   - Normalize by max value
-   - Apply exposure (2^stops)
-   - Tone mapping (Reinhard/ACES/Logarithmic)
-   - Contrast adjustment
-   - Gamma correction
-4. **Output**: Read back RGB8 → PNG or FFmpeg
+| `include/simulation.h` | Simulation class with run() and runProbe() |
+| `include/batch_generator.h` | Batch config, filter criteria, target constraints |
 
 ## Metrics System
 
-The unified metrics system in `include/metrics/` replaces the legacy variance/analysis trackers:
+The metrics system in `include/metrics/` provides time-series tracking and analysis:
 
 | File | Purpose |
 |------|---------|
-| `metric_series.h` | Generic time series with derivative tracking, smoothing |
 | `metrics_collector.h` | Central hub for all metrics (physics + GPU) |
-| `event_detector.h` | Configurable event detection (chaos only; boom uses causticness) |
-| `boom_detection.h` | Utility for finding boom frame from max causticness |
-| `analyzer.h` | Base class for pluggable quality analyzers |
-| `causticness_analyzer.h` | Causticness/peak clarity scoring |
+| `metric_series.h` | Generic time series with derivative tracking |
+| `signal_analyzer.h` | Generic signal analysis (peak clarity, post-reference area) |
+| `event_detector.h` | Threshold-based event detection (chaos only) |
+| `boom_detection.h` | Wrapper for finding boom frame via FrameDetector |
 | `probe_filter.h` | Pass/fail decision logic for filtering |
 | `probe_pipeline.h` | Multi-phase probe system |
+| `analyzer.h` | Base class for quality analyzers |
 
-### Key Concepts
+### Available Metrics
 
-- **Metric**: Raw time-series measurement (variance, brightness, causticness)
-- **Boom/Chaos**: Detected post-simulation via FrameDetector using `[targets.X]` config
-- **Analyzer**: Component that computes quality scores from metrics
-- **Score**: Quality assessment for ranking/filtering (SimulationScore)
+**Physics metrics** (computed from pendulum state):
+- `variance` - Angular variance (stable, CV <1%)
+- `circular_spread` - Distribution uniformity 0=concentrated, 1=uniform (stable)
+- `spread_ratio` - Fraction above horizontal (legacy)
+- `angular_range` - Normalized angular coverage
+- `total_energy` - Total mechanical energy
 
-### Boom Detection
+**Causticness metrics** (sector-based, less stable but good for detection):
+- `angular_causticness` - coverage × density concentration on angle1+angle2
+- `tip_causticness` - causticness using geometric tip angle atan2(x2,y2)
+- `cv_causticness` - CV-based instead of Gini
+- `organization_causticness` - (1-R1*R2) × coverage
+- `local_coherence` - neighbor distance vs random distance
+- `r1_concentration`, `r2_concentration`, `joint_concentration` - per-arm metrics
 
-Boom detection finds the visually significant "explosion" moment in the simulation. Multiple detection methods are available:
+**Velocity metrics** (for boom detection via opposing motion):
+- `velocity_dispersion` - spread of velocity directions (0=same, 1=uniform)
+- `speed_variance` - normalized variance of tip speeds
+- `velocity_bimodality` - detects two groups moving opposite directions
+- `angular_momentum_spread` - spread of angular momenta
+- `acceleration_dispersion` - spread of tip accelerations
 
-| Method | Description | Key Parameters |
-|--------|-------------|----------------|
-| `max_causticness` | Frame with maximum causticness (default) | `offset_seconds` |
-| `first_peak_percent` | First peak >= X% of max | `peak_percent_threshold`, `min_peak_prominence` |
-| `derivative_peak` | When d(causticness)/dt is maximum | `smoothing_window` |
-| `threshold_crossing` | First sustained crossing of threshold | `crossing_threshold`, `crossing_confirmation` |
-| `second_derivative_peak` | When d²(causticness)/dt² is maximum (acceleration) | `smoothing_window` |
+**GPU metrics** (from rendered frame):
+- `brightness` - mean pixel intensity (0-1)
+- `coverage` - fraction of non-zero pixels (0-1)
+- `max_value` - peak pixel intensity before post-processing
 
-```cpp
-#include "metrics/boom_detection.h"
-#include "optimize/prediction_target.h"
+## Prediction System
 
-// Using default MaxValue method:
-auto boom = metrics::findBoomFrame(collector, frame_duration);
+The multi-target prediction system in `include/optimize/` provides flexible frame detection and quality scoring:
 
-// Or with custom params:
-optimize::FrameDetectionParams params;
-params.method = optimize::FrameDetectionMethod::ThresholdCrossing;
-params.crossing_threshold = 0.3;  // 30% of max
-params.crossing_confirmation = 5; // 5 consecutive frames
-auto boom = metrics::findBoomFrame(collector, frame_duration, params);
+| File | Purpose |
+|------|---------|
+| `prediction_target.h` | Target definitions, detection methods, score methods |
+| `frame_detector.h` | Generic frame detection from any metric |
+| `score_predictor.h` | Score prediction with multiple methods |
+| `target_evaluator.h` | Multi-target orchestration |
 
-if (boom.frame >= 0) {
-    // boom.frame, boom.seconds, boom.metric_value are available
-    // Force event for BoomAnalyzer compatibility:
-    metrics::forceBoomEvent(event_detector, boom, variance_at_boom);
-}
-```
+### Frame Detection Methods
+
+| Method | Description |
+|--------|-------------|
+| `max_value` | Frame with maximum metric value (default for boom) |
+| `first_peak_percent` | First peak >= X% of max |
+| `derivative_peak` | When d(metric)/dt is maximum |
+| `threshold_crossing` | First sustained crossing of threshold |
+| `second_derivative_peak` | When acceleration is maximum |
+| `constant_frame` | Always returns configured frame (testing) |
+
+### Score Methods
+
+**Boom-dependent** (require reference frame):
+- `peak_clarity` - main / (main + max_competitor)
+- `post_boom_sustain` - normalized area after reference
+- `composite` - weighted combination
+
+**Boom-independent** (analyze full signal):
+- `dynamic_range` - (max - min) / max
+- `rise_time` - peak_frame / total (inverted: early = high)
+- `smoothness` - 1 / (1 + mean_abs_second_deriv)
+- `buildup_gradient` - average slope to peak
+- `peak_dominance` - peak / mean ratio
+- `decay_rate` - how quickly signal drops after peak
+- `median_dominance` - peak / median ratio
+- `tail_weight` - mean / median ratio (skewness)
+
+**Boom-relative** (properties around reference frame):
+- `pre_boom_contrast` - 1 - (avg_before / peak)
+- `boom_steepness` - derivative_at_boom / max_derivative
 
 ### Usage Example
 
+Targets are configured in TOML and evaluated after simulation:
+
 ```cpp
-metrics::MetricsCollector collector;
-collector.registerStandardMetrics();
+#include "optimize/target_evaluator.h"
+#include "optimize/prediction_target.h"
 
-metrics::EventDetector detector;  // Events added post-simulation
+// Build targets from config
+std::vector<optimize::PredictionTarget> targets;
+for (auto const& tc : config.targets) {
+    targets.push_back(optimize::targetConfigToPredictionTarget(
+        tc.name, tc.type, tc.metric, tc.method,
+        tc.offset_seconds, tc.peak_percent_threshold,
+        tc.min_peak_prominence, tc.smoothing_window,
+        tc.crossing_threshold, tc.crossing_confirmation,
+        tc.weights));
+}
 
-// In simulation loop:
-collector.beginFrame(frame);
-collector.updateFromAngles(angle1s, angle2s);
-collector.setGPUMetrics(gpu_bundle);
-collector.endFrame();
+// Evaluate all targets
+optimize::TargetEvaluator evaluator;
+evaluator.setTargets(targets);
+auto predictions = evaluator.evaluate(collector, frame_duration);
 
-// After loop: detect boom using configured method
-auto boom = metrics::findBoomFrame(collector, config.simulation.frameDuration());
+// Access results
+auto boom_frame = optimize::TargetEvaluator::getBoomFrame(predictions);
+auto boom_quality = optimize::TargetEvaluator::getBoomQuality(predictions);
 ```
 
-## Common Modifications
+## Configuration
 
-### Add new tone mapping operator
-1. Add enum value in `include/config.h` → `ToneMapOperator`
-2. Add parsing in `src/config.cpp` → `parseToneMapOperator()`
-3. Add GLSL implementation in `src/gl_renderer.cpp` → `pp_fragment_shader_src`
-4. Add CPU reference in `include/post_process.h` → `toneMap()`
+### Target Configuration (TOML)
 
-### Add new color scheme
-1. Add enum in `include/config.h` → `ColorScheme`
-2. Add parsing in `src/config.cpp`
-3. Add implementation in `include/color_scheme.h` → `ColorSchemeGenerator`
+Define prediction targets in config files:
 
-### Modify physics
-- All physics in `include/pendulum.h` → `Pendulum::step()`
-- Uses RK4 integration with Lagrangian equations of motion
-- Thread-safe (each pendulum is independent)
+```toml
+# Frame target for boom detection
+[targets.boom]
+type = "frame"
+metric = "angular_causticness"
+method = "max_value"
+offset_seconds = 0.0
 
-### Add new filter criterion for batch probing
+# Frame target for chaos detection
+[targets.chaos]
+type = "frame"
+metric = "variance"
+method = "threshold_crossing"
+crossing_threshold = 0.8
+crossing_confirmation = 10
 
-Filters now use target-based constraints. To add a new filter:
+# Score target for quality
+[targets.boom_quality]
+type = "score"
+metric = "angular_causticness"
+method = "peak_clarity"
+```
 
-**For target-based constraints** (referencing `[targets.X]`):
-1. Add new constraint type to `TargetConstraint` struct in `include/batch_generator.h`
-2. Add TOML parsing in `BatchConfig::load()` in `src/batch_generator.cpp`
-3. Add evaluation in `metrics::ProbeFilter::evaluate()` in `src/metrics/probe_filter.cpp`
+### Per-Metric Configuration
 
-**For general (non-target) filters**:
-1. Add field to `FilterCriteria` struct in `include/batch_generator.h`
-2. Add criterion to `FilterCriteria::toProbeFilter()` method
-3. Add check in `metrics::ProbeFilter::evaluate()` in `src/metrics/probe_filter.cpp`
-4. Add TOML parsing in `BatchConfig::load()` in `src/batch_generator.cpp`
+Metrics with configurable parameters can be tuned:
 
-### Add new analysis metric
-1. Add field to `SpreadMetrics` struct in `include/metrics/metrics_collector.h`
-2. Compute in `MetricsCollector::computeSpread()` method
-3. Register metric in `MetricsCollector::registerStandardMetrics()`
-4. Access via `MetricsCollector::getMetric()` or `getSpreadHistory()`
+```toml
+# Sector-based metrics (angular_causticness, tip_causticness, etc.)
+[metrics.angular_causticness]
+min_sectors = 8
+max_sectors = 72
+target_per_sector = 40
 
-### Add new analyzer for quality scoring
-1. Create new analyzer class inheriting from `metrics::Analyzer` in `include/metrics/`
-2. Implement `name()`, `analyze()`, `score()`, `toJSON()`, `reset()`, `hasResults()`
-3. Add to simulation or batch generator as needed
+# CV-based sector metrics
+[metrics.cv_causticness]
+min_sectors = 8
+max_sectors = 72
+target_per_sector = 40
+cv_normalization = 1.5
 
-### Physics Quality System
-The simulation uses a `physics_quality` setting that maps to maximum timestep (`max_dt`):
+# Local coherence
+[metrics.local_coherence]
+max_radius = 2.0
+min_spread_threshold = 0.05
+log_inverse_baseline = 1.0
+log_inverse_divisor = 2.5
+```
+
+### Physics Quality
 
 | Quality | max_dt | Steps/period | Description |
 |---------|--------|--------------|-------------|
 | low     | 20ms   | ~100         | Visible artifacts, fast |
 | medium  | 12ms   | ~167         | Acceptable quality |
 | high    | 7ms    | ~286         | Gold standard (default) |
-| ultra   | 3ms    | ~667         | Overkill, perfect accuracy |
+| ultra   | 3ms    | ~667         | Perfect accuracy |
 
-The system automatically computes substeps per frame to maintain constant quality:
-```cpp
-substeps = max(1, ceil(frame_dt / max_dt))
-```
+Substeps computed automatically: `substeps = max(1, ceil(frame_dt / max_dt))`
 
-This ensures consistent simulation quality regardless of frame count or duration. You can also specify `max_dt` directly in the config for fine control.
+## Batch Generation
 
-### Batch Generation with Probe Filtering
+### Two-Phase Workflow
 
-The batch system supports a two-phase workflow for generating videos with quality filtering:
+**Phase 1 - Probe**: Fast physics-only simulation with fewer pendulums to evaluate parameters.
 
-**Phase 1 - Probe**: Run a fast physics-only simulation (no GPU, no rendering) with fewer pendulums (e.g., 1000) to evaluate if parameters produce a good animation.
+**Phase 2 - Render**: Full simulation with GPU rendering if probe passes.
 
-**Phase 2 - Render**: Only if the probe passes all filter criteria, run the full simulation with GPU rendering.
+### Filter Criteria
 
-#### Filter Criteria
-
-Filters use a target-based constraint system that references `[targets.X]` sections by name.
-
-**General Filters** (non-target):
-| Criterion | Purpose |
-|-----------|---------|
-| `min_uniformity` | Minimum distribution uniformity (0=concentrated, 1=uniform, 0.9 recommended) |
-
-**Target Constraints** (`[filter.targets.X]`):
-| Field | Purpose |
-|-------|---------|
-| `min_seconds` | Target frame must happen after this time |
-| `max_seconds` | Target frame must happen before this time |
-| `required` | Reject simulations where target is not detected |
-| `min_score` | Minimum score value (for score targets) |
-| `max_score` | Maximum score value (for score targets) |
-
-#### Spread / Uniformity Metrics
-
-The `MetricsCollector` computes spread metrics every frame:
-- `uniformity` (CircularSpread): 1 - mean resultant length (0=concentrated, 1=uniform on disk). This is the preferred metric for filtering.
-- `spread_ratio`: Legacy metric - fraction of pendulums with angle1 in [-π/2, π/2] (above horizontal)
-- `angle1_mean`, `angle1_variance`: For debugging/analysis
-
-Spread is tracked and output in multiple places:
-- **metrics.csv**: Canonical column order (from `simulation.cpp:saveMetricsCSV`):
-  ```
-  frame,variance,circular_spread,spread_ratio,angular_range,angular_causticness,brightness,coverage,total_energy
-  ```
-  Note: `circular_spread` is the uniformity metric (0=concentrated, 1=uniform)
-- **metadata.json**: `final_uniformity` in results section
-- **stdout**: Printed at end of simulation with uniformity and analyzer scores
-- **GUI**: Real-time display in Analysis panel with uniformity graphing
-- **Batch summary**: Spread column in completion table
-
-#### Color Presets
-
-Define curated color combinations in batch configs:
 ```toml
-[[color_presets]]
-scheme = "spectrum"
-start = 0.2
-end = 0.8
+[filter]
+min_uniformity = 0.9     # Minimum distribution uniformity
 
-[[color_presets]]
-scheme = "heat"
-start = 0.0
-end = 0.7
+# Target-based constraints
+[filter.targets.boom]
+min_seconds = 8.0        # Boom must happen after this time
+max_seconds = 15.0       # Boom must happen before this time
+required = true          # Reject if no boom detected
+
+[filter.targets.boom_quality]
+min_score = 0.6          # Minimum quality score
 ```
 
-In random batch mode, one preset is randomly selected per video.
-
-#### Example Batch Config with Probing
+### Example Batch Config
 
 ```toml
 [batch]
@@ -261,22 +257,55 @@ base_config = "config/default.toml"
 
 [probe]
 enabled = true
-pendulum_count = 1000    # Fast probing
-max_retries = 10         # Retry with new params if rejected
+pendulum_count = 1000
+max_retries = 10
 
 [filter]
-min_uniformity = 0.9     # Minimum distribution uniformity
+min_uniformity = 0.9
 
-# Target-based constraints (reference [targets.X] by name)
 [filter.targets.boom]
-min_seconds = 8.0        # Boom must happen after this time
-max_seconds = 15.0       # Boom must happen before this time
-required = true          # Reject simulations with no boom
+min_seconds = 8.0
+max_seconds = 15.0
+required = true
 
 [physics_ranges]
 initial_angle1_deg = [140.0, 200.0]
 initial_angle2_deg = [140.0, 200.0]
 ```
+
+## Common Modifications
+
+### Add new tone mapping operator
+1. Add enum in `include/config.h` → `ToneMapOperator`
+2. Add parsing in `src/config.cpp`
+3. Add GLSL implementation in `src/gl_renderer.cpp` → `pp_fragment_shader_src`
+4. Add CPU reference in `include/post_process.h` → `toneMap()`
+
+### Add new color scheme
+1. Add enum in `include/config.h` → `ColorScheme`
+2. Add parsing in `src/config.cpp`
+3. Add implementation in `include/color_scheme.h` → `ColorSchemeGenerator`
+
+### Add new metric
+1. Add constant in `metrics/metrics_collector.h` → `MetricNames`
+2. Register in `MetricsCollector::registerStandardMetrics()`
+3. Compute in appropriate update method (`updateFromStates()`, etc.)
+
+### Add new score method
+1. Add enum in `optimize/prediction_target.h` → `ScoreMethod`
+2. Add parsing in `parseScoreMethod()`
+3. Implement in `optimize/score_predictor.h` → `ScorePredictor`
+
+### Add new filter criterion
+**For target-based constraints:**
+1. Add field to `TargetConstraint` in `include/batch_generator.h`
+2. Add TOML parsing in `BatchConfig::load()`
+3. Add evaluation in `metrics::ProbeFilter::evaluate()`
+
+**For general filters:**
+1. Add field to `FilterCriteria` in `include/batch_generator.h`
+2. Add to `FilterCriteria::toProbeFilter()`
+3. Add TOML parsing in `BatchConfig::load()`
 
 ## Build Commands
 
@@ -290,232 +319,69 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_GUI=ON && cmake --build build 
 
 ## Metric Iteration Workflow
 
-The metric iteration system allows fast experimentation with metric formulas by saving raw simulation data and recomputing metrics without re-running physics.
-
-### Save Simulation Data
+Save raw simulation data and recompute metrics without re-running physics:
 
 ```bash
-# Add --save-data flag to save raw pendulum state data
+# Save data during simulation
 ./pendulum config.toml --save-data
 
-# Or enable in config file
-# [output]
-# save_simulation_data = true
-```
-
-This creates `simulation_data.bin` alongside the video/frames, containing ZSTD-compressed pendulum states (x1, y1, x2, y2, th1, th2) for all frames.
-
-### Recompute Metrics
-
-```bash
-# Physics metrics only (fast, ~2ms for 100 frames)
+# Recompute physics metrics only
 ./pendulum-metrics output/run_xxx/simulation_data.bin
 
-# With GPU re-rendering (for GPU metrics like causticness)
+# With GPU re-rendering
 ./pendulum-metrics output/run_xxx/simulation_data.bin --render
-
-# Use modified config for different rendering settings
-./pendulum-metrics output/run_xxx/simulation_data.bin --render --config modified.toml
 ```
 
-### Workflow for Metric Development
+Data format: 144-byte header + ZSTD-compressed payload (24 bytes per pendulum per frame).
 
-1. Run simulation once with `--save-data`
-2. Modify metric formula in `src/metrics/metrics_collector.cpp`
-3. Rebuild: `cmake --build build -j` (only recompiles changed files)
-4. Test: `./pendulum-metrics output/run_xxx/simulation_data.bin`
-5. Iterate steps 2-4 until satisfied
+## Metric Stability
 
-### Data Format
+Stability analysis validates that low-N probes can predict full simulation results:
 
-Binary file with 144-byte header + ZSTD-compressed payload:
-- Header: magic, version, pendulum_count, frame_count, physics params
-- Payload: 24 bytes per pendulum per frame (6 floats: x1, y1, x2, y2, th1, th2)
-- Compression: ~2-5x reduction (varies with motion complexity)
+**Stable (CV <1%):** `variance`, `circular_spread`, `angular_range`, `spread_ratio`
 
-### Size Estimates
+**Unstable absolute values (CV 20-50%):** All causticness metrics
 
-| Pendulums | Frames | Raw Size | Compressed |
-|-----------|--------|----------|------------|
-| 1,000 | 100 | 2.4 MB | ~2 MB |
-| 100,000 | 660 | 1.6 GB | ~400 MB |
-| 1,000,000 | 3,000 | 72 GB | ~18 GB |
-
-## Metric Stability Analysis
-
-The stability analysis tool (`pendulum-stability`) tests whether metrics produce consistent results across different pendulum counts. This is critical for validating that low-N probes can predict full simulation results.
-
-### Usage
-
-```bash
-# Quick test with 5 pendulum counts
-./pendulum-stability --counts 500,1000,2000,5000,10000
-
-# Production analysis (higher counts)
-./pendulum-stability --counts 1000,5000,10000,50000,100000
-
-# Save detailed per-frame data
-./pendulum-stability --output stability_data.csv
-```
-
-### Stability Grades
-
-| Grade | CV Range | Meaning |
-|-------|----------|---------|
-| A+ | <1% | Excellent - use for absolute value comparisons |
-| A | <5% | Good - reliable for detection |
-| B | <10% | Acceptable - use with caution |
-| C-F | >10% | Poor/Unstable - relative features only |
-
-### Key Findings
-
-**Stable metrics (CV < 1%):** `variance`, `circular_spread`, `angular_range`, `spread_ratio`, `curvature`
-
-**Moderately stable (CV 1-5%):** `trajectory_smoothness`, `fold_causticness`, `local_coherence`, `true_folds`
-
-**Unstable absolute values (CV 20-50%):** All sector-based causticness metrics (`angular_causticness`, `organization_causticness`, `cv_causticness`, `tip_causticness`, etc.)
-
-**Critical insight:** Despite high CV in absolute values, **boom detection remains stable** (stddev <3 frames for N≥5000). Detection methods analyze curve shape (peaks, derivatives) rather than absolute values, making them robust to scaling variations.
-
-**Recommendation:** For probe filtering, use stable metrics (`uniformity`, `variance`) for absolute thresholds. Use causticness metrics only for relative detection (boom frame, quality ranking).
+**Key insight:** Boom detection remains stable (stddev <3 frames) because detection analyzes curve shape, not absolute values.
 
 ## GUI Application
 
-The GUI (`pendulum-gui`) provides real-time preview and analysis tools.
-
-### Analysis Panel Features
-
-| Feature | Description |
-|---------|-------------|
-| **Plot Modes** | Single Axis, Multi-Axis (grouped by scale), Normalized (0-1) |
-| **Metrics** | Variance, Brightness, Uniformity (circular_spread), Energy, Causticness, Coverage |
-| **Derivatives** | Per-metric "d" toggle to overlay rate of change |
-| **Quality Scores** | Causticness-based quality score with peak clarity and post-boom sustain |
-
-### Preview Settings
-
-| Setting | Description |
-|---------|-------------|
-| Physics Quality | Low/Medium/High/Ultra dropdown (replaces substeps) |
-| Preview Size | Resolution for real-time preview |
-| Pendulum Count | Number of pendulums in preview mode |
-
-### Plot Mode Axis Grouping (Multi-Axis mode)
-
-| Axis | Metrics |
-|------|---------|
-| Y1 (Large) | Variance, Energy |
-| Y2 (0-1) | Brightness, Uniformity, Coverage |
-| Y3 (Medium) | Causticness |
+The GUI (`pendulum-gui`) provides:
+- Real-time preview with adjustable physics quality
+- Multi-axis metric plotting with derivatives
+- Quality scores from SignalAnalyzer
 
 ## Dependencies
 
-Required: OpenGL 3.3+, GLEW, EGL, libpng, pthreads
+Required: OpenGL 3.3+, GLEW, EGL, libpng, pthreads, zstd
 Optional: SDL2 (GUI), FFmpeg (video output)
-
-## Code Style
-
-- C++20 with `auto`, structured bindings, `std::optional`
-- Header-only where sensible (pendulum.h, post_process.h)
-- TOML for config, JSON for metadata/progress
-- No exceptions in hot paths, use return values
-
-## Performance Notes
-
-- Physics is CPU-bound (RK4 per pendulum per substep)
-- Rendering is GPU-bound (millions of line quads)
-- I/O can dominate for PNG output (use video format)
-- 1M pendulums @ 4K: ~5s/frame (RTX 4090)
 
 ## Pendulum Tools (Python)
 
-Python tools for post-processing and uploading double pendulum videos. Handles music, effects, and YouTube uploads.
+Post-processing and uploading tools managed with `uv`:
 
-### Location
-Root level (`pyproject.toml` at repo root) - Python project managed with `uv`
-
-### Setup
 ```bash
 uv sync
-# Place OAuth credentials in credentials/client_secrets.json
 ```
-
-### Output File Naming
-
-| File | Source | Description |
-|------|--------|-------------|
-| `video_raw.mp4` | C++ | Silent video from simulation |
-| `video.mp4` | Python | With music only (lossless mux) |
-| `video_processed.mp4` | Python | With music + effects (re-encoded) |
-
-Files are overwritten on re-run, no nested directories.
 
 ### Commands
 ```bash
-# Music management
-pendulum-tools music list                    # List all tracks
 pendulum-tools music add /path/to/video     # Add music → video.mp4
-pendulum-tools music sync /path/to/video    # Show valid tracks for boom timing
-
-# Video processing (effects + subtitles)
 pendulum-tools process /path/to/video       # Apply effects → video_processed.mp4
-pendulum-tools batch-process /path/to/batch # Process entire batch
-
-# YouTube upload
-pendulum-tools upload /path/to/video --privacy unlisted
-pendulum-tools batch /path/to/batch --limit 10
-
-# Utilities
-pendulum-tools thumbnail /path/to/video    # Extract thumbnails
-pendulum-tools preview /path/to/video      # Preview upload metadata
-pendulum-tools list-templates              # Show effect templates
+pendulum-tools upload /path/to/video        # Upload to YouTube
 ```
 
 ### Key Files
 | File | Purpose |
 |------|---------|
 | `src/pendulum_tools/cli.py` | Click CLI commands |
-| `src/pendulum_tools/uploader.py` | YouTube API integration |
-| `src/pendulum_tools/music/manager.py` | Music selection and FFmpeg muxing |
-| `src/pendulum_tools/music/database.py` | Music track database (database.json) |
-| `src/pendulum_tools/processing/pipeline.py` | Video effects pipeline |
-| `src/pendulum_tools/processing/templates.py` | Caption/motion templates |
 | `src/pendulum_tools/models.py` | Pydantic models for metadata.json |
+| `src/pendulum_tools/music/manager.py` | Music selection and FFmpeg muxing |
+| `src/pendulum_tools/processing/pipeline.py` | Video effects pipeline |
 
-### Music and Boom Timing
+### Music Sync
 
-Music is added to videos using lossless FFmpeg muxing. The music system ensures drops sync with visual booms:
-
-1. After simulation, `boom_seconds` is available in metadata.json
-2. `pendulum-tools music add` can auto-select tracks where `drop_time > boom_seconds`
-3. Audio is offset so the drop aligns with the boom frame
-
-```python
-from pendulum_tools.music import MusicManager
-
-manager = MusicManager("music")
-track = manager.pick_track_for_boom(boom_seconds=10.5)
-
-if track:
-    MusicManager.mux_with_audio(
-        video_path=Path("video_raw.mp4"),
-        audio_path=track.filepath,
-        output_path=Path("video.mp4"),
-        boom_frame=630,
-        drop_time_ms=track.drop_time_ms,
-        video_fps=60,
-    )
-```
-
-### Effect Templates
-
-Templates define motion effects and caption timing. See `config/templates.toml`:
-
-| Template | Motion Effects | Captions |
-|----------|----------------|----------|
-| `viral_science` | Slow zoom + boom punch + shake | Science/chaos hooks |
-| `hype_mrbeast` | Aggressive zoom + extra shake | Hype text |
-| `dramatic_minimal` | Subtle zoom + punch | No captions |
-| `asmr_calm` | Very slow zoom only | Minimal |
-
-Use `pendulum-tools list-templates` to see all available templates.
+Music drops are aligned with visual booms:
+1. Simulation outputs `boom_seconds` in metadata.json
+2. `pendulum-tools music add` selects tracks where `drop_time > boom_seconds`
+3. Audio is offset so drop aligns with boom frame
