@@ -635,17 +635,19 @@ Processed: {'Yes' if video.has_processed else 'No'} | Music: {'Yes' if video.has
         else:
             return
 
-        # Run in background and show result
+        # Run and show result in status bar (no pop-ups)
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(Path.cwd()))
 
             if result.returncode == 0:
-                QMessageBox.information(self, "Success", f"Command completed successfully:\n{command} {subcommand}")
+                # Show success in status bar
+                action = command if not subcommand else f"{command} {subcommand}"
+                self.statusBar().showMessage(f"Done: {action}", 3000)
+
                 # Refresh video info
                 new_info = load_video_info(self.current_video.path)
                 if new_info:
                     self.current_video = new_info
-                    # Update list item
                     row = self.video_list.currentRow()
                     if row >= 0:
                         item = self.video_list.item(row)
@@ -654,9 +656,11 @@ Processed: {'Yes' if video.has_processed else 'No'} | Music: {'Yes' if video.has
                         item.setText(f"[{status}] {new_info.name}")
                     self._update_ui()
             else:
-                QMessageBox.warning(self, "Error", f"Command failed:\n{result.stderr}")
+                # Show error in status bar, keep stderr for debugging
+                error_line = result.stderr.strip().split('\n')[-1] if result.stderr else "Unknown error"
+                self.statusBar().showMessage(f"Failed: {error_line[:80]}", 5000)
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to run command: {e}")
+            self.statusBar().showMessage(f"Error: {e}", 5000)
 
     def _delete_video(self) -> None:
         """Delete the current video."""
