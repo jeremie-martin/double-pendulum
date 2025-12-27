@@ -96,67 +96,6 @@ class InfoBadge(QFrame):
         self.lbl_value.setText(value)
 
 
-class HoldToDeleteButton(QPushButton):
-    """A button that requires holding for 1.5 seconds to activate."""
-
-    HOLD_DURATION_MS = 1500
-
-    def __init__(self, text: str = "Hold to Delete"):
-        super().__init__(text)
-        self._default_text = text
-        self._hold_timer = QTimer()
-        self._hold_timer.setInterval(50)  # Update every 50ms
-        self._hold_timer.timeout.connect(self._on_tick)
-        self._progress = 0
-        self._is_holding = False
-
-        self.setStyleSheet(
-            "color: #999; border: 1px solid #ddd; background: #fafafa;"
-        )
-
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and self.isEnabled():
-            self._is_holding = True
-            self._progress = 0
-            self._hold_timer.start()
-        super().mousePressEvent(event)
-
-    def mouseReleaseEvent(self, event) -> None:
-        if self._is_holding:
-            self._is_holding = False
-            self._hold_timer.stop()
-            self._progress = 0
-            self._update_display()
-        super().mouseReleaseEvent(event)
-
-    def _on_tick(self) -> None:
-        self._progress += 50
-        self._update_display()
-
-        if self._progress >= self.HOLD_DURATION_MS:
-            self._hold_timer.stop()
-            self._is_holding = False
-            self._progress = 0
-            self._update_display()
-            self.click()  # Trigger the actual click action
-
-    def _update_display(self) -> None:
-        if self._progress > 0:
-            pct = min(100, int(self._progress / self.HOLD_DURATION_MS * 100))
-            self.setText(f"Deleting... {pct}%")
-            # Gradient from gray to red as progress increases
-            red_intensity = int(153 + (102 * pct / 100))  # 153 (#999) to 255
-            self.setStyleSheet(
-                f"color: rgb({red_intensity}, 80, 80); "
-                "border: 1px solid #f44336; background: #fff5f5;"
-            )
-        else:
-            self.setText(self._default_text)
-            self.setStyleSheet(
-                "color: #999; border: 1px solid #ddd; background: #fafafa;"
-            )
-
-
 @dataclass
 class VideoInfo:
     """Information about a video in a batch."""
@@ -675,22 +614,20 @@ class MainWindow(QMainWindow):
         # === PUBLISHING ===
         group_pub = QGroupBox("Publishing")
         pub_layout = QVBoxLayout(group_pub)
-        pub_layout.setSpacing(8)
+        pub_layout.setSpacing(6)
 
-        # Title row with icon buttons
+        # Title row
         title_row = QHBoxLayout()
         title_row.setSpacing(4)
         title_row.addWidget(QLabel("Title:"))
         self.edit_title = QLineEdit()
         self.edit_title.setReadOnly(True)
         title_row.addWidget(self.edit_title, 1)
-
         self.btn_regen_title = QPushButton("↻")
         self.btn_regen_title.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
         self.btn_regen_title.setToolTip("Regenerate")
         self.btn_regen_title.clicked.connect(lambda: self._regenerate("title"))
         title_row.addWidget(self.btn_regen_title)
-
         self.btn_copy_title = QPushButton("⧉")
         self.btn_copy_title.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
         self.btn_copy_title.setToolTip("Copy")
@@ -700,37 +637,29 @@ class MainWindow(QMainWindow):
         title_row.addWidget(self.btn_copy_title)
         pub_layout.addLayout(title_row)
 
-        # Description with icon buttons
-        desc_row = QHBoxLayout()
-        desc_row.setSpacing(4)
-        desc_row.addWidget(QLabel("Desc:"))
-
-        self.edit_desc = QTextEdit()
-        self.edit_desc.setReadOnly(True)
-        self.edit_desc.setMaximumHeight(80)
-        desc_row.addWidget(self.edit_desc, 1)
-
-        # Vertical button cluster
-        desc_btns = QVBoxLayout()
-        desc_btns.setSpacing(2)
-
+        # Description row (label + buttons on same line, field below)
+        desc_header = QHBoxLayout()
+        desc_header.setSpacing(4)
+        desc_header.addWidget(QLabel("Desc:"))
+        desc_header.addStretch()
         self.btn_regen_desc = QPushButton("↻")
         self.btn_regen_desc.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
         self.btn_regen_desc.setToolTip("Regenerate")
         self.btn_regen_desc.clicked.connect(lambda: self._regenerate("description"))
-        desc_btns.addWidget(self.btn_regen_desc)
-
+        desc_header.addWidget(self.btn_regen_desc)
         self.btn_copy_desc = QPushButton("⧉")
         self.btn_copy_desc.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
         self.btn_copy_desc.setToolTip("Copy")
         self.btn_copy_desc.clicked.connect(
             lambda: self._copy_to_clipboard(self.edit_desc.toPlainText())
         )
-        desc_btns.addWidget(self.btn_copy_desc)
-        desc_btns.addStretch()
+        desc_header.addWidget(self.btn_copy_desc)
+        pub_layout.addLayout(desc_header)
 
-        desc_row.addLayout(desc_btns)
-        pub_layout.addLayout(desc_row)
+        self.edit_desc = QTextEdit()
+        self.edit_desc.setReadOnly(True)
+        self.edit_desc.setFixedHeight(65)
+        pub_layout.addWidget(self.edit_desc)
 
         # Path row
         path_row = QHBoxLayout()
@@ -740,7 +669,6 @@ class MainWindow(QMainWindow):
         self.edit_path.setReadOnly(True)
         self.edit_path.setStyleSheet("font-size: 10px;")
         path_row.addWidget(self.edit_path, 1)
-
         self.btn_copy_path = QPushButton("⧉")
         self.btn_copy_path.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
         self.btn_copy_path.setToolTip("Copy")
@@ -750,8 +678,9 @@ class MainWindow(QMainWindow):
         path_row.addWidget(self.btn_copy_path)
         pub_layout.addLayout(path_row)
 
-        # Upload button (centered, not full width)
+        # Upload button (centered)
         upload_row = QHBoxLayout()
+        upload_row.setContentsMargins(0, 6, 0, 0)
         upload_row.addStretch()
         self.btn_upload = QPushButton("Upload to YouTube")
         self.btn_upload.setMinimumHeight(BUTTON_HEIGHT + 6)
@@ -769,9 +698,9 @@ class MainWindow(QMainWindow):
 
         layout.addStretch()
 
-        # Delete button at bottom (hold to activate)
-        self.btn_delete = HoldToDeleteButton("Hold to Delete")
-        self.btn_delete.setMinimumHeight(32)
+        # Delete button at bottom
+        self.btn_delete = QPushButton("Delete")
+        self.btn_delete.setMinimumHeight(28)
         self.btn_delete.clicked.connect(self._delete_video)
         self.btn_delete.setEnabled(False)
         layout.addWidget(self.btn_delete)
@@ -1237,8 +1166,18 @@ class MainWindow(QMainWindow):
         self._run_cli_command("upload")
 
     def _delete_video(self) -> None:
-        """Delete the current video project (hold-to-delete is the safety)."""
+        """Delete the current video project."""
         if not self.current_video:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Delete",
+            f"Delete {self.current_video.name}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
             return
 
         try:
