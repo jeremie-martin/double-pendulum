@@ -361,6 +361,27 @@ class MainWindow(QMainWindow):
         zoom_row.addStretch()
         right_layout.addLayout(zoom_row)
 
+        # Blur/brightness settings for Shorts background
+        blur_row = QHBoxLayout()
+        blur_row.addWidget(QLabel("Blur:"))
+        self.blur_spin = QSpinBox()
+        self.blur_spin.setRange(5, 100)
+        self.blur_spin.setValue(50)
+        self.blur_spin.setFixedWidth(60)
+        self.blur_spin.setToolTip("Blur strength for Shorts background")
+        blur_row.addWidget(self.blur_spin)
+        blur_row.addWidget(QLabel("BG Brightness:"))
+        self.brightness_spin = QDoubleSpinBox()
+        self.brightness_spin.setRange(0.0, 1.0)
+        self.brightness_spin.setSingleStep(0.05)
+        self.brightness_spin.setDecimals(2)
+        self.brightness_spin.setValue(1.0)
+        self.brightness_spin.setFixedWidth(60)
+        self.brightness_spin.setToolTip("Background brightness (0-1)")
+        blur_row.addWidget(self.brightness_spin)
+        blur_row.addStretch()
+        right_layout.addLayout(blur_row)
+
         # Processing buttons
         right_layout.addWidget(QLabel("Processing:"))
 
@@ -858,11 +879,15 @@ Processed: {'Yes' if video.has_processed else 'No'} | Music: {music_str}{extra_i
             template = self._get_selected_template()
             zoom_start = self.zoom_start_spin.value()
             zoom_end = self.zoom_end_spin.value()
+            blur = self.blur_spin.value()
+            brightness = self.brightness_spin.value()
             cmd = ["uv", "run", "pendulum-tools", "process", video_dir,
                    "--shorts", "--blur-bg", "--force",
                    "--template", template,
                    "--zoom-start", str(zoom_start),
-                   "--zoom-end", str(zoom_end)]
+                   "--zoom-end", str(zoom_end),
+                   "--blur-strength", str(blur),
+                   "--bg-brightness", str(brightness)]
             if music:
                 cmd.append("--music")
                 if track_id:

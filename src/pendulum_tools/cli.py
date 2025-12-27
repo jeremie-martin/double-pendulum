@@ -901,6 +901,18 @@ def list_templates():
     help="Use blurred video as background instead of black bars (Shorts only)",
 )
 @click.option(
+    "--blur-strength",
+    type=click.IntRange(5, 100),
+    default=None,
+    help="Blur strength for Shorts background (5-100, default=50)",
+)
+@click.option(
+    "--bg-brightness",
+    type=click.FloatRange(0.0, 1.0),
+    default=None,
+    help="Background brightness for Shorts (0.0-1.0, default=1.0)",
+)
+@click.option(
     "--no-thumbnail",
     is_flag=True,
     help="Skip thumbnail extraction",
@@ -968,6 +980,8 @@ def process(
     seed: Optional[int],
     shorts: bool,
     blur_bg: bool,
+    blur_strength: Optional[int],
+    bg_brightness: Optional[float],
     no_thumbnail: bool,
     quality: int,
     nvenc_cq: int,
@@ -1005,18 +1019,23 @@ def process(
         pendulum-tools process /path/to/video_0000 --dry-run
     """
     # Build processing config
-    config = ProcessingConfig(
-        template=template,
-        seed=seed,
-        shorts=shorts,
-        blurred_background=blur_bg,
-        extract_thumbnails=not no_thumbnail,
-        crf_quality=quality,
-        nvenc_cq=nvenc_cq,
-        use_nvenc=not no_nvenc,
-        slow_zoom_start=zoom_start,
-        slow_zoom_end=zoom_end,
-    )
+    config_kwargs = {
+        "template": template,
+        "seed": seed,
+        "shorts": shorts,
+        "blurred_background": blur_bg,
+        "extract_thumbnails": not no_thumbnail,
+        "crf_quality": quality,
+        "nvenc_cq": nvenc_cq,
+        "use_nvenc": not no_nvenc,
+        "slow_zoom_start": zoom_start,
+        "slow_zoom_end": zoom_end,
+    }
+    if blur_strength is not None:
+        config_kwargs["blur_strength"] = blur_strength
+    if bg_brightness is not None:
+        config_kwargs["background_brightness"] = bg_brightness
+    config = ProcessingConfig(**config_kwargs)
 
     # Initialize pipeline
     try:
