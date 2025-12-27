@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """
-Batch video annotation and processing GUI.
+Batch video production studio.
 
-Three-Pane Studio layout:
-- Navigator (Left): Batch selection and video list
-- Stage (Center): Annotation and playback controls
-- Property Panel (Right): Processing, Music, and Publishing tabs
+Refined workflow: Core production actions (1→2→3→4) are always visible;
+advanced settings are tucked into a 'Config' tab on the right.
 
 Entry point: batch-annotate
 """
@@ -22,7 +20,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QSettings, Qt, QTimer
-from PyQt6.QtGui import QFont, QKeySequence, QShortcut
+from PyQt6.QtGui import QColor, QFont, QKeySequence, QPalette, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -39,7 +37,6 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QSizePolicy,
     QSpinBox,
     QTabWidget,
     QTextEdit,
@@ -55,36 +52,15 @@ from .templates import generate_description, generate_title
 
 MPV_COMMAND = "mpv"
 
-# Layout constants
-LEFT_PANEL_WIDTH = 280
-RIGHT_PANEL_WIDTH = 380
-BUTTON_HEIGHT = 40
-SPACING = 10
 
+class Separator(QFrame):
+    """Horizontal separator line."""
 
-def create_separator() -> QFrame:
-    """Create a horizontal separator line."""
-    line = QFrame()
-    line.setFrameShape(QFrame.Shape.HLine)
-    line.setFrameShadow(QFrame.Shadow.Sunken)
-    line.setStyleSheet("background-color: #c0c0c0;")
-    line.setFixedHeight(1)
-    return line
-
-
-def get_best_video_path(video_dir: Path) -> Optional[Path]:
-    """Get the most processed video available."""
-    candidates = [
-        "video_processed_final.mp4",
-        "video_processed.mp4",
-        "video.mp4",
-        "video_raw.mp4",
-    ]
-    for name in candidates:
-        path = video_dir / name
-        if path.exists():
-            return path
-    return None
+    def __init__(self):
+        super().__init__()
+        self.setFrameShape(QFrame.Shape.HLine)
+        self.setFrameShadow(QFrame.Shadow.Sunken)
+        self.setStyleSheet("color: #ddd;")
 
 
 @dataclass
@@ -106,24 +82,28 @@ class VideoInfo:
     music_title: Optional[str] = None
 
 
+def get_best_video_path(video_dir: Path) -> Optional[Path]:
+    """Get the most processed video available."""
+    candidates = [
+        "video_processed_final.mp4",
+        "video_processed.mp4",
+        "video.mp4",
+        "video_raw.mp4",
+    ]
+    for name in candidates:
+        path = video_dir / name
+        if path.exists():
+            return path
+    return None
+
+
 def load_video_info(video_dir: Path) -> Optional[VideoInfo]:
     """Load video info from a video directory."""
-    if not video_dir.is_dir():
-        return None
-
-    name = video_dir.name
-    if not name.startswith("video_"):
+    if not video_dir.is_dir() or not video_dir.name.startswith("video_"):
         return None
 
     metadata_path = video_dir / "metadata.json"
     has_metadata = metadata_path.exists()
-    has_video = (video_dir / "video_raw.mp4").exists()
-    best_video = get_best_video_path(video_dir)
-
-    has_processed = (video_dir / "video_processed.mp4").exists()
-    has_music = (video_dir / "video_processed_final.mp4").exists() or (
-        video_dir / "video.mp4"
-    ).exists()
 
     boom_frame = None
     boom_seconds = None
@@ -148,18 +128,21 @@ def load_video_info(video_dir: Path) -> Optional[VideoInfo]:
             pass
 
     return VideoInfo(
-        name=name,
+        name=video_dir.name,
         path=video_dir,
         metadata_path=metadata_path,
         has_metadata=has_metadata,
-        has_video=has_video,
+        has_video=(video_dir / "video_raw.mp4").exists(),
         boom_frame=boom_frame,
         boom_seconds=boom_seconds,
         video_fps=video_fps,
         duration_seconds=duration_seconds,
-        best_video_path=best_video,
-        has_processed=has_processed,
-        has_music=has_music,
+        best_video_path=get_best_video_path(video_dir),
+        has_processed=(video_dir / "video_processed.mp4").exists(),
+        has_music=(
+            (video_dir / "video_processed_final.mp4").exists()
+            or (video_dir / "video.mp4").exists()
+        ),
         music_title=music_title,
     )
 
@@ -168,20 +151,19 @@ def scan_batch(batch_dir: Path) -> list[VideoInfo]:
     """Scan a batch directory for videos."""
     videos = []
     for item in sorted(batch_dir.iterdir()):
-        if item.is_dir() and item.name.startswith("video_"):
-            info = load_video_info(item)
-            if info:
-                videos.append(info)
+        info = load_video_info(item)
+        if info:
+            videos.append(info)
     return videos
 
 
 class MainWindow(QMainWindow):
-    """Main window for batch annotation - Three-Pane Studio layout."""
+    """Video Production Studio - streamlined 1→2→3→4 workflow."""
 
     def __init__(self, batch_dir: Optional[Path] = None):
         super().__init__()
-        self.setWindowTitle("Batch Video Annotator")
-        self.resize(1200, 800)
+        self.setWindowTitle("Video Production Studio")
+        self.resize(1300, 850)
 
         self.settings = QSettings("double-pendulum", "batch-annotate")
         self.batch_dir: Optional[Path] = None
@@ -191,15 +173,15 @@ class MainWindow(QMainWindow):
         self.valid_tracks: list[MusicTrack] = []
         self.template_lib: Optional[TemplateLibrary] = None
 
-        # Autosave timer
         self.autosave_timer = QTimer()
         self.autosave_timer.setSingleShot(True)
         self.autosave_timer.timeout.connect(self._do_autosave)
 
         self._init_ui()
         self._setup_shortcuts()
-        self._load_music_database()
-        self._load_templates()
+
+        # Load resources after UI is ready
+        QTimer.singleShot(0, self._load_resources)
 
         self.statusBar().show()
 
@@ -210,434 +192,354 @@ class MainWindow(QMainWindow):
             if last_batch and Path(last_batch).exists():
                 self._load_batch(Path(last_batch))
 
-    def _load_music_database(self) -> None:
-        """Load the music database."""
-        try:
-            config = get_config()
-            music_dir = config.get_music_dir(None)
-            self.music_db = MusicDatabase(music_dir)
-        except Exception as e:
-            print(f"Warning: Could not load music database: {e}")
-            self.music_db = None
-
-    def _load_templates(self) -> None:
-        """Load templates and populate the combo."""
+    def _load_resources(self) -> None:
+        """Load templates and music database."""
         try:
             self.template_lib = TemplateLibrary()
-            templates = self.template_lib.list_templates()
-            self.template_combo.addItem("random")
-            for name in sorted(templates):
-                template = self.template_lib.get(name)
-                self.template_combo.addItem(f"{name} - {template.description}")
-            for i in range(self.template_combo.count()):
-                if self.template_combo.itemText(i).startswith("minimal_science"):
-                    self.template_combo.setCurrentIndex(i)
+            self.combo_template.addItem("random")
+            for name in sorted(self.template_lib.list_templates()):
+                tmpl = self.template_lib.get(name)
+                self.combo_template.addItem(f"{name} - {tmpl.description}")
+            # Default to minimal_science
+            for i in range(self.combo_template.count()):
+                if self.combo_template.itemText(i).startswith("minimal_science"):
+                    self.combo_template.setCurrentIndex(i)
                     break
         except Exception as e:
             print(f"Warning: Could not load templates: {e}")
-            self.template_lib = None
+
+        try:
+            config = get_config()
+            self.music_db = MusicDatabase(config.get_music_dir(None))
+        except Exception as e:
+            print(f"Warning: Could not load music database: {e}")
 
     def _init_ui(self) -> None:
-        """Initialize the Three-Pane Studio layout."""
+        """Initialize the production studio layout."""
         central = QWidget()
         self.setCentralWidget(central)
 
         main_layout = QHBoxLayout(central)
-        main_layout.setSpacing(SPACING)
-        main_layout.setContentsMargins(SPACING, SPACING, SPACING, SPACING)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(15)
 
-        # === ZONE A: Navigator (Left) ===
-        left_panel = self._create_navigator_panel()
-        left_panel.setFixedWidth(LEFT_PANEL_WIDTH)
-        main_layout.addWidget(left_panel)
+        # === SIDEBAR (Left, 280px): Batch Navigation ===
+        sidebar = self._create_sidebar()
+        sidebar.setFixedWidth(280)
+        main_layout.addWidget(sidebar)
 
-        # === ZONE B: Stage (Center) ===
-        center_panel = self._create_stage_panel()
-        center_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        main_layout.addWidget(center_panel, 1)
+        # === PRODUCTION AREA (Center, expanding): The 1→2→3→4 Workflow ===
+        production = self._create_production_panel()
+        main_layout.addWidget(production, 1)
 
-        # === ZONE C: Property Panel (Right) ===
-        right_panel = self._create_property_panel()
-        right_panel.setFixedWidth(RIGHT_PANEL_WIDTH)
-        main_layout.addWidget(right_panel)
+        # === SETTINGS PANEL (Right, 360px): Metadata + Config tabs ===
+        settings_panel = self._create_settings_panel()
+        settings_panel.setFixedWidth(360)
+        main_layout.addWidget(settings_panel)
 
-    def _create_navigator_panel(self) -> QWidget:
-        """Create Zone A: Navigator panel."""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setSpacing(SPACING)
+    def _create_sidebar(self) -> QWidget:
+        """Create the left sidebar with batch navigation."""
+        sidebar = QWidget()
+        layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
 
-        # Batch controls
-        self.open_btn = QPushButton("Open Batch...")
-        self.open_btn.clicked.connect(self._open_batch_dialog)
-        layout.addWidget(self.open_btn)
+        self.btn_open = QPushButton("Open Batch...")
+        self.btn_open.setMinimumHeight(35)
+        self.btn_open.clicked.connect(self._open_batch_dialog)
+        layout.addWidget(self.btn_open)
 
-        self.batch_label = QLabel("No batch loaded")
-        self.batch_label.setStyleSheet("color: gray; font-style: italic;")
-        self.batch_label.setWordWrap(True)
-        layout.addWidget(self.batch_label)
+        self.lbl_batch = QLabel("No batch loaded")
+        self.lbl_batch.setStyleSheet("color: gray; font-style: italic;")
+        layout.addWidget(self.lbl_batch)
 
-        layout.addWidget(create_separator())
+        layout.addWidget(Separator())
 
-        # Video list
         self.video_list = QListWidget()
         self.video_list.currentItemChanged.connect(self._on_video_selected)
         layout.addWidget(self.video_list, 1)
 
-        # Navigation
-        nav_layout = QHBoxLayout()
-        self.prev_btn = QPushButton("< Prev (P)")
-        self.prev_btn.clicked.connect(self._prev_video)
-        nav_layout.addWidget(self.prev_btn)
+        nav_row = QHBoxLayout()
+        self.btn_prev = QPushButton("< Prev (P)")
+        self.btn_next = QPushButton("Next (N) >")
+        self.btn_prev.clicked.connect(self._prev_video)
+        self.btn_next.clicked.connect(self._next_video)
+        nav_row.addWidget(self.btn_prev)
+        nav_row.addWidget(self.btn_next)
+        layout.addLayout(nav_row)
 
-        self.next_btn = QPushButton("Next (N) >")
-        self.next_btn.clicked.connect(self._next_video)
-        nav_layout.addWidget(self.next_btn)
-        layout.addLayout(nav_layout)
+        return sidebar
 
-        return panel
-
-    def _create_stage_panel(self) -> QWidget:
-        """Create Zone B: Stage panel with hero controls."""
+    def _create_production_panel(self) -> QWidget:
+        """Create the center production panel with 1→2→3→4 workflow."""
         panel = QWidget()
         layout = QVBoxLayout(panel)
-        layout.setSpacing(SPACING)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
 
-        # Video title (large)
-        self.video_title = QLabel("Select a video")
+        # Video Header
+        self.lbl_title = QLabel("Select a video")
         title_font = QFont()
-        title_font.setPointSize(16)
+        title_font.setPointSize(18)
         title_font.setBold(True)
-        self.video_title.setFont(title_font)
-        layout.addWidget(self.video_title)
+        self.lbl_title.setFont(title_font)
+        layout.addWidget(self.lbl_title)
 
-        # Video stats
-        self.video_stats = QLabel("")
-        self.video_stats.setStyleSheet("color: #666;")
-        layout.addWidget(self.video_stats)
+        self.lbl_stats = QLabel("FPS: -- | Duration: -- | Status: --")
+        self.lbl_stats.setStyleSheet("color: #666;")
+        layout.addWidget(self.lbl_stats)
 
-        layout.addWidget(create_separator())
+        layout.addWidget(Separator())
 
-        # === Hero Timing Control ===
-        timing_group = QGroupBox("Timing")
-        timing_layout = QVBoxLayout(timing_group)
+        # === 1. ANNOTATION & TIMING ===
+        group1 = QGroupBox("1. Annotation & Timing")
+        g1_layout = QVBoxLayout(group1)
 
-        # Boom frame row with large spinbox
         boom_row = QHBoxLayout()
+        boom_row.addWidget(QLabel("Boom Frame:"))
 
-        boom_label = QLabel("Boom Frame:")
-        boom_label.setStyleSheet("font-size: 14px;")
-        boom_row.addWidget(boom_label)
-
-        self.boom_spin = QSpinBox()
-        self.boom_spin.setRange(0, 100000)
-        self.boom_spin.setEnabled(False)
-        self.boom_spin.valueChanged.connect(self._on_boom_changed)
+        self.spin_boom = QSpinBox()
+        self.spin_boom.setRange(0, 100000)
+        self.spin_boom.setFixedSize(130, 42)
         boom_font = QFont()
-        boom_font.setPointSize(18)
-        self.boom_spin.setFont(boom_font)
-        self.boom_spin.setMinimumWidth(120)
-        self.boom_spin.setMinimumHeight(40)
-        boom_row.addWidget(self.boom_spin)
+        boom_font.setPointSize(16)
+        boom_font.setBold(True)
+        self.spin_boom.setFont(boom_font)
+        self.spin_boom.valueChanged.connect(self._on_boom_changed)
+        boom_row.addWidget(self.spin_boom)
 
-        self.boom_seconds_label = QLabel("(0.0s)")
-        self.boom_seconds_label.setStyleSheet("font-size: 14px; color: #666;")
-        boom_row.addWidget(self.boom_seconds_label)
-
-        # Save status indicator
-        self.save_status = QLabel("")
-        self.save_status.setStyleSheet("font-size: 16px;")
-        self.save_status.setFixedWidth(30)
-        boom_row.addWidget(self.save_status)
+        self.lbl_boom_secs = QLabel("(0.00s)")
+        self.lbl_boom_secs.setStyleSheet("font-size: 14px; color: #1976d2;")
+        boom_row.addWidget(self.lbl_boom_secs)
 
         boom_row.addStretch()
-        timing_layout.addLayout(boom_row)
 
-        layout.addWidget(timing_group)
+        self.lbl_autosave = QLabel("")
+        self.lbl_autosave.setStyleSheet("font-size: 16px;")
+        self.lbl_autosave.setFixedWidth(30)
+        boom_row.addWidget(self.lbl_autosave)
 
-        layout.addWidget(create_separator())
+        g1_layout.addLayout(boom_row)
 
-        # Playback controls
-        playback_group = QGroupBox("Playback")
-        playback_layout = QHBoxLayout(playback_group)
+        play_row = QHBoxLayout()
+        self.btn_play = QPushButton("Play Video (O)")
+        self.btn_play.setMinimumHeight(42)
+        self.btn_play.clicked.connect(self._play_video)
+        self.btn_play.setEnabled(False)
+        play_row.addWidget(self.btn_play)
 
-        self.play_btn = QPushButton("Play Video (O)")
-        self.play_btn.setEnabled(False)
-        self.play_btn.clicked.connect(self._play_video)
-        self.play_btn.setMinimumHeight(BUTTON_HEIGHT)
-        playback_layout.addWidget(self.play_btn)
+        self.btn_play_boom = QPushButton("Play at Boom")
+        self.btn_play_boom.setMinimumHeight(42)
+        self.btn_play_boom.clicked.connect(self._play_at_boom)
+        self.btn_play_boom.setEnabled(False)
+        play_row.addWidget(self.btn_play_boom)
 
-        self.play_boom_btn = QPushButton("Play at Boom")
-        self.play_boom_btn.setEnabled(False)
-        self.play_boom_btn.clicked.connect(self._play_at_boom)
-        self.play_boom_btn.setMinimumHeight(BUTTON_HEIGHT)
-        playback_layout.addWidget(self.play_boom_btn)
+        g1_layout.addLayout(play_row)
+        layout.addWidget(group1)
 
-        layout.addWidget(playback_group)
+        # === 2. SOUNDTRACK ===
+        group2 = QGroupBox("2. Soundtrack")
+        g2_layout = QVBoxLayout(group2)
 
-        layout.addWidget(create_separator())
+        music_row = QHBoxLayout()
+        self.combo_music = QComboBox()
+        self.combo_music.setEnabled(False)
+        music_row.addWidget(self.combo_music, 1)
 
-        # Metadata display
-        metadata_group = QGroupBox("Metadata")
-        self.metadata_label = QLabel("")
-        self.metadata_label.setWordWrap(True)
-        self.metadata_label.setStyleSheet("font-size: 11px;")
-        metadata_layout = QVBoxLayout(metadata_group)
-        metadata_layout.addWidget(self.metadata_label)
-        layout.addWidget(metadata_group)
+        self.btn_add_music = QPushButton("Add Music")
+        self.btn_add_music.setFixedWidth(110)
+        self.btn_add_music.setMinimumHeight(35)
+        self.btn_add_music.clicked.connect(self._add_music)
+        self.btn_add_music.setEnabled(False)
+        music_row.addWidget(self.btn_add_music)
 
-        layout.addStretch()
+        g2_layout.addLayout(music_row)
 
-        return panel
+        self.lbl_current_music = QLabel("Current: None")
+        self.lbl_current_music.setStyleSheet("color: #666; font-size: 11px;")
+        g2_layout.addWidget(self.lbl_current_music)
 
-    def _create_property_panel(self) -> QWidget:
-        """Create Zone C: Property panel with tabs."""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setSpacing(SPACING)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(group2)
 
-        # Tab widget
-        self.tabs = QTabWidget()
-        layout.addWidget(self.tabs)
+        # === 3. RENDERING ===
+        group3 = QGroupBox("3. Rendering")
+        g3_layout = QHBoxLayout(group3)
 
-        # Processing tab
-        self.tabs.addTab(self._create_processing_tab(), "Processing")
-
-        # Music tab
-        self.tabs.addTab(self._create_music_tab(), "Music")
-
-        # Publishing tab
-        self.tabs.addTab(self._create_publishing_tab(), "Publishing")
-
-        # Delete button at bottom (outside tabs)
-        layout.addWidget(create_separator())
-
-        self.delete_btn = QPushButton("Delete Video")
-        self.delete_btn.setEnabled(False)
-        self.delete_btn.clicked.connect(self._delete_video)
-        self.delete_btn.setStyleSheet(
-            "background: #f44336; color: white; padding: 8px;"
-        )
-        self.delete_btn.setMinimumHeight(BUTTON_HEIGHT)
-        layout.addWidget(self.delete_btn)
-
-        return panel
-
-    def _create_processing_tab(self) -> QWidget:
-        """Create the Processing tab content."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setSpacing(SPACING)
-
-        # Template selection
-        template_group = QGroupBox("Template")
-        template_layout = QVBoxLayout(template_group)
-        self.template_combo = QComboBox()
-        self.template_combo.currentIndexChanged.connect(self._on_template_changed)
-        template_layout.addWidget(self.template_combo)
-        layout.addWidget(template_group)
-
-        # Motion settings
-        motion_group = QGroupBox("Motion")
-        motion_form = QFormLayout(motion_group)
-        motion_form.setSpacing(8)
-
-        zoom_row = QHBoxLayout()
-        self.zoom_start_spin = QDoubleSpinBox()
-        self.zoom_start_spin.setRange(0.5, 2.0)
-        self.zoom_start_spin.setSingleStep(0.01)
-        self.zoom_start_spin.setDecimals(2)
-        self.zoom_start_spin.setValue(1.0)
-        zoom_row.addWidget(QLabel("Start:"))
-        zoom_row.addWidget(self.zoom_start_spin)
-        zoom_row.addWidget(QLabel("End:"))
-        self.zoom_end_spin = QDoubleSpinBox()
-        self.zoom_end_spin.setRange(0.5, 2.0)
-        self.zoom_end_spin.setSingleStep(0.01)
-        self.zoom_end_spin.setDecimals(2)
-        self.zoom_end_spin.setValue(1.08)
-        zoom_row.addWidget(self.zoom_end_spin)
-        motion_form.addRow("Zoom:", zoom_row)
-
-        layout.addWidget(motion_group)
-
-        # Background settings
-        bg_group = QGroupBox("Background (Shorts)")
-        bg_form = QFormLayout(bg_group)
-        bg_form.setSpacing(8)
-
-        self.blur_spin = QSpinBox()
-        self.blur_spin.setRange(5, 100)
-        self.blur_spin.setValue(50)
-        self.blur_spin.setToolTip("Blur strength for Shorts background")
-        bg_form.addRow("Blur:", self.blur_spin)
-
-        self.brightness_spin = QDoubleSpinBox()
-        self.brightness_spin.setRange(0.0, 1.0)
-        self.brightness_spin.setSingleStep(0.05)
-        self.brightness_spin.setDecimals(2)
-        self.brightness_spin.setValue(1.0)
-        self.brightness_spin.setToolTip("Background brightness (0-1)")
-        bg_form.addRow("Brightness:", self.brightness_spin)
-
-        layout.addWidget(bg_group)
-
-        layout.addWidget(create_separator())
-
-        # Process buttons
-        self.process_btn = QPushButton("Process Video")
-        self.process_btn.setEnabled(False)
-        self.process_btn.clicked.connect(self._process_video)
-        self.process_btn.setStyleSheet(
+        self.btn_process = QPushButton("Process FX")
+        self.btn_process.setMinimumHeight(45)
+        self.btn_process.setStyleSheet(
             "background: #2196F3; color: white; font-weight: bold;"
         )
-        self.process_btn.setMinimumHeight(BUTTON_HEIGHT)
-        layout.addWidget(self.process_btn)
+        self.btn_process.clicked.connect(self._process_video)
+        self.btn_process.setEnabled(False)
+        g3_layout.addWidget(self.btn_process)
 
-        self.process_music_btn = QPushButton("Process + Music")
-        self.process_music_btn.setEnabled(False)
-        self.process_music_btn.clicked.connect(self._process_with_music)
-        self.process_music_btn.setStyleSheet(
+        self.btn_process_music = QPushButton("Process + Music")
+        self.btn_process_music.setMinimumHeight(45)
+        self.btn_process_music.setStyleSheet(
             "background: #4CAF50; color: white; font-weight: bold;"
         )
-        self.process_music_btn.setMinimumHeight(BUTTON_HEIGHT)
-        layout.addWidget(self.process_music_btn)
+        self.btn_process_music.clicked.connect(self._process_with_music)
+        self.btn_process_music.setEnabled(False)
+        g3_layout.addWidget(self.btn_process_music)
 
-        layout.addStretch()
-        return tab
+        layout.addWidget(group3)
 
-    def _create_music_tab(self) -> QWidget:
-        """Create the Music tab content."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setSpacing(SPACING)
+        # === 4. PUBLISHING ===
+        group4 = QGroupBox("4. Publishing")
+        g4_layout = QVBoxLayout(group4)
 
-        # Track selection
-        track_group = QGroupBox("Track Selection")
-        track_layout = QVBoxLayout(track_group)
-
-        self.music_combo = QComboBox()
-        self.music_combo.setEnabled(False)
-        track_layout.addWidget(self.music_combo)
-
-        self.add_music_btn = QPushButton("Add Music Only")
-        self.add_music_btn.setEnabled(False)
-        self.add_music_btn.clicked.connect(self._add_music)
-        self.add_music_btn.setMinimumHeight(BUTTON_HEIGHT)
-        track_layout.addWidget(self.add_music_btn)
-
-        layout.addWidget(track_group)
-
-        # Current music info
-        info_group = QGroupBox("Current Track")
-        info_layout = QVBoxLayout(info_group)
-        self.current_music_label = QLabel("None")
-        self.current_music_label.setStyleSheet("color: #666;")
-        info_layout.addWidget(self.current_music_label)
-        layout.addWidget(info_group)
-
-        layout.addStretch()
-        return tab
-
-    def _create_publishing_tab(self) -> QWidget:
-        """Create the Publishing tab content."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setSpacing(SPACING)
-
-        # Upload button
-        self.upload_btn = QPushButton("Upload to YouTube")
-        self.upload_btn.setEnabled(False)
-        self.upload_btn.clicked.connect(self._upload_video)
-        self.upload_btn.setStyleSheet(
-            "background: #FF0000; color: white; font-weight: bold;"
-        )
-        self.upload_btn.setMinimumHeight(BUTTON_HEIGHT)
-        layout.addWidget(self.upload_btn)
-
-        layout.addWidget(create_separator())
-
-        # Manual upload info
-        manual_group = QGroupBox("Manual Upload Info")
-        manual_layout = QVBoxLayout(manual_group)
-
-        # Title
+        # Title row
         title_row = QHBoxLayout()
-        self.title_edit = QLineEdit()
-        self.title_edit.setReadOnly(True)
-        title_row.addWidget(self.title_edit)
-        self.regen_title_btn = QPushButton("↻")
-        self.regen_title_btn.setFixedWidth(30)
-        self.regen_title_btn.setToolTip("Regenerate title")
-        self.regen_title_btn.clicked.connect(lambda: self._regenerate("title"))
-        title_row.addWidget(self.regen_title_btn)
-        self.copy_title_btn = QPushButton("Copy")
-        self.copy_title_btn.setFixedWidth(50)
-        self.copy_title_btn.clicked.connect(
-            lambda: self._copy_to_clipboard(self.title_edit.text())
+        title_row.addWidget(QLabel("Title:"))
+        self.edit_title = QLineEdit()
+        self.edit_title.setReadOnly(True)
+        title_row.addWidget(self.edit_title)
+        self.btn_regen_title = QPushButton("↻")
+        self.btn_regen_title.setFixedWidth(30)
+        self.btn_regen_title.setToolTip("Regenerate title")
+        self.btn_regen_title.clicked.connect(lambda: self._regenerate("title"))
+        title_row.addWidget(self.btn_regen_title)
+        self.btn_copy_title = QPushButton("Copy")
+        self.btn_copy_title.setFixedWidth(50)
+        self.btn_copy_title.clicked.connect(
+            lambda: self._copy_to_clipboard(self.edit_title.text())
         )
-        title_row.addWidget(self.copy_title_btn)
-        manual_layout.addWidget(QLabel("Title:"))
-        manual_layout.addLayout(title_row)
+        title_row.addWidget(self.btn_copy_title)
+        g4_layout.addLayout(title_row)
 
-        # Description
+        # Description row
         desc_header = QHBoxLayout()
         desc_header.addWidget(QLabel("Description:"))
         desc_header.addStretch()
-        self.regen_desc_btn = QPushButton("↻")
-        self.regen_desc_btn.setFixedWidth(30)
-        self.regen_desc_btn.setToolTip("Regenerate description")
-        self.regen_desc_btn.clicked.connect(lambda: self._regenerate("description"))
-        desc_header.addWidget(self.regen_desc_btn)
-        self.copy_desc_btn = QPushButton("Copy")
-        self.copy_desc_btn.setFixedWidth(50)
-        self.copy_desc_btn.clicked.connect(
-            lambda: self._copy_to_clipboard(self.desc_edit.toPlainText())
+        self.btn_regen_desc = QPushButton("↻")
+        self.btn_regen_desc.setFixedWidth(30)
+        self.btn_regen_desc.setToolTip("Regenerate description")
+        self.btn_regen_desc.clicked.connect(lambda: self._regenerate("description"))
+        desc_header.addWidget(self.btn_regen_desc)
+        self.btn_copy_desc = QPushButton("Copy")
+        self.btn_copy_desc.setFixedWidth(50)
+        self.btn_copy_desc.clicked.connect(
+            lambda: self._copy_to_clipboard(self.edit_desc.toPlainText())
         )
-        desc_header.addWidget(self.copy_desc_btn)
-        manual_layout.addLayout(desc_header)
+        desc_header.addWidget(self.btn_copy_desc)
+        g4_layout.addLayout(desc_header)
 
-        self.desc_edit = QTextEdit()
-        self.desc_edit.setReadOnly(True)
-        self.desc_edit.setMaximumHeight(80)
-        manual_layout.addWidget(self.desc_edit)
+        self.edit_desc = QTextEdit()
+        self.edit_desc.setReadOnly(True)
+        self.edit_desc.setMaximumHeight(70)
+        g4_layout.addWidget(self.edit_desc)
 
-        # Paths
-        path_form = QFormLayout()
-        path_form.setSpacing(4)
-
-        rel_row = QHBoxLayout()
-        self.path_rel_edit = QLineEdit()
-        self.path_rel_edit.setReadOnly(True)
-        rel_row.addWidget(self.path_rel_edit)
-        self.copy_rel_btn = QPushButton("Copy")
-        self.copy_rel_btn.setFixedWidth(50)
-        self.copy_rel_btn.clicked.connect(
-            lambda: self._copy_to_clipboard(self.path_rel_edit.text())
+        # Path row
+        path_row = QHBoxLayout()
+        path_row.addWidget(QLabel("Path:"))
+        self.edit_path = QLineEdit()
+        self.edit_path.setReadOnly(True)
+        path_row.addWidget(self.edit_path)
+        self.btn_copy_path = QPushButton("Copy")
+        self.btn_copy_path.setFixedWidth(50)
+        self.btn_copy_path.clicked.connect(
+            lambda: self._copy_to_clipboard(self.edit_path.text())
         )
-        rel_row.addWidget(self.copy_rel_btn)
-        path_form.addRow("Path (rel):", rel_row)
+        path_row.addWidget(self.btn_copy_path)
+        g4_layout.addLayout(path_row)
 
-        abs_row = QHBoxLayout()
-        self.path_abs_edit = QLineEdit()
-        self.path_abs_edit.setReadOnly(True)
-        abs_row.addWidget(self.path_abs_edit)
-        self.copy_abs_btn = QPushButton("Copy")
-        self.copy_abs_btn.setFixedWidth(50)
-        self.copy_abs_btn.clicked.connect(
-            lambda: self._copy_to_clipboard(self.path_abs_edit.text())
+        # Upload button
+        self.btn_upload = QPushButton("Upload to YouTube")
+        self.btn_upload.setMinimumHeight(45)
+        self.btn_upload.setStyleSheet(
+            "background: #FF0000; color: white; font-weight: bold;"
         )
-        abs_row.addWidget(self.copy_abs_btn)
-        path_form.addRow("Path (abs):", abs_row)
+        self.btn_upload.clicked.connect(self._upload_video)
+        self.btn_upload.setEnabled(False)
+        g4_layout.addWidget(self.btn_upload)
 
-        manual_layout.addLayout(path_form)
-        layout.addWidget(manual_group)
+        layout.addWidget(group4)
 
         layout.addStretch()
-        return tab
+
+        # Delete button (de-emphasized)
+        self.btn_delete = QPushButton("Delete Project")
+        self.btn_delete.setStyleSheet("color: #999; border: 1px solid #ddd;")
+        self.btn_delete.clicked.connect(self._delete_video)
+        self.btn_delete.setEnabled(False)
+        layout.addWidget(self.btn_delete)
+
+        return panel
+
+    def _create_settings_panel(self) -> QWidget:
+        """Create the right panel with Metadata and Config tabs."""
+        tabs = QTabWidget()
+
+        # === METADATA TAB ===
+        meta_tab = QWidget()
+        meta_layout = QVBoxLayout(meta_tab)
+
+        self.txt_metadata = QTextEdit()
+        self.txt_metadata.setReadOnly(True)
+        self.txt_metadata.setStyleSheet(
+            "font-family: monospace; font-size: 11px; background: #fafafa;"
+        )
+        meta_layout.addWidget(self.txt_metadata)
+
+        tabs.addTab(meta_tab, "Metadata")
+
+        # === CONFIG TAB (Advanced settings) ===
+        config_tab = QWidget()
+        config_layout = QVBoxLayout(config_tab)
+
+        # Template group
+        template_group = QGroupBox("Template")
+        template_layout = QVBoxLayout(template_group)
+        self.combo_template = QComboBox()
+        self.combo_template.currentIndexChanged.connect(self._on_template_changed)
+        template_layout.addWidget(self.combo_template)
+        config_layout.addWidget(template_group)
+
+        # Motion group
+        motion_group = QGroupBox("Motion (Slow Zoom)")
+        motion_form = QFormLayout(motion_group)
+
+        self.spin_zoom_start = QDoubleSpinBox()
+        self.spin_zoom_start.setRange(0.5, 2.0)
+        self.spin_zoom_start.setSingleStep(0.01)
+        self.spin_zoom_start.setDecimals(2)
+        self.spin_zoom_start.setValue(1.0)
+        motion_form.addRow("Zoom Start:", self.spin_zoom_start)
+
+        self.spin_zoom_end = QDoubleSpinBox()
+        self.spin_zoom_end.setRange(0.5, 2.0)
+        self.spin_zoom_end.setSingleStep(0.01)
+        self.spin_zoom_end.setDecimals(2)
+        self.spin_zoom_end.setValue(1.08)
+        motion_form.addRow("Zoom End:", self.spin_zoom_end)
+
+        config_layout.addWidget(motion_group)
+
+        # Background group
+        bg_group = QGroupBox("Background (Shorts)")
+        bg_form = QFormLayout(bg_group)
+
+        self.spin_blur = QSpinBox()
+        self.spin_blur.setRange(5, 100)
+        self.spin_blur.setValue(50)
+        self.spin_blur.setToolTip("Blur strength for Shorts background")
+        bg_form.addRow("Blur:", self.spin_blur)
+
+        self.spin_brightness = QDoubleSpinBox()
+        self.spin_brightness.setRange(0.0, 1.0)
+        self.spin_brightness.setSingleStep(0.05)
+        self.spin_brightness.setDecimals(2)
+        self.spin_brightness.setValue(1.0)
+        self.spin_brightness.setToolTip("Background brightness (0-1)")
+        bg_form.addRow("Brightness:", self.spin_brightness)
+
+        config_layout.addWidget(bg_group)
+
+        config_layout.addStretch()
+        tabs.addTab(config_tab, "Config")
+
+        return tabs
 
     def _setup_shortcuts(self) -> None:
         """Set up keyboard shortcuts."""
@@ -660,9 +562,9 @@ class MainWindow(QMainWindow):
 
         self.settings.setValue("last_batch", str(batch_dir))
 
-        self.batch_label.setText(batch_dir.name)
-        self.batch_label.setStyleSheet("font-weight: bold;")
-        self.setWindowTitle(f"Batch Annotator - {batch_dir.name}")
+        self.lbl_batch.setText(batch_dir.name)
+        self.lbl_batch.setStyleSheet("font-weight: bold;")
+        self.setWindowTitle(f"Video Production Studio - {batch_dir.name}")
 
         self.video_list.clear()
         for video in self.videos:
@@ -679,9 +581,9 @@ class MainWindow(QMainWindow):
         if video.boom_frame is None:
             return "?"
         elif video.has_processed:
-            return "P"
+            return "✓"
         elif video.has_music:
-            return "M"
+            return "♪"
         else:
             return "+"
 
@@ -689,152 +591,134 @@ class MainWindow(QMainWindow):
         """Handle video selection."""
         if not current:
             self.current_video = None
-            self._update_ui()
+            self._clear_ui()
             return
 
         self.current_video = current.data(Qt.ItemDataRole.UserRole)
         self._update_ui()
         self._update_music_combo()
 
+    def _clear_ui(self) -> None:
+        """Clear all UI fields."""
+        self.lbl_title.setText("Select a video")
+        self.lbl_stats.setText("FPS: -- | Duration: -- | Status: --")
+        self.spin_boom.setValue(0)
+        self.lbl_boom_secs.setText("(0.00s)")
+        self.lbl_autosave.setText("")
+        self.combo_music.clear()
+        self.lbl_current_music.setText("Current: None")
+        self.edit_title.clear()
+        self.edit_desc.clear()
+        self.edit_path.clear()
+        self.txt_metadata.clear()
+
+        # Disable buttons
+        self.btn_play.setEnabled(False)
+        self.btn_play_boom.setEnabled(False)
+        self.combo_music.setEnabled(False)
+        self.btn_add_music.setEnabled(False)
+        self.btn_process.setEnabled(False)
+        self.btn_process_music.setEnabled(False)
+        self.btn_upload.setEnabled(False)
+        self.btn_delete.setEnabled(False)
+
     def _update_ui(self) -> None:
         """Update UI based on current video."""
         video = self.current_video
-        self.save_status.setText("")
-
         if not video:
-            self.video_title.setText("Select a video")
-            self.video_stats.setText("")
-            self.metadata_label.setText("")
-            self.boom_spin.setEnabled(False)
-            self.play_btn.setEnabled(False)
-            self.play_boom_btn.setEnabled(False)
-            self.music_combo.setEnabled(False)
-            self.add_music_btn.setEnabled(False)
-            self.process_btn.setEnabled(False)
-            self.process_music_btn.setEnabled(False)
-            self.upload_btn.setEnabled(False)
-            self.delete_btn.setEnabled(False)
-            self.current_music_label.setText("None")
-            self.title_edit.clear()
-            self.desc_edit.clear()
-            self.path_rel_edit.clear()
-            self.path_abs_edit.clear()
+            self._clear_ui()
             return
 
-        # Update title and stats
-        self.video_title.setText(video.name)
+        self.lbl_autosave.setText("")
+
+        # Header
+        self.lbl_title.setText(video.name)
         video_file = video.best_video_path.name if video.best_video_path else "None"
-        boom_str = f"{video.boom_seconds:.2f}s" if video.boom_seconds else "N/A"
-        self.video_stats.setText(
+        status = "Processed" if video.has_processed else ("Music" if video.has_music else "Raw")
+        self.lbl_stats.setText(
             f"FPS: {video.video_fps} | Duration: {video.duration_seconds:.1f}s | "
-            f"Video: {video_file} | Boom: {boom_str}"
+            f"Video: {video_file} | Status: {status}"
         )
 
-        # Update current music
-        self.current_music_label.setText(video.music_title if video.music_title else "None")
-
-        # Load full metadata
-        try:
-            meta = VideoMetadata.from_file(video.metadata_path)
-            date_str = meta.created_at.strftime("%Y-%m-%d %H:%M")
-            color_preset = f" ({meta.color.preset_name})" if meta.color.preset_name else ""
-            pp_preset = f" ({meta.post_process.preset_name})" if meta.post_process.preset_name else ""
-            self.metadata_label.setText(
-                f"<b>Simulation</b><br>"
-                f"Pendulums: {meta.simulation.pendulum_count:,}<br>"
-                f"Date: {date_str}<br><br>"
-                f"<b>Color</b>{color_preset}<br>"
-                f"Scheme: {meta.color.scheme} | Range: {meta.color.start}-{meta.color.end}<br><br>"
-                f"<b>Post-Process</b>{pp_preset}<br>"
-                f"Tone: {meta.post_process.tone_map} | "
-                f"Exp: {meta.post_process.exposure} | "
-                f"Contrast: {meta.post_process.contrast} | "
-                f"Gamma: {meta.post_process.gamma}"
-            )
-        except Exception:
-            self.metadata_label.setText("")
-
-        # Update boom spinner
-        self.boom_spin.blockSignals(True)
-        self.boom_spin.setEnabled(True)
-        self.boom_spin.setMaximum(int(video.duration_seconds * video.video_fps))
-        self.boom_spin.setValue(video.boom_frame or 0)
-        self.boom_spin.blockSignals(False)
+        # Boom spinner
+        self.spin_boom.blockSignals(True)
+        self.spin_boom.setMaximum(int(video.duration_seconds * video.video_fps))
+        self.spin_boom.setValue(video.boom_frame or 0)
+        self.spin_boom.blockSignals(False)
         self._update_boom_label()
 
-        # Enable buttons
-        has_boom = video.boom_frame is not None and video.boom_frame > 0
-        self.play_btn.setEnabled(video.best_video_path is not None)
-        self.play_boom_btn.setEnabled(video.best_video_path is not None and has_boom)
-        self.music_combo.setEnabled(has_boom and self.music_db is not None)
-        self.add_music_btn.setEnabled(has_boom and self.music_db is not None)
-        self.process_btn.setEnabled(video.has_video and has_boom)
-        self.process_music_btn.setEnabled(video.has_video and has_boom and self.music_db is not None)
-        self.upload_btn.setEnabled(video.best_video_path is not None)
-        self.delete_btn.setEnabled(True)
+        # Current music
+        self.lbl_current_music.setText(
+            f"Current: {video.music_title}" if video.music_title else "Current: None"
+        )
 
-        # Update manual upload info
+        # Publishing info
         if video.best_video_path:
-            self.path_abs_edit.setText(str(video.best_video_path.resolve()))
-            if self.batch_dir:
-                try:
-                    self.path_rel_edit.setText(
-                        str(video.best_video_path.relative_to(self.batch_dir.parent))
-                    )
-                except ValueError:
-                    self.path_rel_edit.setText(str(video.best_video_path))
-            else:
-                self.path_rel_edit.setText(str(video.best_video_path))
+            self.edit_path.setText(str(video.best_video_path.resolve()))
         else:
-            self.path_rel_edit.setText("")
-            self.path_abs_edit.setText("")
+            self.edit_path.clear()
 
         try:
             metadata = VideoMetadata.from_file(video.metadata_path)
-            self.title_edit.setText(generate_title(metadata))
-            self.desc_edit.setText(generate_description(metadata))
+            self.edit_title.setText(generate_title(metadata))
+            self.edit_desc.setText(generate_description(metadata))
+
+            # Metadata tab
+            date_str = metadata.created_at.strftime("%Y-%m-%d %H:%M")
+            color_preset = f" ({metadata.color.preset_name})" if metadata.color.preset_name else ""
+            pp_preset = f" ({metadata.post_process.preset_name})" if metadata.post_process.preset_name else ""
+            meta_text = (
+                f"=== Simulation ===\n"
+                f"Pendulums: {metadata.simulation.pendulum_count:,}\n"
+                f"Date: {date_str}\n\n"
+                f"=== Color{color_preset} ===\n"
+                f"Scheme: {metadata.color.scheme}\n"
+                f"Range: {metadata.color.start} - {metadata.color.end}\n\n"
+                f"=== Post-Process{pp_preset} ===\n"
+                f"Tone Map: {metadata.post_process.tone_map}\n"
+                f"Exposure: {metadata.post_process.exposure}\n"
+                f"Contrast: {metadata.post_process.contrast}\n"
+                f"Gamma: {metadata.post_process.gamma}\n\n"
+                f"=== Results ===\n"
+                f"Boom Frame: {video.boom_frame}\n"
+                f"Boom Time: {video.boom_seconds:.2f}s" if video.boom_seconds else ""
+            )
+            self.txt_metadata.setText(meta_text)
         except Exception:
-            self.title_edit.setText("")
-            self.desc_edit.setText("")
+            self.edit_title.clear()
+            self.edit_desc.clear()
+            self.txt_metadata.setText("Metadata not available")
+
+        # Enable buttons based on state
+        has_boom = video.boom_frame is not None and video.boom_frame > 0
+        self.btn_play.setEnabled(video.best_video_path is not None)
+        self.btn_play_boom.setEnabled(video.best_video_path is not None and has_boom)
+        self.combo_music.setEnabled(has_boom and self.music_db is not None)
+        self.btn_add_music.setEnabled(has_boom and self.music_db is not None)
+        self.btn_process.setEnabled(video.has_video and has_boom)
+        self.btn_process_music.setEnabled(
+            video.has_video and has_boom and self.music_db is not None
+        )
+        self.btn_upload.setEnabled(video.best_video_path is not None)
+        self.btn_delete.setEnabled(True)
 
     def _update_boom_label(self) -> None:
         """Update the boom seconds label."""
         if not self.current_video:
             return
-        frame = self.boom_spin.value()
+        frame = self.spin_boom.value()
         seconds = frame / self.current_video.video_fps
-        self.boom_seconds_label.setText(f"({seconds:.2f}s)")
-
-    def _copy_to_clipboard(self, text: str) -> None:
-        """Copy text to clipboard and show confirmation."""
-        clipboard = QApplication.clipboard()
-        clipboard.setText(text)
-        self.statusBar().showMessage("Copied to clipboard", 1500)
-
-    def _regenerate(self, field: str) -> None:
-        """Regenerate title or description from templates."""
-        if not self.current_video or not self.current_video.has_metadata:
-            return
-        try:
-            metadata = VideoMetadata.from_file(self.current_video.metadata_path)
-            if field == "title":
-                self.title_edit.setText(generate_title(metadata))
-                self.statusBar().showMessage("Title regenerated", 1500)
-            elif field == "description":
-                self.desc_edit.setText(generate_description(metadata))
-                self.statusBar().showMessage("Description regenerated", 1500)
-        except Exception as e:
-            self.statusBar().showMessage(f"Error: {e}", 3000)
+        self.lbl_boom_secs.setText(f"({seconds:.2f}s)")
 
     def _update_music_combo(self) -> None:
         """Update music dropdown with valid tracks."""
-        self.music_combo.clear()
+        self.combo_music.clear()
         self.valid_tracks = []
 
         if not self.music_db or not self.current_video:
             return
 
-        boom_frame = self.boom_spin.value()
+        boom_frame = self.spin_boom.value()
         if boom_frame <= 0:
             return
 
@@ -842,14 +726,14 @@ class MainWindow(QMainWindow):
         self.valid_tracks = self.music_db.get_valid_tracks_for_boom(boom_seconds)
 
         if not self.valid_tracks:
-            self.music_combo.addItem("No valid tracks (boom too late)")
-            self.music_combo.setEnabled(False)
-            self.add_music_btn.setEnabled(False)
+            self.combo_music.addItem("No valid tracks")
+            self.combo_music.setEnabled(False)
+            self.btn_add_music.setEnabled(False)
             return
 
-        self.music_combo.addItem(f"Random ({len(self.valid_tracks)} available)")
+        self.combo_music.addItem(f"Random ({len(self.valid_tracks)} tracks)")
         for track in self.valid_tracks:
-            self.music_combo.addItem(f"{track.title} (drop: {track.drop_time_seconds:.1f}s)")
+            self.combo_music.addItem(f"{track.title} (drop: {track.drop_time_seconds:.1f}s)")
 
     def _on_boom_changed(self, _value: int) -> None:
         """Handle boom frame change - trigger autosave."""
@@ -859,8 +743,8 @@ class MainWindow(QMainWindow):
         if self.current_video and self.current_video.has_metadata:
             self.autosave_timer.stop()
             self.autosave_timer.start(500)
-            self.save_status.setText("...")
-            self.save_status.setStyleSheet("color: #666; font-size: 16px;")
+            self.lbl_autosave.setText("...")
+            self.lbl_autosave.setStyleSheet("color: #666; font-size: 16px;")
 
     def _do_autosave(self) -> None:
         """Perform the actual autosave."""
@@ -869,7 +753,7 @@ class MainWindow(QMainWindow):
 
         try:
             data = json.loads(self.current_video.metadata_path.read_text())
-            new_boom_frame = self.boom_spin.value()
+            new_boom_frame = self.spin_boom.value()
 
             if "results" not in data:
                 data["results"] = {}
@@ -888,14 +772,60 @@ class MainWindow(QMainWindow):
                 status = self._get_video_status(self.current_video)
                 item.setText(f"[{status}] {self.current_video.name}")
 
-            self.save_status.setText("✓")
-            self.save_status.setStyleSheet("color: #4CAF50; font-size: 16px;")
-            QTimer.singleShot(2000, lambda: self.save_status.setText(""))
+            self.lbl_autosave.setText("✓")
+            self.lbl_autosave.setStyleSheet("color: #4CAF50; font-size: 16px;")
+            QTimer.singleShot(2000, lambda: self.lbl_autosave.setText(""))
 
         except Exception as e:
-            self.save_status.setText("✗")
-            self.save_status.setStyleSheet("color: #f44336; font-size: 16px;")
+            self.lbl_autosave.setText("✗")
+            self.lbl_autosave.setStyleSheet("color: #f44336; font-size: 16px;")
             self.statusBar().showMessage(f"Save error: {e}", 3000)
+
+    def _on_template_changed(self, _index: int) -> None:
+        """Update zoom spinboxes when template changes."""
+        if not self.template_lib:
+            return
+
+        text = self.combo_template.currentText()
+        if text == "random":
+            self.spin_zoom_start.setValue(1.0)
+            self.spin_zoom_end.setValue(1.08)
+            return
+
+        template_name = text.split(" - ")[0]
+        try:
+            template = self.template_lib.get(template_name)
+            if template.motion and template.motion.slow_zoom:
+                self.spin_zoom_start.setValue(template.motion.slow_zoom.start)
+                self.spin_zoom_end.setValue(template.motion.slow_zoom.end)
+            else:
+                self.spin_zoom_start.setValue(1.0)
+                self.spin_zoom_end.setValue(1.0)
+        except KeyError:
+            pass
+
+    def _copy_to_clipboard(self, text: str) -> None:
+        """Copy text to clipboard and show confirmation."""
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
+        self.statusBar().showMessage("Copied to clipboard", 1500)
+
+    def _regenerate(self, field: str) -> None:
+        """Regenerate title or description from templates."""
+        if not self.current_video or not self.current_video.has_metadata:
+            return
+        try:
+            metadata = VideoMetadata.from_file(self.current_video.metadata_path)
+            if field == "title":
+                self.edit_title.setText(generate_title(metadata))
+                self.statusBar().showMessage("Title regenerated", 1500)
+            elif field == "description":
+                self.edit_desc.setText(generate_description(metadata))
+                self.statusBar().showMessage("Description regenerated", 1500)
+        except Exception as e:
+            self.statusBar().showMessage(f"Error: {e}", 3000)
+
+    # === ACTIONS ===
 
     def _prev_video(self) -> None:
         """Select previous video."""
@@ -923,7 +853,7 @@ class MainWindow(QMainWindow):
         if not self.current_video or not self.current_video.best_video_path:
             return
 
-        frame = self.boom_spin.value()
+        frame = self.spin_boom.value()
         if frame <= 0:
             self._play_video()
             return
@@ -932,72 +862,27 @@ class MainWindow(QMainWindow):
         start_seconds = max(0, seconds - 3)
 
         if shutil.which(MPV_COMMAND):
-            subprocess.Popen([MPV_COMMAND, f"--start={start_seconds:.2f}",
-                              str(self.current_video.best_video_path)])
+            subprocess.Popen([
+                MPV_COMMAND,
+                f"--start={start_seconds:.2f}",
+                str(self.current_video.best_video_path),
+            ])
         else:
             QMessageBox.warning(self, "mpv not found", "mpv is not installed or not in PATH")
 
     def _get_selected_track_id(self) -> Optional[str]:
         """Get the track ID from the combo selection, or None for random."""
-        idx = self.music_combo.currentIndex()
+        idx = self.combo_music.currentIndex()
         if idx <= 0 or idx > len(self.valid_tracks):
             return None
         return self.valid_tracks[idx - 1].id
 
     def _get_selected_template(self) -> str:
         """Get the selected template name."""
-        text = self.template_combo.currentText()
+        text = self.combo_template.currentText()
         if text == "random":
             return "random"
         return text.split(" - ")[0]
-
-    def _on_template_changed(self, _index: int) -> None:
-        """Update zoom spinboxes when template changes."""
-        if not self.template_lib:
-            return
-
-        template_name = self._get_selected_template()
-        if template_name == "random":
-            self.zoom_start_spin.setValue(1.0)
-            self.zoom_end_spin.setValue(1.08)
-            return
-
-        try:
-            template = self.template_lib.get(template_name)
-            if template.motion and template.motion.slow_zoom:
-                self.zoom_start_spin.setValue(template.motion.slow_zoom.start)
-                self.zoom_end_spin.setValue(template.motion.slow_zoom.end)
-            else:
-                self.zoom_start_spin.setValue(1.0)
-                self.zoom_end_spin.setValue(1.0)
-        except KeyError:
-            pass
-
-    def _add_music(self) -> None:
-        """Add music to the current video."""
-        if not self.current_video:
-            return
-        track_id = self._get_selected_track_id()
-        self._run_cli_command("music", "add", track_id=track_id)
-
-    def _process_video(self) -> None:
-        """Process the current video with effects."""
-        if not self.current_video:
-            return
-        self._run_cli_command("process")
-
-    def _process_with_music(self) -> None:
-        """Process video and add music."""
-        if not self.current_video:
-            return
-        track_id = self._get_selected_track_id()
-        self._run_cli_command("process", music=True, track_id=track_id)
-
-    def _upload_video(self) -> None:
-        """Upload the current video to YouTube."""
-        if not self.current_video:
-            return
-        self._run_cli_command("upload")
 
     def _run_cli_command(
         self,
@@ -1018,10 +903,10 @@ class MainWindow(QMainWindow):
                 cmd.extend(["--track", track_id])
         elif command == "process":
             template = self._get_selected_template()
-            zoom_start = self.zoom_start_spin.value()
-            zoom_end = self.zoom_end_spin.value()
-            blur = self.blur_spin.value()
-            brightness = self.brightness_spin.value()
+            zoom_start = self.spin_zoom_start.value()
+            zoom_end = self.spin_zoom_end.value()
+            blur = self.spin_blur.value()
+            brightness = self.spin_brightness.value()
             cmd = [
                 "uv", "run", "pendulum-tools", "process", video_dir,
                 "--shorts", "--blur-bg", "--force",
@@ -1053,6 +938,7 @@ class MainWindow(QMainWindow):
                 action = command if not subcommand else f"{command} {subcommand}"
                 self.statusBar().showMessage(f"Done: {action}", 3000)
 
+                # Refresh current video info
                 new_info = load_video_info(self.current_video.path)
                 if new_info:
                     self.current_video = new_info
@@ -1070,14 +956,40 @@ class MainWindow(QMainWindow):
             print(f"Error: {e}")
             self.statusBar().showMessage(f"Error: {e}", 5000)
 
+    def _add_music(self) -> None:
+        """Add music to the current video."""
+        if not self.current_video:
+            return
+        track_id = self._get_selected_track_id()
+        self._run_cli_command("music", "add", track_id=track_id)
+
+    def _process_video(self) -> None:
+        """Process the current video with effects."""
+        if not self.current_video:
+            return
+        self._run_cli_command("process")
+
+    def _process_with_music(self) -> None:
+        """Process video and add music."""
+        if not self.current_video:
+            return
+        track_id = self._get_selected_track_id()
+        self._run_cli_command("process", music=True, track_id=track_id)
+
+    def _upload_video(self) -> None:
+        """Upload the current video to YouTube."""
+        if not self.current_video:
+            return
+        self._run_cli_command("upload")
+
     def _delete_video(self) -> None:
-        """Delete the current video."""
+        """Delete the current video project."""
         if not self.current_video:
             return
 
         reply = QMessageBox.question(
             self,
-            "Delete Video",
+            "Delete Project",
             f"Are you sure you want to delete {self.current_video.name}?\n\n"
             "This will permanently delete the video directory and all its contents.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -1105,14 +1017,19 @@ class MainWindow(QMainWindow):
 
 def main() -> int:
     """Main entry point."""
-    parser = argparse.ArgumentParser(description="Batch video annotation tool")
+    parser = argparse.ArgumentParser(description="Video production studio")
     parser.add_argument("batch_dir", nargs="?", help="Path to batch directory")
     args = parser.parse_args()
 
     batch_dir = Path(args.batch_dir) if args.batch_dir else None
 
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")  # Modern, consistent look
+    app.setStyle("Fusion")
+
+    # Light palette
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor(248, 248, 248))
+    app.setPalette(palette)
 
     window = MainWindow(batch_dir)
     window.show()
