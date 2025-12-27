@@ -279,21 +279,21 @@ effects = { fade_in = 200, fade_out = 300 }
 
 [[template.countdown.captions]]
 pool = "countdown.three"
-position = "center"
+position = "countdown"
 start = "boom-3"
 end = "boom-2"
 effects = { pop_in = true }
 
 [[template.countdown.captions]]
 pool = "countdown.two"
-position = "center"
+position = "countdown"
 start = "boom-2"
 end = "boom-1"
 effects = { pop_in = true }
 
 [[template.countdown.captions]]
 pool = "countdown.one"
-position = "center"
+position = "countdown"
 start = "boom-1"
 end = "boom-0.1"
 effects = { pop_in = true }

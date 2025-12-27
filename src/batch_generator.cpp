@@ -20,7 +20,8 @@ BatchConfig BatchConfig::load(std::string const& path) {
     try {
         auto tbl = toml::parse_file(path);
         std::string base_path = std::filesystem::path(path).parent_path().string();
-        if (base_path.empty()) base_path = ".";
+        if (base_path.empty())
+            base_path = ".";
 
         // Batch settings
         if (auto batch = tbl["batch"].as_table()) {
@@ -95,13 +96,14 @@ BatchConfig BatchConfig::load(std::string const& path) {
                         }
                         // Merge targets (included targets override base if same name)
                         for (auto const& target : included.targets) {
-                            auto it = std::find_if(config.base_config.targets.begin(),
-                                                   config.base_config.targets.end(),
-                                                   [&](auto const& t) { return t.name == target.name; });
+                            auto it =
+                                std::find_if(config.base_config.targets.begin(),
+                                             config.base_config.targets.end(),
+                                             [&](auto const& t) { return t.name == target.name; });
                             if (it != config.base_config.targets.end()) {
-                                *it = target;  // Override existing
+                                *it = target; // Override existing
                             } else {
-                                config.base_config.targets.push_back(target);  // Add new
+                                config.base_config.targets.push_back(target); // Add new
                             }
                         }
                     } else {
@@ -230,7 +232,8 @@ BatchConfig BatchConfig::load(std::string const& path) {
                 std::cerr << "(none defined)";
             } else {
                 for (size_t i = 0; i < config.base_config.targets.size(); ++i) {
-                    if (i > 0) std::cerr << ", ";
+                    if (i > 0)
+                        std::cerr << ", ";
                     std::cerr << config.base_config.targets[i].name;
                 }
             }
@@ -434,9 +437,18 @@ bool BatchGenerator::generateOne(int index) {
                 auto end_time = std::chrono::steady_clock::now();
                 double duration = std::chrono::duration<double>(end_time - start_time).count();
 
-                RunResult result{video_name, "", false, std::nullopt, 0.0,
-                                 std::nullopt, 0.0, 0.0,
-                                 duration, 0.0, config_.max_probe_retries + 1, 1.0};
+                RunResult result{video_name,
+                                 "",
+                                 false,
+                                 std::nullopt,
+                                 0.0,
+                                 std::nullopt,
+                                 0.0,
+                                 0.0,
+                                 duration,
+                                 0.0,
+                                 config_.max_probe_retries + 1,
+                                 1.0};
                 progress_.results.push_back(result);
                 progress_.failed_ids.push_back(video_name);
                 return false;
@@ -485,13 +497,21 @@ bool BatchGenerator::generateOne(int index) {
         double boom_quality = results.getBoomQuality().value_or(0.0);
 
         // For RunResult summary, use simulation time (consistent with historical display)
-        double boom_sim_seconds = results.boom_frame
-            ? *results.boom_frame * config.simulation.frameDuration() : 0.0;
+        double boom_sim_seconds =
+            results.boom_frame ? *results.boom_frame * config.simulation.frameDuration() : 0.0;
 
-        RunResult result{
-            video_name, results.video_path, true, results.boom_frame, boom_sim_seconds,
-            chaos_frame, chaos_seconds, boom_quality,
-            duration, results.final_uniformity, probe_retries, simulation_speed};
+        RunResult result{video_name,
+                         results.video_path,
+                         true,
+                         results.boom_frame,
+                         boom_sim_seconds,
+                         chaos_frame,
+                         chaos_seconds,
+                         boom_quality,
+                         duration,
+                         results.final_uniformity,
+                         probe_retries,
+                         simulation_speed};
         progress_.results.push_back(result);
         progress_.completed_ids.push_back(video_name);
 
@@ -506,9 +526,8 @@ bool BatchGenerator::generateOne(int index) {
         auto end_time = std::chrono::steady_clock::now();
         double duration = std::chrono::duration<double>(end_time - start_time).count();
 
-        RunResult result{video_name, "", false, std::nullopt, 0.0,
-                         std::nullopt, 0.0, 0.0,
-                         duration, 0.0, 0, 1.0};
+        RunResult result{video_name, "",  false,    std::nullopt, 0.0, std::nullopt,
+                         0.0,        0.0, duration, 0.0,          0,   1.0};
         progress_.results.push_back(result);
         progress_.failed_ids.push_back(video_name);
         return false;
@@ -518,25 +537,71 @@ bool BatchGenerator::generateOne(int index) {
 Config BatchGenerator::generateRandomConfig() {
     Config config = config_.base_config;
 
-    // Randomize angles within ranges
-    std::uniform_real_distribution<double> angle1_dist(config_.angle1_range.min,
-                                                       config_.angle1_range.max);
-    std::uniform_real_distribution<double> angle2_dist(config_.angle2_range.min,
-                                                       config_.angle2_range.max);
-    std::uniform_real_distribution<double> variation_dist(config_.variation_range.min,
-                                                          config_.variation_range.max);
+    // -------------------------------------------------------------------------
+    // ⚠️⚠️⚠️  WARNING: ANGLE RANGE INTERPRETATION HACK  ⚠️⚠️⚠️
+    //
+    // The batch config specifies:
+    //
+    //   initial_angle1_deg = [150.0, 180.0]
+    //
+    // but this is interpreted *symmetrically* around zero in code:
+    //
+    //   +[150°, 180°]  OR  -[150°, 180°]
+    //
+    // This allows starting the first pendulum "nearly vertical and above the
+    // horizontal" on BOTH sides, while keeping the config human-readable.
+    //
+    // IMPORTANT:
+    // - This is a SPECIAL CASE for angle1 only.
+    // - The config itself does NOT express this symmetry.
+    // - Anyone reading the TOML alone would assume a single-sided range.
+    //
+    // 🚨 TODO (BIG): Replace this with a proper angle domain system:
+    //   - Support wrapped ranges (e.g. [150°, -150°])
+    //   - Or explicit symmetry flags (e.g. symmetric = true)
+    //   - Or a dedicated "near_vertical" semantic mode
+    //   - Or angle distributions instead of linear ranges
+    //
+    // Until then, this hack is intentional and relied upon.
+    // -------------------------------------------------------------------------
 
-    config.physics.initial_angle1 = deg2rad(angle1_dist(rng_));
-    config.physics.initial_angle2 = deg2rad(angle2_dist(rng_));
-    config.simulation.angle_variation = deg2rad(variation_dist(rng_));
+    // --- Angle 1: symmetric sampling around ±180° ----------------------------
+    {
+        std::uniform_real_distribution<double> base_dist(config_.angle1_range.min,
+                                                         config_.angle1_range.max);
 
-    // Randomize velocities if range is specified (min != max or either non-zero)
+        std::bernoulli_distribution side_dist(0.5); // true = +side, false = -side
+
+        double angle_deg = base_dist(rng_);
+        if (!side_dist(rng_)) {
+            angle_deg = -angle_deg;
+        }
+
+        config.physics.initial_angle1 = deg2rad(angle_deg);
+    }
+
+    // --- Angle 2: normal linear range (no symmetry hack) ----------------------
+    {
+        std::uniform_real_distribution<double> angle2_dist(config_.angle2_range.min,
+                                                           config_.angle2_range.max);
+        config.physics.initial_angle2 = deg2rad(angle2_dist(rng_));
+    }
+
+    // --- Angle variation -----------------------------------------------------
+    {
+        std::uniform_real_distribution<double> variation_dist(config_.variation_range.min,
+                                                              config_.variation_range.max);
+        config.simulation.angle_variation = deg2rad(variation_dist(rng_));
+    }
+
+    // --- Velocities ----------------------------------------------------------
     if (config_.velocity1_range.min != config_.velocity1_range.max ||
         config_.velocity1_range.min != 0.0) {
         std::uniform_real_distribution<double> vel1_dist(config_.velocity1_range.min,
                                                          config_.velocity1_range.max);
         config.physics.initial_velocity1 = vel1_dist(rng_);
     }
+
     if (config_.velocity2_range.min != config_.velocity2_range.max ||
         config_.velocity2_range.min != 0.0) {
         std::uniform_real_distribution<double> vel2_dist(config_.velocity2_range.min,
@@ -544,25 +609,25 @@ Config BatchGenerator::generateRandomConfig() {
         config.physics.initial_velocity2 = vel2_dist(rng_);
     }
 
-    // Select random color preset from library if available
+    // --- Color preset --------------------------------------------------------
     if (!config_.color_preset_names.empty()) {
         std::uniform_int_distribution<size_t> dist(0, config_.color_preset_names.size() - 1);
         std::string const& name = config_.color_preset_names[dist(rng_)];
         if (auto preset = config_.presets.getColor(name)) {
             config.color = *preset;
-            config.selected_color_preset_name = name;  // Track preset name for metadata
+            config.selected_color_preset_name = name;
         } else {
             std::cerr << "Warning: Color preset '" << name << "' not found in library\n";
         }
     }
 
-    // Select random post-process preset from library if available
+    // --- Post-process preset -------------------------------------------------
     if (!config_.post_process_preset_names.empty()) {
         std::uniform_int_distribution<size_t> dist(0, config_.post_process_preset_names.size() - 1);
         std::string const& name = config_.post_process_preset_names[dist(rng_)];
         if (auto preset = config_.presets.getPostProcess(name)) {
             config.post_process = *preset;
-            config.selected_post_process_preset_name = name;  // Track preset name for metadata
+            config.selected_post_process_preset_name = name;
         } else {
             std::cerr << "Warning: Post-process preset '" << name << "' not found in library\n";
         }
@@ -604,7 +669,7 @@ std::pair<bool, metrics::ProbePhaseResults> BatchGenerator::runProbe(Config cons
 
     // Evaluate filter with predictions from the probe
     // Note: Target constraints are evaluated against predictions, not events
-    metrics::EventDetector events;  // Empty - legacy events not used with target constraints
+    metrics::EventDetector events; // Empty - legacy events not used with target constraints
     auto filter_result = filter_.evaluate(collector, events, results.score, results.predictions);
     results.passed_filter = filter_result.passed;
     results.rejection_reason = filter_result.reason;

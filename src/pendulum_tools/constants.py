@@ -27,7 +27,7 @@ BLUR_SCALE_FACTOR = 4  # Scale down before blur for performance
 MIN_BLUR_SIGMA = 5
 
 # Background brightness for Shorts mode (0.0-1.0)
-DEFAULT_BACKGROUND_BRIGHTNESS = 0.3
+DEFAULT_BACKGROUND_BRIGHTNESS = 1.0
 
 # =============================================================================
 # Encoding Quality Constants

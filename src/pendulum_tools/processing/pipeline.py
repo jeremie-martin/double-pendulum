@@ -70,6 +70,29 @@ class ProcessingResult:
     ffmpeg_command: Optional[str] = None
     template_used: Optional[str] = None
     captions_text: Optional[list[str]] = None  # For preview
+    # Processing parameters used
+    zoom_start: Optional[float] = None
+    zoom_end: Optional[float] = None
+    blur_strength: Optional[int] = None
+    background_brightness: Optional[float] = None
+
+    def save_to_metadata(self, metadata_path: Path) -> None:
+        """Save processing parameters to metadata.json."""
+        import json
+        with open(metadata_path) as f:
+            data = json.load(f)
+
+        data["processing"] = {
+            "template": self.template_used,
+            "zoom_start": self.zoom_start,
+            "zoom_end": self.zoom_end,
+            "blur_strength": self.blur_strength,
+            "background_brightness": self.background_brightness,
+        }
+
+        with open(metadata_path, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
 
 
 class ProcessingPipeline:
@@ -201,6 +224,10 @@ class ProcessingPipeline:
                 boom_punch=motion_config.boom_punch if motion_config else None,
                 shake=motion_config.shake if motion_config else None,
             )
+
+        # Track final zoom values for result
+        final_zoom_start = motion_config.slow_zoom.start if motion_config and motion_config.slow_zoom else None
+        final_zoom_end = motion_config.slow_zoom.end if motion_config and motion_config.slow_zoom else None
 
         # Build motion filters if template has motion effects
         # Motion filters use FOREGROUND dimensions (after scaling), not input dimensions
@@ -345,6 +372,10 @@ class ProcessingPipeline:
             ffmpeg_command=ffmpeg_command,
             template_used=template_name,
             captions_text=captions_text,
+            zoom_start=final_zoom_start,
+            zoom_end=final_zoom_end,
+            blur_strength=self.config.blur_strength if self.config.blurred_background else None,
+            background_brightness=self.config.background_brightness if self.config.blurred_background else None,
         )
 
     def preview(self) -> dict:

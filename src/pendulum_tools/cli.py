@@ -1092,6 +1092,8 @@ def process(
         return
 
     if result.success:
+        # Save processing params to metadata
+        result.save_to_metadata(video_dir / "metadata.json")
         console.print("[green]Processing complete![/green]")
         console.print(f"  Output: {result.output_dir}")
         console.print(f"  Template: {result.template_used}")
@@ -1351,6 +1353,8 @@ def batch_process(
             result = pipeline.run(dry_run=dry_run, force=force)
 
             if result.success:
+                if not dry_run:
+                    result.save_to_metadata(video_dir / "metadata.json")
                 status = "DRY RUN" if dry_run else "OK"
                 console.print(f"  [green]{status}[/green] (template: {result.template_used})")
                 logger.info(f"{video_dir.name}: Processed successfully (template: {result.template_used})")

@@ -280,6 +280,21 @@ class ASSGenerator:
         )
         self.subs.styles["Center"] = create_ass_style("Center", center_config)
 
+        # Countdown style (30% from top, for small countdown numbers)
+        countdown_config = ASSStyleConfig(
+            fontname=config.fontname,
+            fontsize=int(config.fontsize * 1.3),
+            primary_color=config.primary_color,
+            outline_color=config.outline_color,
+            back_color=config.back_color,
+            outline=config.outline * 1.2,
+            shadow=config.shadow * 1.5,
+            bold=True,
+            alignment=8,  # Top center
+            margin_v=int(self.video_height * 0.30),
+        )
+        self.subs.styles["Countdown"] = create_ass_style("Countdown", countdown_config)
+
         # Main style (bottom position, for build-up text)
         # Positioned slightly towards center (20% from bottom instead of 15%)
         main_config = ASSStyleConfig(
@@ -360,6 +375,7 @@ POSITION_TO_STYLE = {
     "hook": "Hook",
     "main": "Main",
     "center": "Center",
+    "countdown": "Countdown",
 }
 
 

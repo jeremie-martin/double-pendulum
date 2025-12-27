@@ -116,6 +116,12 @@ class VideoInfo:
     has_processed: bool = False
     has_music: bool = False
     music_title: Optional[str] = None
+    # Processing params (from previous processing)
+    processed_template: Optional[str] = None
+    processed_zoom_start: Optional[float] = None
+    processed_zoom_end: Optional[float] = None
+    processed_blur: Optional[int] = None
+    processed_brightness: Optional[float] = None
 
 
 def get_best_video_path(video_dir: Path) -> Optional[Path]:
@@ -149,6 +155,11 @@ def load_video_info(video_dir: Path) -> Optional[VideoInfo]:
     pendulum_count = 0
     color_scheme = ""
     created_at = ""
+    processed_template = None
+    processed_zoom_start = None
+    processed_zoom_end = None
+    processed_blur = None
+    processed_brightness = None
 
     if has_metadata:
         try:
@@ -171,6 +182,14 @@ def load_video_info(video_dir: Path) -> Optional[VideoInfo]:
             color_scheme = color.get("scheme", "")
 
             created_at = data.get("created_at", "")[:10]  # YYYY-MM-DD
+
+            # Load processing params if video was processed
+            processing = data.get("processing", {})
+            processed_template = processing.get("template")
+            processed_zoom_start = processing.get("zoom_start")
+            processed_zoom_end = processing.get("zoom_end")
+            processed_blur = processing.get("blur_strength")
+            processed_brightness = processing.get("background_brightness")
         except Exception:
             pass
 
@@ -194,6 +213,11 @@ def load_video_info(video_dir: Path) -> Optional[VideoInfo]:
             or (video_dir / "video.mp4").exists()
         ),
         music_title=music_title,
+        processed_template=processed_template,
+        processed_zoom_start=processed_zoom_start,
+        processed_zoom_end=processed_zoom_end,
+        processed_blur=processed_blur,
+        processed_brightness=processed_brightness,
     )
 
 
@@ -251,11 +275,8 @@ class MainWindow(QMainWindow):
             for name in sorted(self.template_lib.list_templates()):
                 tmpl = self.template_lib.get(name)
                 self.combo_template.addItem(f"{name} - {tmpl.description}")
-            # Default to minimal_science
-            for i in range(self.combo_template.count()):
-                if self.combo_template.itemText(i).startswith("minimal_science"):
-                    self.combo_template.setCurrentIndex(i)
-                    break
+            # Default to random (index 0)
+            self.combo_template.setCurrentIndex(0)
         except Exception as e:
             print(f"Warning: Could not load templates: {e}")
 
@@ -524,6 +545,11 @@ class MainWindow(QMainWindow):
         self.combo_template = QComboBox()
         self.combo_template.currentIndexChanged.connect(self._on_template_changed)
         config_form.addRow("Template:", self.combo_template)
+
+        # Previously used label
+        self.lbl_prev_config = QLabel("")
+        self.lbl_prev_config.setStyleSheet("color: #666; font-size: 10px; font-style: italic;")
+        config_form.addRow("", self.lbl_prev_config)
 
         # Zoom
         zoom_widget = QWidget()
@@ -802,6 +828,7 @@ class MainWindow(QMainWindow):
         self.edit_title.clear()
         self.edit_desc.clear()
         self.edit_path.clear()
+        self.lbl_prev_config.setText("")
 
         # Disable buttons
         self.btn_play.setEnabled(False)
@@ -846,6 +873,9 @@ class MainWindow(QMainWindow):
         self.lbl_current_music.setText(
             f"♪ {video.music_title}" if video.music_title else ""
         )
+
+        # Update config based on previous processing or template
+        self._update_config_from_video(video)
 
         # Publishing info
         if video.best_video_path:
@@ -954,6 +984,39 @@ class MainWindow(QMainWindow):
             self.lbl_autosave.setText("✗")
             self.lbl_autosave.setStyleSheet("color: #f44336; font-size: 16px;")
             self.statusBar().showMessage(f"Save error: {e}", 3000)
+
+    def _update_config_from_video(self, video: VideoInfo) -> None:
+        """Update config widgets based on video's previous processing or defaults."""
+        if video.has_processed and video.processed_template:
+            # Show what was previously used
+            prev_parts = [f"Last: {video.processed_template}"]
+            if video.processed_zoom_start is not None:
+                prev_parts.append(f"zoom {video.processed_zoom_start:.2f}→{video.processed_zoom_end:.2f}")
+            if video.processed_blur is not None:
+                prev_parts.append(f"blur {video.processed_blur}")
+            self.lbl_prev_config.setText(" | ".join(prev_parts))
+
+            # Populate spinboxes with previous values
+            if video.processed_zoom_start is not None:
+                self.spin_zoom_start.setValue(video.processed_zoom_start)
+            if video.processed_zoom_end is not None:
+                self.spin_zoom_end.setValue(video.processed_zoom_end)
+            if video.processed_blur is not None:
+                self.spin_blur.setValue(video.processed_blur)
+            if video.processed_brightness is not None:
+                self.spin_brightness.setValue(video.processed_brightness)
+
+            # Try to select the previously used template
+            for i in range(self.combo_template.count()):
+                if self.combo_template.itemText(i).startswith(video.processed_template):
+                    self.combo_template.blockSignals(True)
+                    self.combo_template.setCurrentIndex(i)
+                    self.combo_template.blockSignals(False)
+                    break
+        else:
+            self.lbl_prev_config.setText("")
+            # Reset to defaults from current template selection
+            self._on_template_changed(self.combo_template.currentIndex())
 
     def _on_template_changed(self, _index: int) -> None:
         """Update zoom spinboxes when template changes."""
