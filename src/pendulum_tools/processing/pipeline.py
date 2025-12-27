@@ -17,7 +17,7 @@ from ..constants import (
 )
 from ..exceptions import FFmpegError
 from .ffmpeg import FFmpegCommand, get_video_dimensions
-from .motion import apply_motion_effects, build_motion_filters
+from .motion import apply_motion_effects, build_motion_filters, MotionConfig, SlowZoomConfig
 from .subtitles_ass import generate_ass_from_resolved, CaptionPreset
 from .templates import (
     TemplateLibrary,
@@ -52,6 +52,10 @@ class ProcessingConfig:
     preset: str = "medium"  # Encoding preset (slower = better compression)
     use_nvenc: bool = True  # Use NVIDIA hardware encoding (much faster)
     nvenc_cq: int = DEFAULT_NVENC_CQ  # NVENC quality (0-51, lower = better)
+
+    # Motion overrides (None = use template defaults)
+    slow_zoom_start: Optional[float] = None  # Override slow zoom start scale
+    slow_zoom_end: Optional[float] = None  # Override slow zoom end scale
 
 
 @dataclass
@@ -182,12 +186,28 @@ class ProcessingPipeline:
         else:
             fg_width, fg_height = width, height
 
+        # Build motion config with optional overrides
+        motion_config = template.motion
+        if self.config.slow_zoom_start is not None or self.config.slow_zoom_end is not None:
+            # Apply slow zoom overrides
+            slow_zoom = SlowZoomConfig(
+                start=self.config.slow_zoom_start if self.config.slow_zoom_start is not None
+                      else (motion_config.slow_zoom.start if motion_config and motion_config.slow_zoom else 1.0),
+                end=self.config.slow_zoom_end if self.config.slow_zoom_end is not None
+                    else (motion_config.slow_zoom.end if motion_config and motion_config.slow_zoom else 1.1),
+            )
+            motion_config = MotionConfig(
+                slow_zoom=slow_zoom,
+                boom_punch=motion_config.boom_punch if motion_config else None,
+                shake=motion_config.shake if motion_config else None,
+            )
+
         # Build motion filters if template has motion effects
         # Motion filters use FOREGROUND dimensions (after scaling), not input dimensions
         motion_filters: list[str] | None = None
-        if template.motion and boom_seconds:
+        if motion_config and boom_seconds:
             motion_filters = build_motion_filters(
-                motion=template.motion,
+                motion=motion_config,
                 boom_seconds=boom_seconds,
                 video_duration=video_duration,
                 width=fg_width,
@@ -218,10 +238,10 @@ class ProcessingPipeline:
                 cmd.add_shorts_padding()
         else:
             # Regular video: just apply motion effects
-            if motion_filters:
+            if motion_config:
                 apply_motion_effects(
                     cmd=cmd,
-                    motion=template.motion,
+                    motion=motion_config,
                     boom_seconds=boom_seconds,
                     video_duration=video_duration,
                     width=width,

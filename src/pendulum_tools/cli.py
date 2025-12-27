@@ -949,6 +949,18 @@ def list_templates():
     default=None,
     help="Specific track ID for music (default: auto-select based on boom timing)",
 )
+@click.option(
+    "--zoom-start",
+    type=float,
+    default=None,
+    help="Override slow zoom start scale (e.g., 1.0)",
+)
+@click.option(
+    "--zoom-end",
+    type=float,
+    default=None,
+    help="Override slow zoom end scale (e.g., 1.1)",
+)
 def process(
     video_dir: Path,
     output: Optional[Path],
@@ -965,6 +977,8 @@ def process(
     music: bool,
     music_dir: Optional[Path],
     track: Optional[str],
+    zoom_start: Optional[float],
+    zoom_end: Optional[float],
 ):
     """Process video with motion effects and text overlays.
 
@@ -1000,6 +1014,8 @@ def process(
         crf_quality=quality,
         nvenc_cq=nvenc_cq,
         use_nvenc=not no_nvenc,
+        slow_zoom_start=zoom_start,
+        slow_zoom_end=zoom_end,
     )
 
     # Initialize pipeline

@@ -19,7 +19,7 @@ import json
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -28,6 +28,7 @@ from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -47,7 +48,8 @@ from PyQt6.QtWidgets import (
 
 from .config import get_config
 from .models import VideoMetadata
-from .music import MusicDatabase, MusicManager, MusicTrack
+from .music import MusicDatabase, MusicTrack
+from .processing.templates import TemplateLibrary
 from .templates import generate_title, generate_description
 
 
@@ -177,6 +179,7 @@ class MainWindow(QMainWindow):
         self.current_video: Optional[VideoInfo] = None
         self.music_db: Optional[MusicDatabase] = None
         self.valid_tracks: list[MusicTrack] = []
+        self.template_lib: Optional[TemplateLibrary] = None
 
         # Autosave timer (debounce rapid changes)
         self.autosave_timer = QTimer()
@@ -186,6 +189,7 @@ class MainWindow(QMainWindow):
         self._init_ui()
         self._setup_shortcuts()
         self._load_music_database()
+        self._load_templates()
 
         # Ensure status bar is visible
         self.statusBar().show()
@@ -206,6 +210,24 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Warning: Could not load music database: {e}")
             self.music_db = None
+
+    def _load_templates(self) -> None:
+        """Load templates and populate the combo."""
+        try:
+            self.template_lib = TemplateLibrary()
+            templates = self.template_lib.list_templates()
+            self.template_combo.addItem("random")
+            for name in sorted(templates):
+                template = self.template_lib.get(name)
+                self.template_combo.addItem(f"{name} - {template.description}")
+            # Default to minimal_science
+            for i in range(self.template_combo.count()):
+                if self.template_combo.itemText(i).startswith("minimal_science"):
+                    self.template_combo.setCurrentIndex(i)
+                    break
+        except Exception as e:
+            print(f"Warning: Could not load templates: {e}")
+            self.template_lib = None
 
     def _init_ui(self) -> None:
         """Initialize the UI."""
@@ -306,6 +328,38 @@ class MainWindow(QMainWindow):
         music_row.addWidget(self.add_music_btn)
 
         right_layout.addLayout(music_row)
+
+        # Template section
+        right_layout.addWidget(QLabel("Template:"))
+
+        template_row = QHBoxLayout()
+        self.template_combo = QComboBox()
+        self.template_combo.setMinimumWidth(200)
+        self.template_combo.currentIndexChanged.connect(self._on_template_changed)
+        template_row.addWidget(self.template_combo, 1)
+        right_layout.addLayout(template_row)
+
+        # Slow zoom overrides
+        zoom_row = QHBoxLayout()
+        zoom_row.addWidget(QLabel("Zoom:"))
+        zoom_row.addWidget(QLabel("Start:"))
+        self.zoom_start_spin = QDoubleSpinBox()
+        self.zoom_start_spin.setRange(0.5, 2.0)
+        self.zoom_start_spin.setSingleStep(0.01)
+        self.zoom_start_spin.setDecimals(2)
+        self.zoom_start_spin.setValue(1.0)
+        self.zoom_start_spin.setFixedWidth(70)
+        zoom_row.addWidget(self.zoom_start_spin)
+        zoom_row.addWidget(QLabel("End:"))
+        self.zoom_end_spin = QDoubleSpinBox()
+        self.zoom_end_spin.setRange(0.5, 2.0)
+        self.zoom_end_spin.setSingleStep(0.01)
+        self.zoom_end_spin.setDecimals(2)
+        self.zoom_end_spin.setValue(1.08)
+        self.zoom_end_spin.setFixedWidth(70)
+        zoom_row.addWidget(self.zoom_end_spin)
+        zoom_row.addStretch()
+        right_layout.addLayout(zoom_row)
 
         # Processing buttons
         right_layout.addWidget(QLabel("Processing:"))
@@ -729,6 +783,37 @@ Processed: {'Yes' if video.has_processed else 'No'} | Music: {music_str}{extra_i
             return None  # Random
         return self.valid_tracks[idx - 1].id
 
+    def _get_selected_template(self) -> str:
+        """Get the selected template name."""
+        text = self.template_combo.currentText()
+        if text == "random":
+            return "random"
+        # Extract name from "name - description"
+        return text.split(" - ")[0]
+
+    def _on_template_changed(self, _index: int) -> None:
+        """Update zoom spinboxes when template changes."""
+        if not self.template_lib:
+            return
+
+        template_name = self._get_selected_template()
+        if template_name == "random":
+            # Use default values for random
+            self.zoom_start_spin.setValue(1.0)
+            self.zoom_end_spin.setValue(1.08)
+            return
+
+        try:
+            template = self.template_lib.get(template_name)
+            if template.motion and template.motion.slow_zoom:
+                self.zoom_start_spin.setValue(template.motion.slow_zoom.start)
+                self.zoom_end_spin.setValue(template.motion.slow_zoom.end)
+            else:
+                self.zoom_start_spin.setValue(1.0)
+                self.zoom_end_spin.setValue(1.0)
+        except KeyError:
+            pass
+
     def _add_music(self) -> None:
         """Add music to the current video."""
         if not self.current_video:
@@ -770,7 +855,14 @@ Processed: {'Yes' if video.has_processed else 'No'} | Music: {music_str}{extra_i
             if track_id:
                 cmd.extend(["--track", track_id])
         elif command == "process":
-            cmd = ["uv", "run", "pendulum-tools", "process", video_dir, "--shorts", "--blur-bg", "--force"]
+            template = self._get_selected_template()
+            zoom_start = self.zoom_start_spin.value()
+            zoom_end = self.zoom_end_spin.value()
+            cmd = ["uv", "run", "pendulum-tools", "process", video_dir,
+                   "--shorts", "--blur-bg", "--force",
+                   "--template", template,
+                   "--zoom-start", str(zoom_start),
+                   "--zoom-end", str(zoom_end)]
             if music:
                 cmd.append("--music")
                 if track_id:
