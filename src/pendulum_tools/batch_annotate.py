@@ -78,14 +78,14 @@ class InfoBadge(QFrame):
     def __init__(self, label: str, value: str = "—"):
         super().__init__()
         self.setStyleSheet(
-            "background: #f0f0f0; border-radius: 4px; padding: 4px 8px;"
+            "background: #f0f0f0; border-radius: 4px;"
         )
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 3, 6, 3)
-        layout.setSpacing(4)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(6)
 
         self.lbl_key = QLabel(label)
-        self.lbl_key.setStyleSheet("color: #666; font-size: 11px;")
+        self.lbl_key.setStyleSheet("color: #888; font-size: 10px;")
         layout.addWidget(self.lbl_key)
 
         self.lbl_value = QLabel(value)
@@ -94,6 +94,67 @@ class InfoBadge(QFrame):
 
     def set_value(self, value: str) -> None:
         self.lbl_value.setText(value)
+
+
+class HoldToDeleteButton(QPushButton):
+    """A button that requires holding for 1.5 seconds to activate."""
+
+    HOLD_DURATION_MS = 1500
+
+    def __init__(self, text: str = "Hold to Delete"):
+        super().__init__(text)
+        self._default_text = text
+        self._hold_timer = QTimer()
+        self._hold_timer.setInterval(50)  # Update every 50ms
+        self._hold_timer.timeout.connect(self._on_tick)
+        self._progress = 0
+        self._is_holding = False
+
+        self.setStyleSheet(
+            "color: #999; border: 1px solid #ddd; background: #fafafa;"
+        )
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self.isEnabled():
+            self._is_holding = True
+            self._progress = 0
+            self._hold_timer.start()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._is_holding:
+            self._is_holding = False
+            self._hold_timer.stop()
+            self._progress = 0
+            self._update_display()
+        super().mouseReleaseEvent(event)
+
+    def _on_tick(self) -> None:
+        self._progress += 50
+        self._update_display()
+
+        if self._progress >= self.HOLD_DURATION_MS:
+            self._hold_timer.stop()
+            self._is_holding = False
+            self._progress = 0
+            self._update_display()
+            self.click()  # Trigger the actual click action
+
+    def _update_display(self) -> None:
+        if self._progress > 0:
+            pct = min(100, int(self._progress / self.HOLD_DURATION_MS * 100))
+            self.setText(f"Deleting... {pct}%")
+            # Gradient from gray to red as progress increases
+            red_intensity = int(153 + (102 * pct / 100))  # 153 (#999) to 255
+            self.setStyleSheet(
+                f"color: rgb({red_intensity}, 80, 80); "
+                "border: 1px solid #f44336; background: #fff5f5;"
+            )
+        else:
+            self.setText(self._default_text)
+            self.setStyleSheet(
+                "color: #999; border: 1px solid #ddd; background: #fafafa;"
+            )
 
 
 @dataclass
@@ -371,13 +432,15 @@ class MainWindow(QMainWindow):
         bar = QFrame()
         bar.setStyleSheet("background: #f5f5f5; border-radius: 6px;")
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(12)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
 
-        self.badge_pendulums = InfoBadge("Pendulums")
+        # Use short labels to avoid cramping
+        self.badge_pendulums = InfoBadge("N")
+        self.badge_pendulums.setToolTip("Pendulum count")
         layout.addWidget(self.badge_pendulums)
 
-        self.badge_scheme = InfoBadge("Scheme")
+        self.badge_scheme = InfoBadge("Color")
         layout.addWidget(self.badge_scheme)
 
         self.badge_date = InfoBadge("Date")
@@ -386,10 +449,11 @@ class MainWindow(QMainWindow):
         self.badge_fps = InfoBadge("FPS")
         layout.addWidget(self.badge_fps)
 
-        self.badge_duration = InfoBadge("Duration")
+        self.badge_duration = InfoBadge("Len")
+        self.badge_duration.setToolTip("Video duration")
         layout.addWidget(self.badge_duration)
 
-        self.badge_status = InfoBadge("Status")
+        self.badge_status = InfoBadge("State")
         layout.addWidget(self.badge_status)
 
         layout.addStretch()
@@ -513,10 +577,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(group_music)
 
         # === CONFIG (Expandable) ===
-        self.group_config = QGroupBox("Advanced Config")
-        self.group_config.setCheckable(True)
-        self.group_config.setChecked(False)
-        config_form = QFormLayout(self.group_config)
+        group_config = QGroupBox("Config")
+        config_form = QFormLayout(group_config)
         config_form.setSpacing(8)
 
         # Template
@@ -572,7 +634,7 @@ class MainWindow(QMainWindow):
 
         config_form.addRow("Background:", bg_widget)
 
-        layout.addWidget(self.group_config)
+        layout.addWidget(group_config)
 
         layout.addStretch()
 
@@ -707,9 +769,8 @@ class MainWindow(QMainWindow):
 
         layout.addStretch()
 
-        # Delete button at bottom (de-emphasized)
-        self.btn_delete = QPushButton("Delete Project")
-        self.btn_delete.setStyleSheet("color: #999; border: 1px solid #ddd;")
+        # Delete button at bottom (hold to activate)
+        self.btn_delete = HoldToDeleteButton("Hold to Delete")
         self.btn_delete.setMinimumHeight(32)
         self.btn_delete.clicked.connect(self._delete_video)
         self.btn_delete.setEnabled(False)
@@ -1176,20 +1237,8 @@ class MainWindow(QMainWindow):
         self._run_cli_command("upload")
 
     def _delete_video(self) -> None:
-        """Delete the current video project."""
+        """Delete the current video project (hold-to-delete is the safety)."""
         if not self.current_video:
-            return
-
-        reply = QMessageBox.question(
-            self,
-            "Delete Project",
-            f"Are you sure you want to delete {self.current_video.name}?\n\n"
-            "This will permanently delete the video directory and all its contents.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-
-        if reply != QMessageBox.StandardButton.Yes:
             return
 
         try:
