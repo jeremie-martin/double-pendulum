@@ -614,7 +614,17 @@ class MainWindow(QMainWindow):
         # === PUBLISHING ===
         group_pub = QGroupBox("Publishing")
         pub_layout = QVBoxLayout(group_pub)
-        pub_layout.setSpacing(6)
+        pub_layout.setSpacing(4)
+        pub_layout.setContentsMargins(8, 8, 8, 8)
+
+        # Header row with regenerate button
+        header_row = QHBoxLayout()
+        header_row.addStretch()
+        self.btn_regen = QPushButton("↻ Regenerate")
+        self.btn_regen.setToolTip("Regenerate title and description")
+        self.btn_regen.clicked.connect(self._regenerate_all)
+        header_row.addWidget(self.btn_regen)
+        pub_layout.addLayout(header_row)
 
         # Title row
         title_row = QHBoxLayout()
@@ -623,43 +633,31 @@ class MainWindow(QMainWindow):
         self.edit_title = QLineEdit()
         self.edit_title.setReadOnly(True)
         title_row.addWidget(self.edit_title, 1)
-        self.btn_regen_title = QPushButton("↻")
-        self.btn_regen_title.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
-        self.btn_regen_title.setToolTip("Regenerate")
-        self.btn_regen_title.clicked.connect(lambda: self._regenerate("title"))
-        title_row.addWidget(self.btn_regen_title)
         self.btn_copy_title = QPushButton("⧉")
         self.btn_copy_title.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
-        self.btn_copy_title.setToolTip("Copy")
+        self.btn_copy_title.setToolTip("Copy title")
         self.btn_copy_title.clicked.connect(
             lambda: self._copy_to_clipboard(self.edit_title.text())
         )
         title_row.addWidget(self.btn_copy_title)
         pub_layout.addLayout(title_row)
 
-        # Description row (label + buttons on same line, field below)
-        desc_header = QHBoxLayout()
-        desc_header.setSpacing(4)
-        desc_header.addWidget(QLabel("Desc:"))
-        desc_header.addStretch()
-        self.btn_regen_desc = QPushButton("↻")
-        self.btn_regen_desc.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
-        self.btn_regen_desc.setToolTip("Regenerate")
-        self.btn_regen_desc.clicked.connect(lambda: self._regenerate("description"))
-        desc_header.addWidget(self.btn_regen_desc)
+        # Description row
+        desc_row = QHBoxLayout()
+        desc_row.setSpacing(4)
+        desc_row.addWidget(QLabel("Desc:"), 0, Qt.AlignmentFlag.AlignTop)
+        self.edit_desc = QTextEdit()
+        self.edit_desc.setReadOnly(True)
+        self.edit_desc.setMinimumHeight(90)
+        desc_row.addWidget(self.edit_desc, 1)
         self.btn_copy_desc = QPushButton("⧉")
         self.btn_copy_desc.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
-        self.btn_copy_desc.setToolTip("Copy")
+        self.btn_copy_desc.setToolTip("Copy description")
         self.btn_copy_desc.clicked.connect(
             lambda: self._copy_to_clipboard(self.edit_desc.toPlainText())
         )
-        desc_header.addWidget(self.btn_copy_desc)
-        pub_layout.addLayout(desc_header)
-
-        self.edit_desc = QTextEdit()
-        self.edit_desc.setReadOnly(True)
-        self.edit_desc.setFixedHeight(65)
-        pub_layout.addWidget(self.edit_desc)
+        desc_row.addWidget(self.btn_copy_desc, 0, Qt.AlignmentFlag.AlignTop)
+        pub_layout.addLayout(desc_row)
 
         # Path row
         path_row = QHBoxLayout()
@@ -671,28 +669,22 @@ class MainWindow(QMainWindow):
         path_row.addWidget(self.edit_path, 1)
         self.btn_copy_path = QPushButton("⧉")
         self.btn_copy_path.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
-        self.btn_copy_path.setToolTip("Copy")
+        self.btn_copy_path.setToolTip("Copy path")
         self.btn_copy_path.clicked.connect(
             lambda: self._copy_to_clipboard(self.edit_path.text())
         )
         path_row.addWidget(self.btn_copy_path)
         pub_layout.addLayout(path_row)
 
-        # Upload button (centered)
-        upload_row = QHBoxLayout()
-        upload_row.setContentsMargins(0, 6, 0, 0)
-        upload_row.addStretch()
+        # Upload button
         self.btn_upload = QPushButton("Upload to YouTube")
-        self.btn_upload.setMinimumHeight(BUTTON_HEIGHT + 6)
-        self.btn_upload.setMinimumWidth(200)
+        self.btn_upload.setMinimumHeight(BUTTON_HEIGHT + 4)
         self.btn_upload.setStyleSheet(
-            "background: #FF0000; color: white; font-weight: bold; font-size: 13px;"
+            "background: #FF0000; color: white; font-weight: bold;"
         )
         self.btn_upload.clicked.connect(self._upload_video)
         self.btn_upload.setEnabled(False)
-        upload_row.addWidget(self.btn_upload)
-        upload_row.addStretch()
-        pub_layout.addLayout(upload_row)
+        pub_layout.addWidget(self.btn_upload)
 
         layout.addWidget(group_pub)
 
@@ -992,18 +984,15 @@ class MainWindow(QMainWindow):
         clipboard.setText(text)
         self.statusBar().showMessage("Copied to clipboard", 1500)
 
-    def _regenerate(self, field: str) -> None:
-        """Regenerate title or description from templates."""
+    def _regenerate_all(self) -> None:
+        """Regenerate title and description from templates."""
         if not self.current_video or not self.current_video.has_metadata:
             return
         try:
             metadata = VideoMetadata.from_file(self.current_video.metadata_path)
-            if field == "title":
-                self.edit_title.setText(generate_title(metadata))
-                self.statusBar().showMessage("Title regenerated", 1500)
-            elif field == "description":
-                self.edit_desc.setText(generate_description(metadata))
-                self.statusBar().showMessage("Description regenerated", 1500)
+            self.edit_title.setText(generate_title(metadata))
+            self.edit_desc.setText(generate_description(metadata))
+            self.statusBar().showMessage("Regenerated", 1500)
         except Exception as e:
             self.statusBar().showMessage(f"Error: {e}", 3000)
 
