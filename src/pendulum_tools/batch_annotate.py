@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Batch video production studio.
+Batch video production studio - Main Stage architecture.
 
-Refined workflow: Core production actions (1→2→3→4) are always visible;
-advanced settings are tucked into a 'Config' tab on the right.
+Two-pane splitter layout:
+- Sidebar (Left): Video list with search filter
+- Main Stage (Right): Info-bar + Dual-column workflow (Preparation | Execution)
 
 Entry point: batch-annotate
 """
@@ -20,7 +21,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QSettings, Qt, QTimer
-from PyQt6.QtGui import QColor, QFont, QKeySequence, QPalette, QShortcut
+from PyQt6.QtGui import QColor, QFont, QKeySequence, QPalette, QShortcut, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -38,7 +39,8 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSpinBox,
-    QTabWidget,
+    QSplitter,
+    QStyle,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -52,6 +54,13 @@ from .templates import generate_description, generate_title
 
 MPV_COMMAND = "mpv"
 
+# Layout constants
+SIDEBAR_MIN_WIDTH = 220
+SIDEBAR_DEFAULT_WIDTH = 260
+BUTTON_HEIGHT = 38
+ICON_BUTTON_SIZE = 28
+MAIN_MARGINS = 15
+
 
 class Separator(QFrame):
     """Horizontal separator line."""
@@ -61,6 +70,30 @@ class Separator(QFrame):
         self.setFrameShape(QFrame.Shape.HLine)
         self.setFrameShadow(QFrame.Shadow.Sunken)
         self.setStyleSheet("color: #ddd;")
+
+
+class InfoBadge(QFrame):
+    """A styled read-only badge showing key-value info."""
+
+    def __init__(self, label: str, value: str = "—"):
+        super().__init__()
+        self.setStyleSheet(
+            "background: #f0f0f0; border-radius: 4px; padding: 4px 8px;"
+        )
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 3, 6, 3)
+        layout.setSpacing(4)
+
+        self.lbl_key = QLabel(label)
+        self.lbl_key.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(self.lbl_key)
+
+        self.lbl_value = QLabel(value)
+        self.lbl_value.setStyleSheet("color: #333; font-weight: bold; font-size: 11px;")
+        layout.addWidget(self.lbl_value)
+
+    def set_value(self, value: str) -> None:
+        self.lbl_value.setText(value)
 
 
 @dataclass
@@ -77,6 +110,9 @@ class VideoInfo:
     video_fps: int
     duration_seconds: float
     best_video_path: Optional[Path]
+    pendulum_count: int = 0
+    color_scheme: str = ""
+    created_at: str = ""
     has_processed: bool = False
     has_music: bool = False
     music_title: Optional[str] = None
@@ -110,6 +146,9 @@ def load_video_info(video_dir: Path) -> Optional[VideoInfo]:
     video_fps = 60
     duration_seconds = 30.0
     music_title = None
+    pendulum_count = 0
+    color_scheme = ""
+    created_at = ""
 
     if has_metadata:
         try:
@@ -124,6 +163,14 @@ def load_video_info(video_dir: Path) -> Optional[VideoInfo]:
 
             music = data.get("music", {})
             music_title = music.get("title")
+
+            simulation = data.get("simulation", {})
+            pendulum_count = simulation.get("pendulum_count", 0)
+
+            color = data.get("color", {})
+            color_scheme = color.get("scheme", "")
+
+            created_at = data.get("created_at", "")[:10]  # YYYY-MM-DD
         except Exception:
             pass
 
@@ -138,6 +185,9 @@ def load_video_info(video_dir: Path) -> Optional[VideoInfo]:
         video_fps=video_fps,
         duration_seconds=duration_seconds,
         best_video_path=get_best_video_path(video_dir),
+        pendulum_count=pendulum_count,
+        color_scheme=color_scheme,
+        created_at=created_at,
         has_processed=(video_dir / "video_processed.mp4").exists(),
         has_music=(
             (video_dir / "video_processed_final.mp4").exists()
@@ -158,16 +208,17 @@ def scan_batch(batch_dir: Path) -> list[VideoInfo]:
 
 
 class MainWindow(QMainWindow):
-    """Video Production Studio - streamlined 1→2→3→4 workflow."""
+    """Video Production Studio - Main Stage architecture."""
 
     def __init__(self, batch_dir: Optional[Path] = None):
         super().__init__()
         self.setWindowTitle("Video Production Studio")
-        self.resize(1300, 850)
+        self.resize(1280, 820)
 
         self.settings = QSettings("double-pendulum", "batch-annotate")
         self.batch_dir: Optional[Path] = None
         self.videos: list[VideoInfo] = []
+        self.filtered_videos: list[VideoInfo] = []
         self.current_video: Optional[VideoInfo] = None
         self.music_db: Optional[MusicDatabase] = None
         self.valid_tracks: list[MusicTrack] = []
@@ -215,37 +266,44 @@ class MainWindow(QMainWindow):
             print(f"Warning: Could not load music database: {e}")
 
     def _init_ui(self) -> None:
-        """Initialize the production studio layout."""
+        """Initialize the Main Stage layout with QSplitter."""
         central = QWidget()
         self.setCentralWidget(central)
 
         main_layout = QHBoxLayout(central)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(MAIN_MARGINS, MAIN_MARGINS, MAIN_MARGINS, MAIN_MARGINS)
+        main_layout.setSpacing(0)
 
-        # === SIDEBAR (Left, 280px): Batch Navigation ===
+        # === QSplitter: Sidebar | Main Stage ===
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setHandleWidth(6)
+
+        # Left: Sidebar
         sidebar = self._create_sidebar()
-        sidebar.setFixedWidth(280)
-        main_layout.addWidget(sidebar)
+        sidebar.setMinimumWidth(SIDEBAR_MIN_WIDTH)
+        self.splitter.addWidget(sidebar)
 
-        # === PRODUCTION AREA (Center, expanding): The 1→2→3→4 Workflow ===
-        production = self._create_production_panel()
-        main_layout.addWidget(production, 1)
+        # Right: Main Stage
+        main_stage = self._create_main_stage()
+        self.splitter.addWidget(main_stage)
 
-        # === SETTINGS PANEL (Right, 360px): Metadata + Config tabs ===
-        settings_panel = self._create_settings_panel()
-        settings_panel.setFixedWidth(360)
-        main_layout.addWidget(settings_panel)
+        # Set initial sizes (sidebar, main stage)
+        self.splitter.setSizes([SIDEBAR_DEFAULT_WIDTH, 1000])
+        self.splitter.setStretchFactor(0, 0)  # Sidebar doesn't stretch
+        self.splitter.setStretchFactor(1, 1)  # Main stage stretches
+
+        main_layout.addWidget(self.splitter)
 
     def _create_sidebar(self) -> QWidget:
-        """Create the left sidebar with batch navigation."""
+        """Create the left sidebar with search and video list."""
         sidebar = QWidget()
         layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 0, 10, 0)
         layout.setSpacing(8)
 
+        # Open batch button
         self.btn_open = QPushButton("Open Batch...")
-        self.btn_open.setMinimumHeight(35)
+        self.btn_open.setMinimumHeight(BUTTON_HEIGHT)
         self.btn_open.clicked.connect(self._open_batch_dialog)
         layout.addWidget(self.btn_open)
 
@@ -255,13 +313,24 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(Separator())
 
+        # Search/filter input
+        self.txt_filter = QLineEdit()
+        self.txt_filter.setPlaceholderText("Filter videos...")
+        self.txt_filter.setClearButtonEnabled(True)
+        self.txt_filter.textChanged.connect(self._on_filter_changed)
+        layout.addWidget(self.txt_filter)
+
+        # Video list
         self.video_list = QListWidget()
         self.video_list.currentItemChanged.connect(self._on_video_selected)
         layout.addWidget(self.video_list, 1)
 
+        # Navigation row
         nav_row = QHBoxLayout()
-        self.btn_prev = QPushButton("< Prev (P)")
-        self.btn_next = QPushButton("Next (N) >")
+        self.btn_prev = QPushButton("◀ Prev")
+        self.btn_next = QPushButton("Next ▶")
+        self.btn_prev.setMinimumHeight(32)
+        self.btn_next.setMinimumHeight(32)
         self.btn_prev.clicked.connect(self._prev_video)
         self.btn_next.clicked.connect(self._next_video)
         nav_row.addWidget(self.btn_prev)
@@ -270,276 +339,383 @@ class MainWindow(QMainWindow):
 
         return sidebar
 
-    def _create_production_panel(self) -> QWidget:
-        """Create the center production panel with 1→2→3→4 workflow."""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+    def _create_main_stage(self) -> QWidget:
+        """Create the main stage with header, info-bar, and dual-column workflow."""
+        stage = QWidget()
+        layout = QVBoxLayout(stage)
+        layout.setContentsMargins(10, 0, 0, 0)
+        layout.setSpacing(10)
 
-        # Video Header
+        # === HEADER STRIP ===
         self.lbl_title = QLabel("Select a video")
         title_font = QFont()
-        title_font.setPointSize(18)
+        title_font.setPointSize(20)
         title_font.setBold(True)
         self.lbl_title.setFont(title_font)
         layout.addWidget(self.lbl_title)
 
-        self.lbl_stats = QLabel("FPS: -- | Duration: -- | Status: --")
-        self.lbl_stats.setStyleSheet("color: #666;")
-        layout.addWidget(self.lbl_stats)
+        # === INFO-BAR (Status badges) ===
+        info_bar = self._create_info_bar()
+        layout.addWidget(info_bar)
 
         layout.addWidget(Separator())
 
-        # === 1. ANNOTATION & TIMING ===
-        group1 = QGroupBox("1. Annotation & Timing")
-        g1_layout = QVBoxLayout(group1)
+        # === DUAL-COLUMN WORKFLOW ===
+        columns_widget = self._create_dual_columns()
+        layout.addWidget(columns_widget, 1)
 
-        boom_row = QHBoxLayout()
-        boom_row.addWidget(QLabel("Boom Frame:"))
+        return stage
 
-        self.spin_boom = QSpinBox()
-        self.spin_boom.setRange(0, 100000)
-        self.spin_boom.setFixedSize(130, 42)
-        boom_font = QFont()
-        boom_font.setPointSize(16)
-        boom_font.setBold(True)
-        self.spin_boom.setFont(boom_font)
-        self.spin_boom.valueChanged.connect(self._on_boom_changed)
-        boom_row.addWidget(self.spin_boom)
+    def _create_info_bar(self) -> QFrame:
+        """Create the horizontal info-bar with status badges."""
+        bar = QFrame()
+        bar.setStyleSheet("background: #f5f5f5; border-radius: 6px;")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(12)
 
-        self.lbl_boom_secs = QLabel("(0.00s)")
-        self.lbl_boom_secs.setStyleSheet("font-size: 14px; color: #1976d2;")
-        boom_row.addWidget(self.lbl_boom_secs)
+        self.badge_pendulums = InfoBadge("Pendulums")
+        layout.addWidget(self.badge_pendulums)
 
-        boom_row.addStretch()
+        self.badge_scheme = InfoBadge("Scheme")
+        layout.addWidget(self.badge_scheme)
 
-        self.lbl_autosave = QLabel("")
-        self.lbl_autosave.setStyleSheet("font-size: 16px;")
-        self.lbl_autosave.setFixedWidth(30)
-        boom_row.addWidget(self.lbl_autosave)
+        self.badge_date = InfoBadge("Date")
+        layout.addWidget(self.badge_date)
 
-        g1_layout.addLayout(boom_row)
+        self.badge_fps = InfoBadge("FPS")
+        layout.addWidget(self.badge_fps)
 
-        play_row = QHBoxLayout()
-        self.btn_play = QPushButton("Play Video (O)")
-        self.btn_play.setMinimumHeight(42)
-        self.btn_play.clicked.connect(self._play_video)
-        self.btn_play.setEnabled(False)
-        play_row.addWidget(self.btn_play)
+        self.badge_duration = InfoBadge("Duration")
+        layout.addWidget(self.badge_duration)
 
-        self.btn_play_boom = QPushButton("Play at Boom")
-        self.btn_play_boom.setMinimumHeight(42)
-        self.btn_play_boom.clicked.connect(self._play_at_boom)
-        self.btn_play_boom.setEnabled(False)
-        play_row.addWidget(self.btn_play_boom)
-
-        g1_layout.addLayout(play_row)
-        layout.addWidget(group1)
-
-        # === 2. SOUNDTRACK ===
-        group2 = QGroupBox("2. Soundtrack")
-        g2_layout = QVBoxLayout(group2)
-
-        music_row = QHBoxLayout()
-        self.combo_music = QComboBox()
-        self.combo_music.setEnabled(False)
-        music_row.addWidget(self.combo_music, 1)
-
-        self.btn_add_music = QPushButton("Add Music")
-        self.btn_add_music.setFixedWidth(110)
-        self.btn_add_music.setMinimumHeight(35)
-        self.btn_add_music.clicked.connect(self._add_music)
-        self.btn_add_music.setEnabled(False)
-        music_row.addWidget(self.btn_add_music)
-
-        g2_layout.addLayout(music_row)
-
-        self.lbl_current_music = QLabel("Current: None")
-        self.lbl_current_music.setStyleSheet("color: #666; font-size: 11px;")
-        g2_layout.addWidget(self.lbl_current_music)
-
-        layout.addWidget(group2)
-
-        # === 3. RENDERING ===
-        group3 = QGroupBox("3. Rendering")
-        g3_layout = QHBoxLayout(group3)
-
-        self.btn_process = QPushButton("Process FX")
-        self.btn_process.setMinimumHeight(45)
-        self.btn_process.setStyleSheet(
-            "background: #2196F3; color: white; font-weight: bold;"
-        )
-        self.btn_process.clicked.connect(self._process_video)
-        self.btn_process.setEnabled(False)
-        g3_layout.addWidget(self.btn_process)
-
-        self.btn_process_music = QPushButton("Process + Music")
-        self.btn_process_music.setMinimumHeight(45)
-        self.btn_process_music.setStyleSheet(
-            "background: #4CAF50; color: white; font-weight: bold;"
-        )
-        self.btn_process_music.clicked.connect(self._process_with_music)
-        self.btn_process_music.setEnabled(False)
-        g3_layout.addWidget(self.btn_process_music)
-
-        layout.addWidget(group3)
-
-        # === 4. PUBLISHING ===
-        group4 = QGroupBox("4. Publishing")
-        g4_layout = QVBoxLayout(group4)
-
-        # Title row
-        title_row = QHBoxLayout()
-        title_row.addWidget(QLabel("Title:"))
-        self.edit_title = QLineEdit()
-        self.edit_title.setReadOnly(True)
-        title_row.addWidget(self.edit_title)
-        self.btn_regen_title = QPushButton("↻")
-        self.btn_regen_title.setFixedWidth(30)
-        self.btn_regen_title.setToolTip("Regenerate title")
-        self.btn_regen_title.clicked.connect(lambda: self._regenerate("title"))
-        title_row.addWidget(self.btn_regen_title)
-        self.btn_copy_title = QPushButton("Copy")
-        self.btn_copy_title.setFixedWidth(50)
-        self.btn_copy_title.clicked.connect(
-            lambda: self._copy_to_clipboard(self.edit_title.text())
-        )
-        title_row.addWidget(self.btn_copy_title)
-        g4_layout.addLayout(title_row)
-
-        # Description row
-        desc_header = QHBoxLayout()
-        desc_header.addWidget(QLabel("Description:"))
-        desc_header.addStretch()
-        self.btn_regen_desc = QPushButton("↻")
-        self.btn_regen_desc.setFixedWidth(30)
-        self.btn_regen_desc.setToolTip("Regenerate description")
-        self.btn_regen_desc.clicked.connect(lambda: self._regenerate("description"))
-        desc_header.addWidget(self.btn_regen_desc)
-        self.btn_copy_desc = QPushButton("Copy")
-        self.btn_copy_desc.setFixedWidth(50)
-        self.btn_copy_desc.clicked.connect(
-            lambda: self._copy_to_clipboard(self.edit_desc.toPlainText())
-        )
-        desc_header.addWidget(self.btn_copy_desc)
-        g4_layout.addLayout(desc_header)
-
-        self.edit_desc = QTextEdit()
-        self.edit_desc.setReadOnly(True)
-        self.edit_desc.setMaximumHeight(70)
-        g4_layout.addWidget(self.edit_desc)
-
-        # Path row
-        path_row = QHBoxLayout()
-        path_row.addWidget(QLabel("Path:"))
-        self.edit_path = QLineEdit()
-        self.edit_path.setReadOnly(True)
-        path_row.addWidget(self.edit_path)
-        self.btn_copy_path = QPushButton("Copy")
-        self.btn_copy_path.setFixedWidth(50)
-        self.btn_copy_path.clicked.connect(
-            lambda: self._copy_to_clipboard(self.edit_path.text())
-        )
-        path_row.addWidget(self.btn_copy_path)
-        g4_layout.addLayout(path_row)
-
-        # Upload button
-        self.btn_upload = QPushButton("Upload to YouTube")
-        self.btn_upload.setMinimumHeight(45)
-        self.btn_upload.setStyleSheet(
-            "background: #FF0000; color: white; font-weight: bold;"
-        )
-        self.btn_upload.clicked.connect(self._upload_video)
-        self.btn_upload.setEnabled(False)
-        g4_layout.addWidget(self.btn_upload)
-
-        layout.addWidget(group4)
+        self.badge_status = InfoBadge("Status")
+        layout.addWidget(self.badge_status)
 
         layout.addStretch()
 
-        # Delete button (de-emphasized)
-        self.btn_delete = QPushButton("Delete Project")
-        self.btn_delete.setStyleSheet("color: #999; border: 1px solid #ddd;")
-        self.btn_delete.clicked.connect(self._delete_video)
-        self.btn_delete.setEnabled(False)
-        layout.addWidget(self.btn_delete)
+        # Autosave indicator
+        self.lbl_autosave = QLabel("")
+        self.lbl_autosave.setStyleSheet("font-size: 16px;")
+        self.lbl_autosave.setFixedWidth(24)
+        layout.addWidget(self.lbl_autosave)
 
-        return panel
+        return bar
 
-    def _create_settings_panel(self) -> QWidget:
-        """Create the right panel with Metadata and Config tabs."""
-        tabs = QTabWidget()
+    def _create_dual_columns(self) -> QWidget:
+        """Create the dual-column workflow: Preparation | Execution."""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(20)
 
-        # === METADATA TAB ===
-        meta_tab = QWidget()
-        meta_layout = QVBoxLayout(meta_tab)
+        # === COLUMN A: PREPARATION ===
+        col_a = self._create_preparation_column()
+        layout.addWidget(col_a, 1)
 
-        self.txt_metadata = QTextEdit()
-        self.txt_metadata.setReadOnly(True)
-        self.txt_metadata.setStyleSheet(
-            "font-family: monospace; font-size: 11px; background: #fafafa;"
-        )
-        meta_layout.addWidget(self.txt_metadata)
+        # Vertical separator
+        vsep = QFrame()
+        vsep.setFrameShape(QFrame.Shape.VLine)
+        vsep.setStyleSheet("color: #ddd;")
+        layout.addWidget(vsep)
 
-        tabs.addTab(meta_tab, "Metadata")
+        # === COLUMN B: EXECUTION ===
+        col_b = self._create_execution_column()
+        layout.addWidget(col_b, 1)
 
-        # === CONFIG TAB (Advanced settings) ===
-        config_tab = QWidget()
-        config_layout = QVBoxLayout(config_tab)
+        return widget
 
-        # Template group
-        template_group = QGroupBox("Template")
-        template_layout = QVBoxLayout(template_group)
+    def _create_preparation_column(self) -> QWidget:
+        """Column A: Annotation + Soundtrack + Config."""
+        col = QWidget()
+        layout = QVBoxLayout(col)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        # === ANNOTATION & TIMING ===
+        group_annot = QGroupBox("Annotation && Timing")
+        annot_form = QFormLayout(group_annot)
+        annot_form.setSpacing(10)
+
+        # Boom frame row
+        boom_widget = QWidget()
+        boom_layout = QHBoxLayout(boom_widget)
+        boom_layout.setContentsMargins(0, 0, 0, 0)
+        boom_layout.setSpacing(8)
+
+        self.spin_boom = QSpinBox()
+        self.spin_boom.setRange(0, 100000)
+        self.spin_boom.setFixedWidth(100)
+        boom_font = QFont()
+        boom_font.setPointSize(14)
+        boom_font.setBold(True)
+        self.spin_boom.setFont(boom_font)
+        self.spin_boom.setMinimumHeight(36)
+        self.spin_boom.valueChanged.connect(self._on_boom_changed)
+        boom_layout.addWidget(self.spin_boom)
+
+        self.lbl_boom_secs = QLabel("(0.00s)")
+        self.lbl_boom_secs.setStyleSheet("color: #1976d2; font-weight: bold;")
+        boom_layout.addWidget(self.lbl_boom_secs)
+        boom_layout.addStretch()
+
+        annot_form.addRow("Boom Frame:", boom_widget)
+
+        # Playback buttons
+        play_widget = QWidget()
+        play_layout = QHBoxLayout(play_widget)
+        play_layout.setContentsMargins(0, 0, 0, 0)
+        play_layout.setSpacing(8)
+
+        self.btn_play = QPushButton("▶ Play")
+        self.btn_play.setMinimumHeight(BUTTON_HEIGHT)
+        self.btn_play.clicked.connect(self._play_video)
+        self.btn_play.setEnabled(False)
+        play_layout.addWidget(self.btn_play)
+
+        self.btn_play_boom = QPushButton("▶ At Boom")
+        self.btn_play_boom.setMinimumHeight(BUTTON_HEIGHT)
+        self.btn_play_boom.clicked.connect(self._play_at_boom)
+        self.btn_play_boom.setEnabled(False)
+        play_layout.addWidget(self.btn_play_boom)
+
+        annot_form.addRow("", play_widget)
+
+        layout.addWidget(group_annot)
+
+        # === SOUNDTRACK ===
+        group_music = QGroupBox("Soundtrack")
+        music_form = QFormLayout(group_music)
+        music_form.setSpacing(10)
+
+        self.combo_music = QComboBox()
+        self.combo_music.setEnabled(False)
+        music_form.addRow("Track:", self.combo_music)
+
+        # Music buttons
+        music_btns = QWidget()
+        music_btns_layout = QHBoxLayout(music_btns)
+        music_btns_layout.setContentsMargins(0, 0, 0, 0)
+        music_btns_layout.setSpacing(8)
+
+        self.btn_add_music = QPushButton("Add Music")
+        self.btn_add_music.setMinimumHeight(BUTTON_HEIGHT)
+        self.btn_add_music.clicked.connect(self._add_music)
+        self.btn_add_music.setEnabled(False)
+        music_btns_layout.addWidget(self.btn_add_music)
+
+        self.lbl_current_music = QLabel("")
+        self.lbl_current_music.setStyleSheet("color: #666; font-size: 11px;")
+        music_btns_layout.addWidget(self.lbl_current_music, 1)
+
+        music_form.addRow("", music_btns)
+
+        layout.addWidget(group_music)
+
+        # === CONFIG (Expandable) ===
+        self.group_config = QGroupBox("Advanced Config")
+        self.group_config.setCheckable(True)
+        self.group_config.setChecked(False)
+        config_form = QFormLayout(self.group_config)
+        config_form.setSpacing(8)
+
+        # Template
         self.combo_template = QComboBox()
         self.combo_template.currentIndexChanged.connect(self._on_template_changed)
-        template_layout.addWidget(self.combo_template)
-        config_layout.addWidget(template_group)
+        config_form.addRow("Template:", self.combo_template)
 
-        # Motion group
-        motion_group = QGroupBox("Motion (Slow Zoom)")
-        motion_form = QFormLayout(motion_group)
+        # Zoom
+        zoom_widget = QWidget()
+        zoom_layout = QHBoxLayout(zoom_widget)
+        zoom_layout.setContentsMargins(0, 0, 0, 0)
+        zoom_layout.setSpacing(8)
 
         self.spin_zoom_start = QDoubleSpinBox()
         self.spin_zoom_start.setRange(0.5, 2.0)
         self.spin_zoom_start.setSingleStep(0.01)
         self.spin_zoom_start.setDecimals(2)
         self.spin_zoom_start.setValue(1.0)
-        motion_form.addRow("Zoom Start:", self.spin_zoom_start)
+        zoom_layout.addWidget(QLabel("Start:"))
+        zoom_layout.addWidget(self.spin_zoom_start)
 
         self.spin_zoom_end = QDoubleSpinBox()
         self.spin_zoom_end.setRange(0.5, 2.0)
         self.spin_zoom_end.setSingleStep(0.01)
         self.spin_zoom_end.setDecimals(2)
         self.spin_zoom_end.setValue(1.08)
-        motion_form.addRow("Zoom End:", self.spin_zoom_end)
+        zoom_layout.addWidget(QLabel("End:"))
+        zoom_layout.addWidget(self.spin_zoom_end)
+        zoom_layout.addStretch()
 
-        config_layout.addWidget(motion_group)
+        config_form.addRow("Zoom:", zoom_widget)
 
-        # Background group
-        bg_group = QGroupBox("Background (Shorts)")
-        bg_form = QFormLayout(bg_group)
+        # Blur & Brightness
+        bg_widget = QWidget()
+        bg_layout = QHBoxLayout(bg_widget)
+        bg_layout.setContentsMargins(0, 0, 0, 0)
+        bg_layout.setSpacing(8)
 
         self.spin_blur = QSpinBox()
         self.spin_blur.setRange(5, 100)
         self.spin_blur.setValue(50)
-        self.spin_blur.setToolTip("Blur strength for Shorts background")
-        bg_form.addRow("Blur:", self.spin_blur)
+        bg_layout.addWidget(QLabel("Blur:"))
+        bg_layout.addWidget(self.spin_blur)
 
         self.spin_brightness = QDoubleSpinBox()
         self.spin_brightness.setRange(0.0, 1.0)
         self.spin_brightness.setSingleStep(0.05)
         self.spin_brightness.setDecimals(2)
         self.spin_brightness.setValue(1.0)
-        self.spin_brightness.setToolTip("Background brightness (0-1)")
-        bg_form.addRow("Brightness:", self.spin_brightness)
+        bg_layout.addWidget(QLabel("Bright:"))
+        bg_layout.addWidget(self.spin_brightness)
+        bg_layout.addStretch()
 
-        config_layout.addWidget(bg_group)
+        config_form.addRow("Background:", bg_widget)
 
-        config_layout.addStretch()
-        tabs.addTab(config_tab, "Config")
+        layout.addWidget(self.group_config)
 
-        return tabs
+        layout.addStretch()
+
+        return col
+
+    def _create_execution_column(self) -> QWidget:
+        """Column B: Rendering + Publishing."""
+        col = QWidget()
+        layout = QVBoxLayout(col)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        # === RENDERING ===
+        group_render = QGroupBox("Rendering")
+        render_layout = QHBoxLayout(group_render)
+        render_layout.setSpacing(10)
+
+        self.btn_process = QPushButton("Process FX")
+        self.btn_process.setMinimumHeight(BUTTON_HEIGHT + 4)
+        self.btn_process.setStyleSheet(
+            "background: #2196F3; color: white; font-weight: bold;"
+        )
+        self.btn_process.clicked.connect(self._process_video)
+        self.btn_process.setEnabled(False)
+        render_layout.addWidget(self.btn_process)
+
+        self.btn_process_music = QPushButton("Process + Music")
+        self.btn_process_music.setMinimumHeight(BUTTON_HEIGHT + 4)
+        self.btn_process_music.setStyleSheet(
+            "background: #4CAF50; color: white; font-weight: bold;"
+        )
+        self.btn_process_music.clicked.connect(self._process_with_music)
+        self.btn_process_music.setEnabled(False)
+        render_layout.addWidget(self.btn_process_music)
+
+        layout.addWidget(group_render)
+
+        # === PUBLISHING ===
+        group_pub = QGroupBox("Publishing")
+        pub_layout = QVBoxLayout(group_pub)
+        pub_layout.setSpacing(8)
+
+        # Title row with icon buttons
+        title_row = QHBoxLayout()
+        title_row.setSpacing(4)
+        title_row.addWidget(QLabel("Title:"))
+        self.edit_title = QLineEdit()
+        self.edit_title.setReadOnly(True)
+        title_row.addWidget(self.edit_title, 1)
+
+        self.btn_regen_title = QPushButton("↻")
+        self.btn_regen_title.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
+        self.btn_regen_title.setToolTip("Regenerate")
+        self.btn_regen_title.clicked.connect(lambda: self._regenerate("title"))
+        title_row.addWidget(self.btn_regen_title)
+
+        self.btn_copy_title = QPushButton("⧉")
+        self.btn_copy_title.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
+        self.btn_copy_title.setToolTip("Copy")
+        self.btn_copy_title.clicked.connect(
+            lambda: self._copy_to_clipboard(self.edit_title.text())
+        )
+        title_row.addWidget(self.btn_copy_title)
+        pub_layout.addLayout(title_row)
+
+        # Description with icon buttons
+        desc_row = QHBoxLayout()
+        desc_row.setSpacing(4)
+        desc_row.addWidget(QLabel("Desc:"))
+
+        self.edit_desc = QTextEdit()
+        self.edit_desc.setReadOnly(True)
+        self.edit_desc.setMaximumHeight(80)
+        desc_row.addWidget(self.edit_desc, 1)
+
+        # Vertical button cluster
+        desc_btns = QVBoxLayout()
+        desc_btns.setSpacing(2)
+
+        self.btn_regen_desc = QPushButton("↻")
+        self.btn_regen_desc.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
+        self.btn_regen_desc.setToolTip("Regenerate")
+        self.btn_regen_desc.clicked.connect(lambda: self._regenerate("description"))
+        desc_btns.addWidget(self.btn_regen_desc)
+
+        self.btn_copy_desc = QPushButton("⧉")
+        self.btn_copy_desc.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
+        self.btn_copy_desc.setToolTip("Copy")
+        self.btn_copy_desc.clicked.connect(
+            lambda: self._copy_to_clipboard(self.edit_desc.toPlainText())
+        )
+        desc_btns.addWidget(self.btn_copy_desc)
+        desc_btns.addStretch()
+
+        desc_row.addLayout(desc_btns)
+        pub_layout.addLayout(desc_row)
+
+        # Path row
+        path_row = QHBoxLayout()
+        path_row.setSpacing(4)
+        path_row.addWidget(QLabel("Path:"))
+        self.edit_path = QLineEdit()
+        self.edit_path.setReadOnly(True)
+        self.edit_path.setStyleSheet("font-size: 10px;")
+        path_row.addWidget(self.edit_path, 1)
+
+        self.btn_copy_path = QPushButton("⧉")
+        self.btn_copy_path.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
+        self.btn_copy_path.setToolTip("Copy")
+        self.btn_copy_path.clicked.connect(
+            lambda: self._copy_to_clipboard(self.edit_path.text())
+        )
+        path_row.addWidget(self.btn_copy_path)
+        pub_layout.addLayout(path_row)
+
+        # Upload button (centered, not full width)
+        upload_row = QHBoxLayout()
+        upload_row.addStretch()
+        self.btn_upload = QPushButton("Upload to YouTube")
+        self.btn_upload.setMinimumHeight(BUTTON_HEIGHT + 6)
+        self.btn_upload.setMinimumWidth(200)
+        self.btn_upload.setStyleSheet(
+            "background: #FF0000; color: white; font-weight: bold; font-size: 13px;"
+        )
+        self.btn_upload.clicked.connect(self._upload_video)
+        self.btn_upload.setEnabled(False)
+        upload_row.addWidget(self.btn_upload)
+        upload_row.addStretch()
+        pub_layout.addLayout(upload_row)
+
+        layout.addWidget(group_pub)
+
+        layout.addStretch()
+
+        # Delete button at bottom (de-emphasized)
+        self.btn_delete = QPushButton("Delete Project")
+        self.btn_delete.setStyleSheet("color: #999; border: 1px solid #ddd;")
+        self.btn_delete.setMinimumHeight(32)
+        self.btn_delete.clicked.connect(self._delete_video)
+        self.btn_delete.setEnabled(False)
+        layout.addWidget(self.btn_delete)
+
+        return col
 
     def _setup_shortcuts(self) -> None:
         """Set up keyboard shortcuts."""
@@ -547,6 +723,9 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("P"), self).activated.connect(self._prev_video)
         QShortcut(QKeySequence("O"), self).activated.connect(self._play_video)
         QShortcut(QKeySequence("Ctrl+O"), self).activated.connect(self._open_batch_dialog)
+        QShortcut(QKeySequence("Ctrl+F"), self).activated.connect(
+            lambda: self.txt_filter.setFocus()
+        )
 
     def _open_batch_dialog(self) -> None:
         """Open a file dialog to select a batch directory."""
@@ -559,33 +738,58 @@ class MainWindow(QMainWindow):
         """Load a batch directory."""
         self.batch_dir = batch_dir
         self.videos = scan_batch(batch_dir)
+        self.filtered_videos = self.videos.copy()
 
         self.settings.setValue("last_batch", str(batch_dir))
 
-        self.lbl_batch.setText(batch_dir.name)
+        self.lbl_batch.setText(f"{batch_dir.name} ({len(self.videos)})")
         self.lbl_batch.setStyleSheet("font-weight: bold;")
         self.setWindowTitle(f"Video Production Studio - {batch_dir.name}")
 
-        self.video_list.clear()
-        for video in self.videos:
-            status = self._get_video_status(video)
-            item = QListWidgetItem(f"[{status}] {video.name}")
-            item.setData(Qt.ItemDataRole.UserRole, video)
-            self.video_list.addItem(item)
+        self.txt_filter.clear()
+        self._refresh_video_list()
 
-        if self.videos:
+        if self.filtered_videos:
             self.video_list.setCurrentRow(0)
 
-    def _get_video_status(self, video: VideoInfo) -> str:
-        """Get status indicator for video."""
-        if video.boom_frame is None:
-            return "?"
-        elif video.has_processed:
-            return "✓"
-        elif video.has_music:
-            return "♪"
+    def _on_filter_changed(self, text: str) -> None:
+        """Filter video list based on search text."""
+        text_lower = text.lower().strip()
+        if not text_lower:
+            self.filtered_videos = self.videos.copy()
         else:
-            return "+"
+            self.filtered_videos = [
+                v for v in self.videos
+                if text_lower in v.name.lower()
+            ]
+        self._refresh_video_list()
+
+    def _refresh_video_list(self) -> None:
+        """Refresh the video list widget."""
+        self.video_list.clear()
+        for video in self.filtered_videos:
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, video)
+
+            # Status icon via standard icons
+            icon = self._get_status_icon(video)
+            if icon:
+                item.setIcon(icon)
+
+            item.setText(video.name)
+            self.video_list.addItem(item)
+
+    def _get_status_icon(self, video: VideoInfo) -> Optional[QIcon]:
+        """Get status icon for video using system icons."""
+        style = self.style()
+        if video.boom_frame is None:
+            return style.standardIcon(QStyle.StandardPixmap.SP_MessageBoxQuestion)
+        elif video.has_processed:
+            return style.standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton)
+        elif video.has_music:
+            return style.standardIcon(QStyle.StandardPixmap.SP_MediaVolume)
+        else:
+            return style.standardIcon(QStyle.StandardPixmap.SP_FileIcon)
 
     def _on_video_selected(self, current: Optional[QListWidgetItem], _previous) -> None:
         """Handle video selection."""
@@ -601,16 +805,21 @@ class MainWindow(QMainWindow):
     def _clear_ui(self) -> None:
         """Clear all UI fields."""
         self.lbl_title.setText("Select a video")
-        self.lbl_stats.setText("FPS: -- | Duration: -- | Status: --")
+        self.badge_pendulums.set_value("—")
+        self.badge_scheme.set_value("—")
+        self.badge_date.set_value("—")
+        self.badge_fps.set_value("—")
+        self.badge_duration.set_value("—")
+        self.badge_status.set_value("—")
+        self.lbl_autosave.setText("")
+
         self.spin_boom.setValue(0)
         self.lbl_boom_secs.setText("(0.00s)")
-        self.lbl_autosave.setText("")
         self.combo_music.clear()
-        self.lbl_current_music.setText("Current: None")
+        self.lbl_current_music.setText("")
         self.edit_title.clear()
         self.edit_desc.clear()
         self.edit_path.clear()
-        self.txt_metadata.clear()
 
         # Disable buttons
         self.btn_play.setEnabled(False)
@@ -633,12 +842,16 @@ class MainWindow(QMainWindow):
 
         # Header
         self.lbl_title.setText(video.name)
-        video_file = video.best_video_path.name if video.best_video_path else "None"
+
+        # Info-bar badges
+        self.badge_pendulums.set_value(f"{video.pendulum_count:,}" if video.pendulum_count else "—")
+        self.badge_scheme.set_value(video.color_scheme or "—")
+        self.badge_date.set_value(video.created_at or "—")
+        self.badge_fps.set_value(str(video.video_fps))
+        self.badge_duration.set_value(f"{video.duration_seconds:.1f}s")
+
         status = "Processed" if video.has_processed else ("Music" if video.has_music else "Raw")
-        self.lbl_stats.setText(
-            f"FPS: {video.video_fps} | Duration: {video.duration_seconds:.1f}s | "
-            f"Video: {video_file} | Status: {status}"
-        )
+        self.badge_status.set_value(status)
 
         # Boom spinner
         self.spin_boom.blockSignals(True)
@@ -649,7 +862,7 @@ class MainWindow(QMainWindow):
 
         # Current music
         self.lbl_current_music.setText(
-            f"Current: {video.music_title}" if video.music_title else "Current: None"
+            f"♪ {video.music_title}" if video.music_title else ""
         )
 
         # Publishing info
@@ -662,32 +875,9 @@ class MainWindow(QMainWindow):
             metadata = VideoMetadata.from_file(video.metadata_path)
             self.edit_title.setText(generate_title(metadata))
             self.edit_desc.setText(generate_description(metadata))
-
-            # Metadata tab
-            date_str = metadata.created_at.strftime("%Y-%m-%d %H:%M")
-            color_preset = f" ({metadata.color.preset_name})" if metadata.color.preset_name else ""
-            pp_preset = f" ({metadata.post_process.preset_name})" if metadata.post_process.preset_name else ""
-            meta_text = (
-                f"=== Simulation ===\n"
-                f"Pendulums: {metadata.simulation.pendulum_count:,}\n"
-                f"Date: {date_str}\n\n"
-                f"=== Color{color_preset} ===\n"
-                f"Scheme: {metadata.color.scheme}\n"
-                f"Range: {metadata.color.start} - {metadata.color.end}\n\n"
-                f"=== Post-Process{pp_preset} ===\n"
-                f"Tone Map: {metadata.post_process.tone_map}\n"
-                f"Exposure: {metadata.post_process.exposure}\n"
-                f"Contrast: {metadata.post_process.contrast}\n"
-                f"Gamma: {metadata.post_process.gamma}\n\n"
-                f"=== Results ===\n"
-                f"Boom Frame: {video.boom_frame}\n"
-                f"Boom Time: {video.boom_seconds:.2f}s" if video.boom_seconds else ""
-            )
-            self.txt_metadata.setText(meta_text)
         except Exception:
             self.edit_title.clear()
             self.edit_desc.clear()
-            self.txt_metadata.setText("Metadata not available")
 
         # Enable buttons based on state
         has_boom = video.boom_frame is not None and video.boom_frame > 0
@@ -766,11 +956,13 @@ class MainWindow(QMainWindow):
             self.current_video.boom_frame = new_boom_frame
             self.current_video.boom_seconds = new_boom_frame / self.current_video.video_fps
 
+            # Update list item icon
             row = self.video_list.currentRow()
             if row >= 0:
                 item = self.video_list.item(row)
-                status = self._get_video_status(self.current_video)
-                item.setText(f"[{status}] {self.current_video.name}")
+                icon = self._get_status_icon(self.current_video)
+                if icon:
+                    item.setIcon(icon)
 
             self.lbl_autosave.setText("✓")
             self.lbl_autosave.setStyleSheet("color: #4CAF50; font-size: 16px;")
@@ -946,8 +1138,9 @@ class MainWindow(QMainWindow):
                     if row >= 0:
                         item = self.video_list.item(row)
                         item.setData(Qt.ItemDataRole.UserRole, new_info)
-                        status = self._get_video_status(new_info)
-                        item.setText(f"[{status}] {new_info.name}")
+                        icon = self._get_status_icon(new_info)
+                        if icon:
+                            item.setIcon(icon)
                     self._update_ui()
             else:
                 error_line = result.stderr.strip().split("\n")[-1] if result.stderr else "Unknown error"
@@ -1004,6 +1197,7 @@ class MainWindow(QMainWindow):
             row = self.video_list.currentRow()
             self.video_list.takeItem(row)
             self.videos = [v for v in self.videos if v.name != self.current_video.name]
+            self.filtered_videos = [v for v in self.filtered_videos if v.name != self.current_video.name]
 
             if self.batch_dir:
                 symlink = self.batch_dir / f"{self.current_video.name}.mp4"
@@ -1028,7 +1222,7 @@ def main() -> int:
 
     # Light palette
     palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Window, QColor(248, 248, 248))
+    palette.setColor(QPalette.ColorRole.Window, QColor(250, 250, 250))
     app.setPalette(palette)
 
     window = MainWindow(batch_dir)
