@@ -97,6 +97,12 @@ public:
     // Much faster than run() since it skips GL initialization and all I/O
     metrics::ProbePhaseResults runProbe(ProgressCallback progress = nullptr);
 
+    // Run probe and collect all pendulum states for ML-based boom detection
+    // Returns state data as contiguous float array: [frames][pendulums][8]
+    // 8 values per pendulum: x1, y1, x2, y2, th1, th2, w1, w2
+    // This is used by phase 2 probe to send data to the boom detection server
+    std::vector<float> runProbeCollectStates(ProgressCallback progress = nullptr);
+
 private:
     Config config_;
     HeadlessGL gl_;

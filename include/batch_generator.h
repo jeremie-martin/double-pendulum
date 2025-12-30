@@ -1,5 +1,6 @@
 #pragma once
 
+#include "boom_client.h"
 #include "config.h"
 #include "metrics/probe_filter.h"
 #include "metrics/probe_pipeline.h"
@@ -126,12 +127,19 @@ struct BatchConfig {
     // Base config (for parameters not being varied)
     Config base_config;
 
-    // Probe settings for pre-filtering
+    // Probe settings for pre-filtering (Phase 1)
     int probe_pendulum_count = 1000;  // Pendulum count for fast probing
     int probe_total_frames = 0;       // Frame count for probing (0 = use base_config)
     double probe_max_dt = 0.0;        // Max timestep for probing (0 = use base_config)
     int max_probe_retries = 10;       // Max retries before giving up on a slot
     bool probe_enabled = false;       // Enable probe-based filtering
+
+    // Phase 2: ML-based boom detection probe
+    // Runs a second probe with 2000 pendulums at full duration,
+    // sends state data to Python ML server for boom frame detection.
+    bool phase2_enabled = false;          // Enable ML-based second probe
+    int phase2_pendulum_count = 2000;     // Pendulums for ML detection (trained on 2000)
+    std::string boom_socket_path;         // Unix socket path for boom_server.py
 
     // Filter criteria for probe validation
     FilterCriteria filter;
@@ -205,6 +213,11 @@ private:
     // Run probe simulation and check if it passes filter criteria
     // Returns pair of (passes, probe_results)
     std::pair<bool, metrics::ProbePhaseResults> runProbe(Config const& config);
+
+    // Run phase 2 probe with ML-based boom detection
+    // Runs simulation with 2000 pendulums, sends to boom server, returns detected frame
+    // Returns pair of (accepted, boom_frame) - boom_frame is -1 if rejected
+    std::pair<bool, int> runPhase2Probe(Config const& config);
 
     // Save progress after each video
     void saveProgress();

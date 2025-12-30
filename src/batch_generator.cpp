@@ -113,7 +113,7 @@ BatchConfig BatchConfig::load(std::string const& path) {
             }
         }
 
-        // Probe settings
+        // Probe settings (Phase 1)
         if (auto probe = tbl["probe"].as_table()) {
             config.probe_enabled = true; // Enable probing if section exists
             if (auto pc = probe->get("pendulum_count")) {
@@ -130,6 +130,21 @@ BatchConfig BatchConfig::load(std::string const& path) {
             }
             if (auto enabled = probe->get("enabled")) {
                 config.probe_enabled = enabled->value<bool>().value_or(true);
+            }
+
+            // Phase 2: ML-based boom detection
+            if (auto phase2 = probe->get("phase2")) {
+                if (auto phase2_tbl = phase2->as_table()) {
+                    if (auto enabled = phase2_tbl->get("enabled")) {
+                        config.phase2_enabled = enabled->value<bool>().value_or(false);
+                    }
+                    if (auto pc = phase2_tbl->get("pendulum_count")) {
+                        config.phase2_pendulum_count = pc->value<int>().value_or(2000);
+                    }
+                    if (auto socket = phase2_tbl->get("socket")) {
+                        config.boom_socket_path = socket->value<std::string>().value_or("");
+                    }
+                }
             }
         }
 
@@ -398,8 +413,9 @@ bool BatchGenerator::generateOne(int index) {
         Config config;
         int probe_retries = 0;
         metrics::ProbePhaseResults probe_result;
+        std::optional<int> ml_boom_frame;  // Boom frame from ML phase 2 (if enabled)
 
-        // Phase 1: Probe validation (if enabled)
+        // Phase 1 + Phase 2: Probe validation (if enabled)
         if (config_.probe_enabled) {
             bool found_valid = false;
 
@@ -415,20 +431,42 @@ bool BatchGenerator::generateOne(int index) {
                           << ", " << rad2deg(config.physics.initial_velocity2) << " deg/s... ";
                 std::cout.flush();
 
-                // Run probe (physics only)
+                // Run phase 1 probe (physics only, fast)
                 auto [passes, result] = runProbe(config);
                 probe_result = result;
 
-                if (passes) {
-                    std::cout << "OK (boom=" << std::setprecision(2) << result.boom_seconds
+                if (!passes) {
+                    std::cout << "REJECT: " << result.rejection_reason << "\n";
+                    continue;  // Try next random config
+                }
+
+                std::cout << "P1 OK";
+
+                // Phase 2: ML-based boom detection (if enabled)
+                if (config_.phase2_enabled) {
+                    std::cout << " | P2: ";
+                    std::cout.flush();
+
+                    auto [accepted, boom_frame] = runPhase2Probe(config);
+
+                    if (!accepted) {
+                        std::cout << "REJECT (ML)\n";
+                        continue;  // Try next random config
+                    }
+
+                    ml_boom_frame = boom_frame;
+                    double boom_seconds = boom_frame * config.simulation.frameDuration();
+                    std::cout << "OK (boom=" << std::setprecision(2) << boom_seconds << "s)\n";
+                } else {
+                    // No phase 2 - use phase 1 results
+                    std::cout << " (boom=" << std::setprecision(2) << result.boom_seconds
                               << "s, uniformity=" << std::setprecision(2) << result.final_uniformity
                               << ")\n";
-                    probe_retries = retry;
-                    found_valid = true;
-                    break;
-                } else {
-                    std::cout << "REJECT: " << result.rejection_reason << "\n";
                 }
+
+                probe_retries = retry;
+                found_valid = true;
+                break;
             }
 
             if (!found_valid) {
@@ -496,14 +534,34 @@ bool BatchGenerator::generateOne(int index) {
         }
         double boom_quality = results.getBoomQuality().value_or(0.0);
 
-        // For RunResult summary, use simulation time (consistent with historical display)
+        // Use ML-detected boom frame from phase 2 if available, otherwise use simulation's detection
+        std::optional<int> final_boom_frame = ml_boom_frame.has_value() ? ml_boom_frame : results.boom_frame;
         double boom_sim_seconds =
-            results.boom_frame ? *results.boom_frame * config.simulation.frameDuration() : 0.0;
+            final_boom_frame ? *final_boom_frame * config.simulation.frameDuration() : 0.0;
+
+        // If phase 2 provided boom frame, update the metadata.json file
+        if (ml_boom_frame.has_value()) {
+            std::string metadata_path = config.output.directory + "/metadata.json";
+            std::ifstream in(metadata_path);
+            if (in) {
+                json metadata = json::parse(in);
+                in.close();
+
+                // Update boom_frame and boom_seconds in metadata
+                metadata["results"]["boom_frame"] = *ml_boom_frame;
+                metadata["results"]["boom_seconds"] = boom_sim_seconds;
+
+                std::ofstream out(metadata_path);
+                if (out) {
+                    out << metadata.dump(2) << "\n";
+                }
+            }
+        }
 
         RunResult result{video_name,
                          results.video_path,
                          true,
-                         results.boom_frame,
+                         final_boom_frame,
                          boom_sim_seconds,
                          chaos_frame,
                          chaos_seconds,
@@ -675,6 +733,48 @@ std::pair<bool, metrics::ProbePhaseResults> BatchGenerator::runProbe(Config cons
     results.rejection_reason = filter_result.reason;
 
     return {filter_result.passed, results};
+}
+
+std::pair<bool, int> BatchGenerator::runPhase2Probe(Config const& config) {
+    // Phase 2: Run simulation with 2000 pendulums and send to ML boom detection server
+    // Returns (accepted, boom_frame) where boom_frame is -1 if rejected
+
+    if (config_.boom_socket_path.empty()) {
+        std::cerr << "Error: Phase 2 enabled but boom_socket_path not configured\n";
+        return {false, -1};
+    }
+
+    // Create config for phase 2 probe (full duration, 2000 pendulums)
+    Config phase2_config = config;
+    phase2_config.simulation.pendulum_count = config_.phase2_pendulum_count;
+    // Use full frame count and duration from base config (no probe shortcuts)
+
+    // Run simulation and collect all states
+    Simulation sim(phase2_config);
+    auto states = sim.runProbeCollectStates();
+
+    int frames = phase2_config.simulation.total_frames;
+    int pendulums = phase2_config.simulation.pendulum_count;
+
+    // Send to boom detection server
+    try {
+        boom::BoomClient client(config_.boom_socket_path);
+        auto result = client.predictBinary(states.data(), frames, pendulums);
+
+        if (!result.ok) {
+            std::cerr << "Boom server error: " << result.error_message << "\n";
+            return {false, -1};
+        }
+
+        if (result.accepted) {
+            return {true, result.boom_frame};
+        } else {
+            return {false, -1};
+        }
+    } catch (std::exception const& e) {
+        std::cerr << "Failed to connect to boom server: " << e.what() << "\n";
+        return {false, -1};
+    }
 }
 
 void BatchGenerator::saveProgress() {

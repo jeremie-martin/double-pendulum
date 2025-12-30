@@ -892,6 +892,61 @@ metrics::ProbePhaseResults Simulation::runProbe(ProgressCallback progress) {
     return results;
 }
 
+std::vector<float> Simulation::runProbeCollectStates(ProgressCallback progress) {
+    // Physics-only simulation that collects all pendulum states for ML-based boom detection
+    // Returns contiguous float array: [frames][pendulums][8]
+    // 8 values per pendulum per frame: x1, y1, x2, y2, th1, th2, w1, w2
+
+    int const pendulum_count = config_.simulation.pendulum_count;
+    int const total_frames = config_.simulation.total_frames;
+    int const substeps = config_.simulation.substeps();
+    double const dt = config_.simulation.dt();
+
+    // Determine thread count
+    int thread_count = config_.render.thread_count;
+    if (thread_count <= 0) {
+        thread_count = std::thread::hardware_concurrency();
+    }
+
+    // Initialize pendulums
+    std::vector<Pendulum> pendulums(pendulum_count);
+    initializePendulums(pendulums);
+
+    // Allocate state buffer
+    std::vector<PendulumState> states(pendulum_count);
+
+    // Pre-allocate output buffer for all frames
+    // 8 floats per pendulum: x1, y1, x2, y2, th1, th2, w1, w2
+    std::vector<float> all_states;
+    all_states.reserve(static_cast<size_t>(total_frames) * pendulum_count * 8);
+
+    // Main physics loop
+    for (int frame = 0; frame < total_frames; ++frame) {
+        // Step physics
+        stepPendulums(pendulums, states, substeps, dt, thread_count);
+
+        // Copy state data to output buffer
+        for (int p = 0; p < pendulum_count; ++p) {
+            PendulumState const& s = states[p];
+            all_states.push_back(static_cast<float>(s.x1));
+            all_states.push_back(static_cast<float>(s.y1));
+            all_states.push_back(static_cast<float>(s.x2));
+            all_states.push_back(static_cast<float>(s.y2));
+            all_states.push_back(static_cast<float>(s.th1));
+            all_states.push_back(static_cast<float>(s.th2));
+            all_states.push_back(static_cast<float>(s.w1));
+            all_states.push_back(static_cast<float>(s.w2));
+        }
+
+        // Progress callback
+        if (progress) {
+            progress(frame + 1, total_frames);
+        }
+    }
+
+    return all_states;
+}
+
 void Simulation::initializePendulums(std::vector<Pendulum>& pendulums) {
     int const n = pendulums.size();
     double const center_angle = config_.physics.initial_angle1;
