@@ -18,6 +18,9 @@ Example config file (~/.config/pendulum-tools/config.toml):
 
     [processing]
     default_template = "minimal_science"
+    shorts = true
+    blur_bg = true
+    force = true
 """
 
 from __future__ import annotations
@@ -36,6 +39,18 @@ from .constants import (
     ENV_MUSIC_DIR,
     USER_CONFIG_PATHS,
 )
+
+
+@dataclass
+class ProcessingDefaults:
+    """Default processing settings from config file.
+
+    These can be overridden by CLI options.
+    """
+
+    shorts: bool = False
+    blur_bg: bool = False
+    force: bool = False
 
 # Try to import tomllib (Python 3.11+) or tomli as fallback
 try:
@@ -62,6 +77,9 @@ class UserConfig:
 
     # Processing
     default_template: str = "minimal_science"
+
+    # Processing defaults (for auto/watch commands)
+    processing: ProcessingDefaults = field(default_factory=ProcessingDefaults)
 
     # Internal: track where config was loaded from
     _config_source: Optional[Path] = field(default=None, repr=False)
@@ -124,6 +142,12 @@ class UserConfig:
         processing = data.get("processing", {})
         if "default_template" in processing:
             self.default_template = str(processing["default_template"])
+        if "shorts" in processing:
+            self.processing.shorts = bool(processing["shorts"])
+        if "blur_bg" in processing:
+            self.processing.blur_bg = bool(processing["blur_bg"])
+        if "force" in processing:
+            self.processing.force = bool(processing["force"])
 
     def _load_from_env(self) -> None:
         """Override configuration from environment variables."""

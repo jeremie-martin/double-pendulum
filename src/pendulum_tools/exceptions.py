@@ -149,3 +149,44 @@ class MusicSyncError(PendulumToolsError):
         parts.append(f"Available tracks: {available_tracks}")
 
         super().__init__(" | ".join(parts))
+
+
+class UploadError(PendulumToolsError):
+    """Exception for YouTube upload failures."""
+
+    def __init__(
+        self,
+        message: str,
+        video_path: Optional[Path] = None,
+        is_rate_limit: bool = False,
+        retry_after: Optional[int] = None,
+    ):
+        self.video_path = video_path
+        self.is_rate_limit = is_rate_limit
+        self.retry_after = retry_after
+
+        parts = [message]
+        if video_path:
+            parts.append(f"Video: {video_path}")
+        if is_rate_limit:
+            parts.append("Rate limit exceeded")
+        if retry_after:
+            parts.append(f"Retry after: {retry_after}s")
+
+        super().__init__(" | ".join(parts))
+
+
+class RateLimitError(UploadError):
+    """Specific exception for YouTube API rate limit errors."""
+
+    def __init__(
+        self,
+        video_path: Optional[Path] = None,
+        retry_after: Optional[int] = None,
+    ):
+        super().__init__(
+            "YouTube API rate limit exceeded",
+            video_path=video_path,
+            is_rate_limit=True,
+            retry_after=retry_after,
+        )

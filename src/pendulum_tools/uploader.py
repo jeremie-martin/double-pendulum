@@ -10,7 +10,10 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
+
+from .exceptions import RateLimitError, UploadError
 
 # OAuth 2.0 scope for uploading videos
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
@@ -104,6 +107,8 @@ class YouTubeUploader:
 
         Raises:
             RuntimeError: If not authenticated.
+            RateLimitError: If YouTube API rate limit is exceeded.
+            UploadError: For other upload failures.
         """
         if not self.youtube:
             raise RuntimeError("Not authenticated. Call authenticate() first.")
@@ -135,13 +140,42 @@ class YouTubeUploader:
             media_body=media,
         )
 
-        response = None
-        while response is None:
-            status, response = request.next_chunk()
-            if status and progress_callback:
-                progress_callback(status.progress())
+        try:
+            response = None
+            while response is None:
+                status, response = request.next_chunk()
+                if status and progress_callback:
+                    progress_callback(status.progress())
 
-        return response.get("id")
+            return response.get("id")
+
+        except HttpError as e:
+            # Check for rate limit errors (403 with quota reasons or 429)
+            if e.resp.status == 403:
+                # Try to extract error reason from response
+                try:
+                    import json
+                    error_content = json.loads(e.content.decode("utf-8"))
+                    errors = error_content.get("error", {}).get("errors", [])
+                    for error in errors:
+                        reason = error.get("reason", "")
+                        if reason in ("quotaExceeded", "rateLimitExceeded", "userRateLimitExceeded", "dailyLimitExceeded"):
+                            raise RateLimitError(video_path=video_path)
+                except (json.JSONDecodeError, KeyError, AttributeError):
+                    pass
+
+            if e.resp.status == 429:
+                retry_after = e.resp.get("Retry-After")
+                raise RateLimitError(
+                    video_path=video_path,
+                    retry_after=int(retry_after) if retry_after else None,
+                )
+
+            # General upload error
+            raise UploadError(
+                f"YouTube API error ({e.resp.status}): {e.reason}",
+                video_path=video_path,
+            )
 
     @property
     def is_authenticated(self) -> bool:

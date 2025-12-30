@@ -82,3 +82,24 @@ MIN_OUTPUT_VIDEO_SIZE = 100_000  # 100KB
 
 # Default log file name pattern
 DEFAULT_LOG_FILE_PATTERN = "batch_{timestamp}.log"
+
+# =============================================================================
+# Logging (Loguru)
+# =============================================================================
+
+# Default log directory
+DEFAULT_LOG_DIR = Path.home() / ".local" / "share" / "pendulum-tools" / "logs"
+
+# Log file date format
+LOG_DATE_FORMAT = "%Y-%m-%d"
+
+# =============================================================================
+# Watch Mode Constants
+# =============================================================================
+
+# Polling interval for new directories (seconds)
+WATCH_POLL_INTERVAL = 5.0
+
+# Minimum time to wait after detecting a new directory before processing
+# (ensures video generation is complete)
+WATCH_SETTLE_TIME = 10.0
