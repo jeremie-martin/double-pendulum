@@ -1852,6 +1852,12 @@ def auto(
     help="Seconds to wait after new directory detected before processing (default: 10.0)",
 )
 @click.option(
+    "--upload-delay",
+    type=float,
+    default=60.0,
+    help="Seconds to wait between uploads to avoid rate limiting (default: 60.0)",
+)
+@click.option(
     "--verbose",
     "-v",
     is_flag=True,
@@ -1864,6 +1870,7 @@ def watch(
     privacy: str,
     poll_interval: float,
     settle_time: float,
+    upload_delay: float,
     verbose: bool,
 ):
     """Watch batch directory and auto-process new videos as they appear.
@@ -1872,6 +1879,7 @@ def watch(
     folder appears with video.mp4 and metadata.json, waits for settle_time
     then runs the full pipeline (process -> music -> upload).
 
+    Waits upload_delay seconds between uploads to avoid YouTube rate limiting.
     Gracefully handles rate limits by skipping and continuing.
     Press Ctrl+C to stop watching.
 
@@ -1880,8 +1888,8 @@ def watch(
         # Watch and upload as public
         pendulum-tools watch /path/to/batch_output --privacy public
 
-        # Custom timing
-        pendulum-tools watch /path/to/batch_output --poll-interval 10 --settle-time 30
+        # Custom timing (2 min delay between uploads)
+        pendulum-tools watch /path/to/batch_output --upload-delay 120
     """
     import signal
     import time
@@ -1938,7 +1946,7 @@ def watch(
     console.print(f"  Shorts: {'Yes' if user_config.processing.shorts else 'No'}")
     console.print(f"  Blur BG: {'Yes' if user_config.processing.blur_bg else 'No'}")
     console.print(f"  Privacy: {privacy}")
-    console.print(f"[dim]Poll interval: {poll_interval}s, Settle time: {settle_time}s[/dim]")
+    console.print(f"[dim]Poll: {poll_interval}s, Settle: {settle_time}s, Upload delay: {upload_delay}s[/dim]")
     console.print("[dim]Press Ctrl+C to stop[/dim]")
     console.print()
     log.info(f"Starting watch on {batch_dir}")
@@ -1951,7 +1959,7 @@ def watch(
             # Scan for new directories
             current_time = time.time()
 
-            for item in batch_dir.iterdir():
+            for item in sorted(batch_dir.iterdir(), key=lambda x: x.name):
                 if not item.is_dir() or not item.name.startswith("video_"):
                     continue
 
@@ -1979,7 +1987,7 @@ def watch(
                 if current_time - pending[dir_name] < settle_time:
                     continue
 
-                # Process this directory
+                # Process this directory (only ONE per iteration)
                 del pending[dir_name]
                 console.print(f"\n[bold]Processing:[/bold] {dir_name}")
 
@@ -1998,6 +2006,11 @@ def watch(
                 if result.succeeded:
                     total_processed += 1
                     console.print(f"  [green]SUCCESS[/green] https://youtu.be/{result.video_id}")
+                    # Wait before next upload to avoid rate limiting
+                    if upload_delay > 0 and running:
+                        console.print(f"[dim]Waiting {upload_delay}s before next upload...[/dim]")
+                        log.info(f"Upload delay: waiting {upload_delay}s")
+                        time.sleep(upload_delay)
                 elif result.status == "rate_limited":
                     total_failed += 1
                     console.print(f"  [yellow]RATE LIMITED[/yellow] - skipping")
@@ -2006,6 +2019,9 @@ def watch(
                     console.print(f"  [red]FAILED[/red] {result.error}")
 
                 console.print(f"[dim]Total: {total_processed} processed, {total_failed} failed[/dim]")
+
+                # Process only ONE video per loop iteration, then rescan
+                break
 
             # Wait before next scan
             time.sleep(poll_interval)
