@@ -1,0 +1,11 @@
+[paths]
+credentials_dir = "credentials"
+music_dir = "music"
+
+[encoding]
+use_nvenc = true
+nvenc_cq = 20
+crf_quality = 15
+
+[processing]
+default_template = "minimal_science"

@@ -13,18 +13,24 @@ presets = "config/presets.toml"          # Preset library file
 enabled = true           # Enable probe-based filtering
 pendulum_count = 1000    # Fast probing with fewer pendulums (no rendering)
 total_frames = 200       # Fewer frames for faster probing (0 = use base_config)
-max_dt = 0.01            # Larger timestep for faster probing (0 = use base_config)
-max_retries = 100000       # Retry with new params if probe fails
+# max_dt = 0.01            # Larger timestep for faster probing (0 = use base_config)
+max_retries = 10000000       # Retry with new params if probe fails
+physics_quality = "medium"
+
+[probe.phase2]
+enabled = true
+pendulum_count = 2000
+socket = "/home/holo/prog/boom-detection/sock"  # Path to Unix socket where boom_server.py is listening
 
 [physics_ranges]
 # Random initial angles (in degrees)
-initial_angle1_deg = [140.0, 180.0]
-initial_angle2_deg = [140.0, 180.0]
+initial_angle1_deg = [150.0, 180.0]
+initial_angle2_deg = [-180.0, 180.0]
 # Random angle variation (in degrees)
-# angle_variation_deg = [0.003, 0.004]
+angle_variation_deg = [0.001, 0.05]
 # Random initial velocities (rad/s) - small values for variety
-initial_velocity1 = [-0.05, 0.05]
-initial_velocity2 = [-0.05, 0.05]
+initial_velocity1 = [-0.2, 0.2]
+initial_velocity2 = [-0.2, 0.2]
 
 
 [filter]
@@ -33,12 +39,12 @@ min_uniformity = 0.9       # Minimum distribution uniformity (0=concentrated, 1=
 
 # Target-based constraints (reference [targets.X] by name)
 [filter.targets.boom]
-min_seconds = 7.0          # Boom must happen after this time
-max_seconds = 14.0         # Boom must happen before this time
+min_seconds = 6.0          # Boom must happen after this time
+max_seconds = 12.0         # Boom must happen before this time
 required = true            # Reject simulations with no detectable boom
 
 [filter.targets.boom_quality]
-min_score = 0.7          # Minimum quality score for boom
+min_score = 0.0001          # Minimum quality score for boom
 
 # Randomization settings - which presets to randomly select from
 # Names must match presets defined in the preset library

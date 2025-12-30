@@ -19,6 +19,7 @@ dependencies = [
     "matplotlib>=3.10.8",
     "numpy>=2.4.0",
     "pyqt6>=6.10.1",
+    "zstandard>=0.25.0",
 ]
 
 [project.scripts]

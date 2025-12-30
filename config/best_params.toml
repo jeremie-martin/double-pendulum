@@ -1,67 +1,88 @@
 # Best parameters found by pendulum-optimize
 # Primary target: boom
-# Best metric: tip_causticness with MAE=27.22 frames
+# Best metric: organization_causticness with MAE=23.28 frames
 # Samples evaluated: 50
 
-# tip_causticness: MAE=27.22 frames
+# organization_causticness: MAE=23.28 frames
+[metrics.organization_causticness]
+min_sectors = 8
+max_sectors = 42
+target_per_sector = 237
+
+# joint_concentration: MAE=23.42 frames
+[metrics.joint_concentration]
+min_sectors = 8
+max_sectors = 94
+target_per_sector = 106
+
+# angular_causticness: MAE=23.90 frames
+[metrics.angular_causticness]
+min_sectors = 8
+max_sectors = 110
+target_per_sector = 90
+
+# tip_causticness: MAE=23.96 frames
 [metrics.tip_causticness]
 min_sectors = 8
 max_sectors = 8
 target_per_sector = 1248
 
-# angular_causticness: MAE=30.14 frames
-[metrics.angular_causticness]
-min_sectors = 8
-max_sectors = 8
-target_per_sector = 1248
-
-# r1_concentration: MAE=30.36 frames
-[metrics.r1_concentration]
-min_sectors = 8
-max_sectors = 8
-target_per_sector = 1248
-
-# joint_concentration: MAE=30.56 frames
-[metrics.joint_concentration]
-min_sectors = 8
-max_sectors = 8
-target_per_sector = 1248
-
-# organization_causticness: MAE=30.68 frames
-[metrics.organization_causticness]
-min_sectors = 8
-max_sectors = 8
-target_per_sector = 1248
-
-# r2_concentration: MAE=33.30 frames
-[metrics.r2_concentration]
-min_sectors = 8
-max_sectors = 8
-target_per_sector = 1248
-
-# cv_causticness: MAE=35.74 frames
+# cv_causticness: MAE=27.12 frames
 [metrics.cv_causticness]
 min_sectors = 8
-max_sectors = 8
-target_per_sector = 1248
-cv_normalization = 0.50
+max_sectors = 60
+target_per_sector = 166
+cv_normalization = 1.57
 
-# variance: MAE=89.18 frames
+# r2_concentration: MAE=28.16 frames
+[metrics.r2_concentration]
+min_sectors = 8
+max_sectors = 128
+target_per_sector = 78
+
+# r1_concentration: MAE=29.44 frames
+[metrics.r1_concentration]
+min_sectors = 8
+max_sectors = 94
+target_per_sector = 106
+
+# acceleration_dispersion: MAE=33.12 frames
+[metrics.acceleration_dispersion]
+min_sectors = 8
+max_sectors = 72
+target_per_sector = 40
+
+# velocity_dispersion: MAE=35.36 frames
+[metrics.velocity_dispersion]
+min_sectors = 8
+max_sectors = 72
+target_per_sector = 40
+
+# angular_momentum_spread: MAE=53.68 frames
+[metrics.angular_momentum_spread]
+min_sectors = 8
+max_sectors = 72
+target_per_sector = 40
+
+# variance: MAE=86.68 frames
 [metrics.variance]
 min_sectors = 8
 max_sectors = 72
 target_per_sector = 40
 
-# boom: MAE=27.22 frames (50 samples)
+# boom: MAE=23.28 frames (50 samples)
 [targets.boom]
 type = "frame"
-metric = "tip_causticness"
-method = "max_value"
+metric = "organization_causticness"
+method = "threshold_crossing"
 offset_seconds = -0.50
+crossing_threshold = 0.70
+crossing_confirmation = 10
 
-# boom_quality: MAE=0.2248 (score units, 0-1 scale) (50 samples)
+# boom_quality: MAE=0.2204 (score units, 0-1 scale) (50 samples)
 [targets.boom_quality]
 type = "score"
-metric = "tip_causticness"
-method = "rise_time"
+metric = "organization_causticness"
+method = "pre_boom_contrast"
+window_seconds = 2.00
 

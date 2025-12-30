@@ -22,6 +22,7 @@ physics_quality = "high"     # "low", "medium", "high", "ultra"
 [render]
 width = 768
 height = 768
+thread_count = 16               # 0 = auto-detect hardware concurrency
 
 [post_process]
 exposure = 5.5
