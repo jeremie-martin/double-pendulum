@@ -1438,8 +1438,22 @@ def _auto_process_single(
     Returns:
         AutoProcessResult with status and optional error message.
     """
+    import json
     from .exceptions import RateLimitError, UploadError
     from .music import MusicManager
+
+    metadata_path = video_dir / "metadata.json"
+
+    # Check if already uploaded
+    try:
+        with open(metadata_path) as f:
+            meta_data = json.load(f)
+        if "upload" in meta_data and meta_data["upload"].get("video_id"):
+            video_id = meta_data["upload"]["video_id"]
+            log.info(f"Skipping {video_dir.name}: already uploaded as {video_id}")
+            return AutoProcessResult(video_dir, "skipped", error=f"Already uploaded: {video_id}")
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        pass
 
     # Check if already processed (has video_processed_final.mp4)
     final_video = video_dir / "video_processed_final.mp4"
@@ -1448,7 +1462,6 @@ def _auto_process_single(
         return AutoProcessResult(video_dir, "skipped", error="Already processed")
 
     # Load metadata
-    metadata_path = video_dir / "metadata.json"
     try:
         metadata = VideoMetadata.from_file(metadata_path)
     except Exception as e:
@@ -1482,7 +1495,8 @@ def _auto_process_single(
         log.error(f"{video_dir.name}: Processing exception: {e}")
         return AutoProcessResult(video_dir, "process_failed", error=str(e))
 
-    # Step 2: Add music
+    # Step 2: Add music (required for upload)
+    music_added = False
     if result.video_path:
         log.info(f"Adding music to {video_dir.name}")
         try:
@@ -1495,45 +1509,56 @@ def _auto_process_single(
             try:
                 manager = MusicManager(resolved_music_dir)
             except FileNotFoundError as e:
-                log.warning(f"{video_dir.name}: Music directory not found: {e}")
-                # Continue without music - still upload processed video
-                pass
+                log.error(f"{video_dir.name}: Music directory not found: {e}")
+                return AutoProcessResult(video_dir, "music_failed", error=f"Music directory not found: {e}")
+
+            # Get boom info
+            boom_frame = metadata.results.boom_frame if metadata.results else None
+            if not boom_frame or boom_frame <= 0:
+                log.error(f"{video_dir.name}: No boom frame detected, cannot add music")
+                return AutoProcessResult(video_dir, "music_failed", error="No boom frame detected")
+
+            video_fps = metadata.config.video_fps
+            video_boom_seconds = boom_frame / video_fps
+
+            # Select track (auto-select based on boom timing)
+            selected_track = manager.pick_track_for_boom(video_boom_seconds)
+            if not selected_track:
+                selected_track = manager.random_track()
+
+            if not selected_track:
+                log.error(f"{video_dir.name}: No music tracks available")
+                return AutoProcessResult(video_dir, "music_failed", error="No music tracks available")
+
+            # Output path
+            output_path = result.video_path.with_name(
+                result.video_path.stem + "_final.mp4"
+            )
+
+            success = MusicManager.mux_with_audio(
+                video_path=result.video_path,
+                audio_path=selected_track.filepath,
+                output_path=output_path,
+                boom_frame=boom_frame,
+                drop_time_ms=selected_track.drop_time_ms,
+                video_fps=video_fps,
+            )
+
+            if success:
+                MusicManager.update_metadata_with_music(metadata_path, selected_track)
+                log.info(f"{video_dir.name}: Music added ({selected_track.title})")
+                music_added = True
             else:
-                # Get boom info
-                boom_frame = metadata.results.boom_frame if metadata.results else None
-                if boom_frame and boom_frame > 0:
-                    video_fps = metadata.config.video_fps
-                    video_boom_seconds = boom_frame / video_fps
-
-                    # Select track (auto-select based on boom timing)
-                    selected_track = manager.pick_track_for_boom(video_boom_seconds)
-                    if not selected_track:
-                        selected_track = manager.random_track()
-
-                    # Output path
-                    output_path = result.video_path.with_name(
-                        result.video_path.stem + "_final.mp4"
-                    )
-
-                    success = MusicManager.mux_with_audio(
-                        video_path=result.video_path,
-                        audio_path=selected_track.filepath,
-                        output_path=output_path,
-                        boom_frame=boom_frame,
-                        drop_time_ms=selected_track.drop_time_ms,
-                        video_fps=video_fps,
-                    )
-
-                    if success:
-                        MusicManager.update_metadata_with_music(metadata_path, selected_track)
-                        log.info(f"{video_dir.name}: Music added ({selected_track.title})")
-                    else:
-                        log.warning(f"{video_dir.name}: Failed to add music, continuing anyway")
-                else:
-                    log.warning(f"{video_dir.name}: No boom frame, skipping music")
+                log.error(f"{video_dir.name}: FFmpeg muxing failed")
+                return AutoProcessResult(video_dir, "music_failed", error="FFmpeg muxing failed")
 
         except Exception as e:
-            log.warning(f"{video_dir.name}: Music error: {e}, continuing anyway")
+            log.error(f"{video_dir.name}: Music error: {e}")
+            return AutoProcessResult(video_dir, "music_failed", error=str(e))
+
+    if not music_added:
+        log.error(f"{video_dir.name}: Music was not added, cannot upload")
+        return AutoProcessResult(video_dir, "music_failed", error="Music not added")
 
     if dry_run:
         log.info(f"{video_dir.name}: Dry run - would upload")
@@ -1560,6 +1585,22 @@ def _auto_process_single(
         )
 
         if video_id:
+            # Save upload info to metadata.json
+            try:
+                with open(metadata_path) as f:
+                    meta_data = json.load(f)
+                meta_data["upload"] = {
+                    "video_id": video_id,
+                    "url": f"https://youtu.be/{video_id}",
+                    "privacy": privacy,
+                    "uploaded_at": datetime.now().isoformat(),
+                }
+                with open(metadata_path, "w") as f:
+                    json.dump(meta_data, f, indent=2)
+                    f.write("\n")
+            except Exception as e:
+                log.warning(f"{video_dir.name}: Failed to save upload info: {e}")
+
             log.info(f"{video_dir.name}: Uploaded successfully: https://youtu.be/{video_id}")
             return AutoProcessResult(video_dir, "success", video_id=video_id)
         else:
@@ -1584,7 +1625,7 @@ def _print_auto_summary(results: list[AutoProcessResult]) -> None:
     table.add_column("Status")
     table.add_column("Info")
 
-    counts = {"success": 0, "skipped": 0, "failed": 0, "rate_limited": 0}
+    counts = {"success": 0, "skipped": 0, "failed": 0, "rate_limited": 0, "music_failed": 0}
 
     for r in results:
         if r.succeeded:
@@ -1599,6 +1640,10 @@ def _print_auto_summary(results: list[AutoProcessResult]) -> None:
             status = "[yellow]RATE LIMIT[/yellow]"
             info = r.error or ""
             counts["rate_limited"] += 1
+        elif r.status == "music_failed":
+            status = "[red]MUSIC FAILED[/red]"
+            info = r.error or ""
+            counts["music_failed"] += 1
         else:
             status = f"[red]{r.status.upper()}[/red]"
             info = r.error or ""
@@ -1608,12 +1653,14 @@ def _print_auto_summary(results: list[AutoProcessResult]) -> None:
 
     console.print(table)
     console.print()
-    console.print(
-        f"Success: {counts['success']} | "
-        f"Skipped: {counts['skipped']} | "
-        f"Rate Limited: {counts['rate_limited']} | "
-        f"Failed: {counts['failed']}"
-    )
+    parts = [f"Success: {counts['success']}", f"Skipped: {counts['skipped']}"]
+    if counts["rate_limited"] > 0:
+        parts.append(f"Rate Limited: {counts['rate_limited']}")
+    if counts["music_failed"] > 0:
+        parts.append(f"Music Failed: {counts['music_failed']}")
+    if counts["failed"] > 0:
+        parts.append(f"Failed: {counts['failed']}")
+    console.print(" | ".join(parts))
 
 
 @main.command()
@@ -1860,11 +1907,23 @@ def watch(
     processed: set[str] = set()
     pending: dict[str, float] = {}  # dir_name -> first_seen_time
 
-    # Find already-processed directories
+    # Find already-processed or already-uploaded directories
+    import json
     for item in batch_dir.iterdir():
         if item.is_dir() and item.name.startswith("video_"):
+            # Check for final video
             if (item / "video_processed_final.mp4").exists():
                 processed.add(item.name)
+            # Check for upload marker in metadata
+            metadata_path = item / "metadata.json"
+            if metadata_path.exists():
+                try:
+                    with open(metadata_path) as f:
+                        meta_data = json.load(f)
+                    if "upload" in meta_data and meta_data["upload"].get("video_id"):
+                        processed.add(item.name)
+                except (json.JSONDecodeError, KeyError):
+                    pass
 
     running = True
 
