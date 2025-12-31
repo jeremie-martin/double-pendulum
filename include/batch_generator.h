@@ -107,6 +107,37 @@ struct FilterCriteria {
     }
 };
 
+// =============================================================================
+// Remote Transfer Configuration
+// =============================================================================
+//
+// Configuration for SCP-based remote transfer after each video is generated.
+// Enables distributed workflow where videos are generated on one machine
+// and queued for processing/upload on another (e.g., Raspberry Pi).
+//
+// Example TOML:
+//   [transfer]
+//   enabled = true
+//   host = "pi@raspberrypi.local"
+//   remote_path = "/home/pi/pendulum-watch"
+//   identity_file = "~/.ssh/id_rsa"      # Optional
+//   delete_after_transfer = false        # Optional
+//   timeout_seconds = 300                # Optional
+//
+// =============================================================================
+struct TransferConfig {
+    bool enabled = false;
+    std::string host;              // user@host or just host
+    std::string remote_path;       // Destination directory on remote
+    std::string identity_file;     // Optional SSH key path (~ expanded)
+    bool delete_after_transfer = false;  // Delete local files after successful transfer
+    int timeout_seconds = 300;     // SCP timeout
+
+    bool isValid() const {
+        return enabled && !host.empty() && !remote_path.empty();
+    }
+};
+
 // Batch configuration loaded from TOML
 struct BatchConfig {
     std::string output_directory = "batch_output";
@@ -150,6 +181,9 @@ struct BatchConfig {
     // Names of presets to randomly select from (empty = use base_config)
     std::vector<std::string> color_preset_names;
     std::vector<std::string> post_process_preset_names;
+
+    // Remote transfer settings
+    TransferConfig transfer;
 
     static BatchConfig load(std::string const& path);
 };
@@ -227,6 +261,11 @@ private:
 
     // Create symlink to video in batch root folder
     void createVideoSymlink(std::string const& video_path, std::string const& link_name);
+
+    // Transfer files to remote host via SCP (if configured)
+    // Returns true on success or if transfer is disabled, false on failure
+    // Note: Failures are logged but do not fail the batch
+    bool transferFiles(std::string const& video_dir, std::string const& video_name);
 
     // Print batch completion summary
     void printSummary() const;

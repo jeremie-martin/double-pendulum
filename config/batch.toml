@@ -69,3 +69,14 @@ post_process_presets = [
   "studio_neutral",
   "vibrant"
 ]
+
+# Remote transfer settings (SCP to a queue server)
+# Videos are transferred immediately after generation for remote processing/upload.
+# Enable this to use a Raspberry Pi or similar as a queue server.
+[transfer]
+enabled = false
+host = "pi@raspberrypi.local"           # SSH host (user@host or just host)
+remote_path = "/home/pi/pendulum-watch" # Destination directory on remote
+# identity_file = "~/.ssh/id_rsa"       # Optional: SSH key path (~ is expanded)
+# delete_after_transfer = false         # Optional: Delete local files after successful transfer
+# timeout_seconds = 300                 # Optional: SCP timeout (default 300)

@@ -224,6 +224,28 @@ BatchConfig BatchConfig::load(std::string const& path) {
             }
         }
 
+        // Remote transfer settings
+        if (auto transfer = tbl["transfer"].as_table()) {
+            if (auto enabled = transfer->get("enabled")) {
+                config.transfer.enabled = enabled->value<bool>().value_or(false);
+            }
+            if (auto host = transfer->get("host")) {
+                config.transfer.host = host->value<std::string>().value_or("");
+            }
+            if (auto path = transfer->get("remote_path")) {
+                config.transfer.remote_path = path->value<std::string>().value_or("");
+            }
+            if (auto key = transfer->get("identity_file")) {
+                config.transfer.identity_file = key->value<std::string>().value_or("");
+            }
+            if (auto del = transfer->get("delete_after_transfer")) {
+                config.transfer.delete_after_transfer = del->value<bool>().value_or(false);
+            }
+            if (auto timeout = transfer->get("timeout_seconds")) {
+                config.transfer.timeout_seconds = timeout->value<int>().value_or(300);
+            }
+        }
+
     } catch (toml::parse_error const& err) {
         std::cerr << "Error parsing batch config: " << err.description() << "\n";
     }
@@ -576,6 +598,10 @@ bool BatchGenerator::generateOne(int index) {
         // Create symlink to video in batch root
         createVideoSymlink(results.video_path, video_name + ".mp4");
 
+        // Transfer files to remote host (if configured)
+        // Note: Failures are logged but do not fail the batch
+        transferFiles(config.output.directory, video_name);
+
         return true;
 
     } catch (std::exception const& e) {
@@ -815,6 +841,134 @@ void BatchGenerator::createVideoSymlink(std::string const& video_path,
     if (ec) {
         std::cerr << "Warning: Could not create symlink: " << ec.message() << "\n";
     }
+}
+
+bool BatchGenerator::transferFiles(std::string const& video_dir,
+                                   std::string const& video_name) {
+    if (!config_.transfer.isValid()) {
+        return true; // Not enabled, nothing to do
+    }
+
+    std::cout << "Transferring to " << config_.transfer.host << "... " << std::flush;
+
+    // Expand ~ in identity file path
+    std::string identity_file = config_.transfer.identity_file;
+    if (!identity_file.empty() && identity_file[0] == '~') {
+        char const* home = getenv("HOME");
+        if (home) {
+            identity_file = std::string(home) + identity_file.substr(1);
+        }
+    }
+
+    // Build SSH options string (shared between ssh and scp)
+    std::ostringstream ssh_opts;
+    ssh_opts << "-o BatchMode=yes -o ConnectTimeout="
+             << std::min(config_.transfer.timeout_seconds, 30);
+    if (!identity_file.empty()) {
+        ssh_opts << " -i \"" << identity_file << "\"";
+    }
+
+    // Create remote directory first
+    std::string remote_video_dir = config_.transfer.remote_path + "/" + video_name;
+    {
+        std::ostringstream mkdir_cmd;
+        mkdir_cmd << "ssh " << ssh_opts.str() << " "
+                  << config_.transfer.host << " "
+                  << "\"mkdir -p '" << remote_video_dir << "'\" 2>&1";
+
+        FILE* pipe = popen(mkdir_cmd.str().c_str(), "r");
+        if (!pipe) {
+            std::cerr << "\nError: Failed to create remote directory\n";
+            return false;
+        }
+
+        std::string output;
+        char buffer[256];
+        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            output += buffer;
+        }
+
+        int result = pclose(pipe);
+        if (result != 0) {
+            std::cerr << "\nFailed to create remote directory: "
+                      << (output.empty() ? "unknown error" : output);
+            return false;
+        }
+    }
+
+    // Files to transfer
+    std::vector<std::string> files = {"video_raw.mp4", "metadata.json"};
+    bool all_success = true;
+
+    for (auto const& filename : files) {
+        std::string local_path = video_dir + "/" + filename;
+
+        // Check if file exists
+        if (!std::filesystem::exists(local_path)) {
+            // video_raw.mp4 might be named video.mp4 in some cases
+            if (filename == "video_raw.mp4") {
+                local_path = video_dir + "/video.mp4";
+                if (!std::filesystem::exists(local_path)) {
+                    std::cerr << "\nWarning: No video file found in " << video_dir << "\n";
+                    continue;
+                }
+            } else {
+                std::cerr << "\nWarning: File not found: " << local_path << "\n";
+                continue;
+            }
+        }
+
+        // Build SCP command
+        std::ostringstream scp_cmd;
+        scp_cmd << "scp -q " << ssh_opts.str()
+                << " -o ConnectTimeout=" << config_.transfer.timeout_seconds
+                << " \"" << local_path << "\""
+                << " \"" << config_.transfer.host << ":" << remote_video_dir << "/";
+
+        // Keep the original filename for video.mp4 -> video_raw.mp4 mapping
+        if (filename == "video_raw.mp4" && local_path.find("video.mp4") != std::string::npos) {
+            scp_cmd << "video.mp4";
+        } else {
+            scp_cmd << filename;
+        }
+        scp_cmd << "\" 2>&1";
+
+        FILE* pipe = popen(scp_cmd.str().c_str(), "r");
+        if (!pipe) {
+            std::cerr << "\nError: Failed to execute SCP command\n";
+            all_success = false;
+            continue;
+        }
+
+        std::string output;
+        char buffer[256];
+        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            output += buffer;
+        }
+
+        int result = pclose(pipe);
+        if (result != 0) {
+            std::cerr << "\nSCP failed for " << filename << ": "
+                      << (output.empty() ? "unknown error" : output);
+            all_success = false;
+        }
+    }
+
+    if (all_success) {
+        std::cout << "OK\n";
+
+        // Delete local files if configured and all transfers succeeded
+        if (config_.transfer.delete_after_transfer) {
+            std::error_code ec;
+            std::filesystem::remove_all(video_dir, ec);
+            if (ec) {
+                std::cerr << "Warning: Could not delete " << video_dir
+                          << ": " << ec.message() << "\n";
+            }
+        }
+    }
+
+    return all_success;
 }
 
 void BatchGenerator::printSummary() const {
