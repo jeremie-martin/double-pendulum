@@ -427,8 +427,16 @@ void BatchGenerator::resume() {
 
 bool BatchGenerator::generateOne(int index) {
     auto start_time = std::chrono::steady_clock::now();
+
+    // Generate unique video name with timestamp to avoid conflicts when
+    // transferring to a shared watch directory from multiple batch runs
+    auto now = std::chrono::system_clock::now();
+    auto time_t_now = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_now = *std::localtime(&time_t_now);
+
     std::ostringstream name_stream;
-    name_stream << "video_" << std::setfill('0') << std::setw(4) << index;
+    name_stream << "video_" << std::setfill('0') << std::setw(4) << index
+                << "_" << std::put_time(&tm_now, "%Y%m%d_%H%M%S");
     std::string video_name = name_stream.str();
 
     try {
@@ -896,7 +904,7 @@ bool BatchGenerator::transferFiles(std::string const& video_dir,
         }
     }
 
-    // Files to transfer
+    // Files to transfer (metadata.json MUST be last - it's the "ready" signal for the watcher)
     std::vector<std::string> files = {"video_raw.mp4", "metadata.json"};
     bool all_success = true;
 
