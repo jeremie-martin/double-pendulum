@@ -23,6 +23,11 @@ texts = [
     "Order becomes chaos.",
     "From order to chaos.",
     "Deterministic yet unpredictable.",
+    "0.00001° apart.",
+    "Physics is beautiful.",
+    "Same start, different end.",
+    "Divergence is inevitable.",
+    "Chaos is certain.",
 ]
 
 [hooks.wait]
@@ -50,6 +55,18 @@ texts = [
     "POV: butterfly effect",
     "POV: physics simulation",
     "POV: mathematics",
+    "POV: deterministic chaos",
+]
+
+[hooks.context]
+# Context-setting hooks - what you're watching
+texts = [
+    "This is chaos theory.",
+    "The butterfly effect.",
+    "Physics in motion.",
+    "Pure mathematics.",
+    "Deterministic chaos.",
+    "Nature's unpredictability.",
 ]
 
 [hooks.satisfying]
@@ -72,13 +89,28 @@ texts = [
 ]
 
 [hooks.mystery]
-# Mysterious, intriguing hooks
+# Mysterious openers - work as FIRST caption (standalone)
 texts = [
     "What happens next?",
-    "Then this happens.",
     "Watch what unfolds.",
     "It starts simple.",
     "Looks stable, right?",
+    "Order... for now.",
+    "Just wait.",
+    "Pay attention.",
+    "Something's about to happen.",
+]
+
+[hooks.mystery_followup]
+# Mystery followups - ONLY use as SECOND caption after setup
+# These need prior context to make sense
+texts = [
+    "Then this happens.",
+    "Not for long.",
+    "This can't last.",
+    "But watch closely.",
+    "Here it comes.",
+    "And then...",
 ]
 
 # =============================================================================
@@ -102,18 +134,20 @@ texts = ["1"]
 [engagement.subscribe]
 # Call to action - subscribe/follow
 texts = [
-    "More chaos coming",
-    "Follow for more",
-    "Subscribe for simulations",
+    "More chaos coming.",
+    "Follow for more.",
+    "More simulations soon.",
+    "New video tomorrow.",
 ]
 
 [engagement.tease]
 # Tease next video or bigger runs
 texts = [
-    "Next one is bigger",
+    "Next one is bigger.",
     "Want to see more?",
-    "Just the beginning",
-    "Next one is wilder",
+    "Just the beginning.",
+    "This was just a warmup.",
+    "10 million next?",
 ]
 
 [engagement.question]
@@ -121,5 +155,7 @@ texts = [
 texts = [
     "Caught the moment?",
     "See it happen?",
-    "Watched twice yet?",
+    "Watch it again.",
+    "When did you notice?",
+    "Replay it.",
 ]

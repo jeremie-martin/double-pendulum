@@ -100,12 +100,12 @@ class ASSStyleConfig:
 ASS_PRESETS: dict[CaptionPreset, ASSStyleConfig] = {
     CaptionPreset.CAPCUT_BOLD: ASSStyleConfig(
         fontname="Inter Bold",
-        fontsize=86,  # +10% for better mobile visibility
+        fontsize=95,  # Larger for better mobile visibility
         primary_color="&H00FFFFFF",
         outline_color="&H00000000",
         back_color="&H80000000",
-        outline=5.5,
-        shadow=3.0,
+        outline=6.0,
+        shadow=3.5,
         bold=True,
         alignment=2,
         margin_v=120,
@@ -250,7 +250,7 @@ class ASSGenerator:
         self.subs.styles["Default"] = create_ass_style("Default", config)
 
         # Hook style (for top-positioned text)
-        # Positioned slightly towards center (18% from top instead of 12%)
+        # Positioned at 18% from top
         hook_config = ASSStyleConfig(
             fontname=config.fontname,
             fontsize=int(config.fontsize * 0.85),
@@ -296,7 +296,7 @@ class ASSGenerator:
         self.subs.styles["Countdown"] = create_ass_style("Countdown", countdown_config)
 
         # Main style (bottom position, for build-up text)
-        # Positioned slightly towards center (20% from bottom instead of 15%)
+        # Positioned towards center (25% from bottom)
         main_config = ASSStyleConfig(
             fontname=config.fontname,
             fontsize=config.fontsize,
@@ -307,7 +307,7 @@ class ASSGenerator:
             shadow=config.shadow,
             bold=config.bold,
             alignment=2,  # Bottom center
-            margin_v=int(self.video_height * 0.20),
+            margin_v=int(self.video_height * 0.25),  # Closer to center
         )
         self.subs.styles["Main"] = create_ass_style("Main", main_config)
 

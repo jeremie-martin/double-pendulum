@@ -12,48 +12,79 @@ if TYPE_CHECKING:
 # Philosophy: Not always "double pendulum", mix themes (chaos, butterfly effect, satisfying)
 # Keep titles clear, searchable, and scroll-stopping
 TITLE_TEMPLATES = [
-    # Chaos-focused (no "pendulum") - strong performers
+    # Chaos-focused - strong performers
     "Chaos Theory Visualized",
     "From Order to Chaos",
     "The Moment Chaos Begins",
     "When Order Breaks Down",
     "Pure Chaos",
     "Controlled Chaos",
+    "Chaos Unfolds",
+    "Beautiful Chaos",
+    "Chaos in Motion",
     # Butterfly effect themed - highly searchable
     "The Butterfly Effect",
     "The Butterfly Effect Visualized",
     "Tiny Change, Massive Chaos",
     "Small Differences, Big Chaos",
     "One Tiny Difference",
+    "0.00001° Makes All The Difference",
     # Satisfying/hypnotic vibe
     "Oddly Satisfying Chaos",
     "Hypnotic",
+    "Mesmerizing Physics",
+    "Strangely Satisfying",
+    "So Satisfying",
     # Count-focused (impressive numbers)
     "{count_formatted} Simulations, One Tiny Difference",
     "{count_formatted} Identical Starts, Total Chaos",
     "{count_formatted} Start Together, Then This Happens",
     "{count_formatted} Pendulums, One Outcome",
+    "{count_formatted} Paths Diverge",
     # Curiosity-driven (scroll stoppers)
     "Watch Until The End",
     "You Won't See It Coming",
     "This Is Why Prediction Is Impossible",
     "They All Start The Same",
+    "Same Start, Different End",
+    "Wait For It",
+    "Keep Watching",
+    # Physics/science
+    "Physics Is Beautiful",
+    "Nature Is Chaotic",
+    "Why We Can't Predict The Future",
+    "Deterministic Chaos",
     # Clean/minimal
     "Chaos",
     "Order to Chaos",
+    "Divergence",
+]
+
+# Hashtags to randomly append to titles (0-3 selected)
+TITLE_HASHTAGS = [
+    "#chaos",
+    "#physics",
+    "#satisfying",
+    "#simulation",
+    "#science",
+    "#hypnotic",
+    "#mesmerizing",
+    "#butterflyeffect",
+    "#math",
+    "#pendulum",
 ]
 
 # Description Templates - mix of minimal and detailed
 # Note: {boom_time} is VIDEO time (when it appears on screen), not simulation time
 # Philosophy: Not always mention boom time, keep it clean, avoid being too dry/educational
 DESCRIPTION_TEMPLATES = [
-    # Ultra minimal - no boom time
+    # Ultra minimal
     """\
 {count_formatted} identical starts. Complete chaos.
 
 #chaos #physics #satisfying #butterflyeffect""",
 
-    # Butterfly effect focus - no boom time
+    # Butterfly effect focus
     """\
 The butterfly effect: tiny differences create massive outcomes.
 
@@ -69,7 +100,7 @@ Watch for {boom_time}.
 
 #chaos #physics #satisfying #simulation""",
 
-    # Mysterious/intriguing - no boom time
+    # Mysterious/intriguing
     """\
 They all start the same way.
 
@@ -77,7 +108,7 @@ They don't end the same way.
 
 #chaos #physics #satisfying #butterflyeffect""",
 
-    # Short punchy - with boom time
+    # Short punchy with boom time
     """\
 Order becomes chaos at {boom_time}.
 
@@ -85,25 +116,69 @@ Order becomes chaos at {boom_time}.
 
 #chaos #physics #satisfying #simulation""",
 
-    # Clean statement - no boom time
+    # Clean statement
     """\
 {count_formatted} pendulums. Tiny differences. Total chaos.
 
 #chaos #physics #satisfying #butterflyeffect""",
 
-    # Curiosity - no boom time
+    # Curiosity
     """\
 Same start. Different end.
 
 #chaos #physics #satisfying #simulation""",
 
-    # Count focused - no boom time
+    # Question style
     """\
 What happens when {count_formatted} start almost identical?
 
 Chaos.
 
 #chaos #physics #satisfying #butterflyeffect""",
+
+    # Pure minimal - just hashtags
+    """\
+#chaos #physics #simulation #satisfying #pendulum""",
+
+    # Science-focused
+    """\
+Deterministic chaos: the outcome is predetermined, but impossible to predict.
+
+{count_formatted} pendulums demonstrate why.
+
+#chaostheory #physics #science #simulation""",
+
+    # One-liner poetic
+    """\
+Where physics meets art.
+
+#physics #simulation #chaos #satisfying""",
+
+    # Story hint
+    """\
+{count_formatted} begin together. None finish together.
+
+#chaos #butterflyeffect #physics #simulation""",
+
+    # Math angle
+    """\
+0.00001° difference. Completely different outcomes.
+
+#chaos #math #physics #simulation""",
+
+    # Hypnotic vibe
+    """\
+Just watch.
+
+#satisfying #hypnotic #chaos #physics""",
+
+    # Double pendulum explicit
+    """\
+Double pendulum chaos.
+
+{count_formatted} simulations.
+
+#pendulum #chaos #physics #simulation""",
 ]
 
 # Base tags (always included)
@@ -157,12 +232,20 @@ def get_count_tags(count: int) -> list[str]:
 
 
 def generate_title(metadata: VideoMetadata) -> str:
-    """Generate a random title from templates."""
+    """Generate a random title from templates with 0-3 hashtags."""
     template = random.choice(TITLE_TEMPLATES)
-    return template.format(
+    title = template.format(
         count_formatted=format_count(metadata.config.pendulum_count),
         pendulum_count=metadata.config.pendulum_count,
     )
+
+    # Add 0-3 random hashtags
+    num_hashtags = random.randint(0, 3)
+    if num_hashtags > 0:
+        hashtags = random.sample(TITLE_HASHTAGS, num_hashtags)
+        title = f"{title} {' '.join(hashtags)}"
+
+    return title
 
 
 def generate_description(metadata: VideoMetadata) -> str:
