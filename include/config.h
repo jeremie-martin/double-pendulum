@@ -316,6 +316,10 @@ struct Config {
     OutputParams output;
     AnalysisParams analysis;
 
+    // Preset library file path (for loading themes/color/post_process presets)
+    // Default: "config/presets.toml" - used by CLI --set preset.theme=<name>
+    std::string presets_file = "config/presets.toml";
+
     // Preset names (set by batch generator when random preset selected)
     // These are for metadata output only - not saved to config.toml
     std::string selected_color_preset_name;

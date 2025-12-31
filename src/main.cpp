@@ -35,14 +35,19 @@ void printUsage(char const* program) {
               << "  --save-data            Save raw simulation data for metric iteration\n"
               << "  --resume               Resume interrupted batch\n\n"
               << "Parameter keys use dot notation: section.parameter\n"
-              << "  Sections: physics, simulation, render, post_process, color, detection, output\n\n"
+              << "  Sections: physics, simulation, render, post_process, color, output, preset\n\n"
+              << "Preset options (from config/presets.toml):\n"
+              << "  preset.theme=<name>       Apply a curated theme (color + post_process)\n"
+              << "  preset.color=<name>       Apply a color preset\n"
+              << "  preset.post_process=<name> Apply a post-process preset\n"
+              << "  preset.file=<path>        Use a different presets file\n\n"
               << "Examples:\n"
               << "  " << program << " config/default.toml\n"
               << "  " << program << " config/default.toml --set simulation.pendulum_count=50000\n"
-              << "  " << program << " config/default.toml --set post_process.exposure=2.0 --analysis\n"
+              << "  " << program << " config/default.toml --set preset.theme=ember_cinematic\n"
+              << "  " << program << " config/default.toml --set preset.color=cyberpunk_full\n"
               << "  " << program << " config/batch.toml\n"
-              << "  " << program << " config/batch.toml --resume\n"
-              << "  " << program << " config/batch.toml --set render.width=1920\n";
+              << "  " << program << " config/batch.toml --resume\n";
 }
 
 // Parsed command-line options

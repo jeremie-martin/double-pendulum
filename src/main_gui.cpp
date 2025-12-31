@@ -105,6 +105,9 @@ struct ExportState {
 
 // Preset UI state
 struct PresetUIState {
+    // Theme preset (bundles color + post_process)
+    std::string loaded_theme;  // Name of currently loaded theme (empty if none)
+
     // Color preset
     std::string loaded_color_preset; // Name of currently loaded preset (empty if none)
     ColorParams loaded_color_values; // Values when preset was loaded (for detecting changes)
@@ -1164,6 +1167,91 @@ void drawSimulationSection(AppState& state) {
     }
 }
 
+void drawThemeSection(AppState& state) {
+    if (ImGui::CollapsingHeader("Theme Presets")) {
+        auto theme_names = state.presets.getThemeNames();
+
+        if (theme_names.empty()) {
+            ImGui::TextDisabled("No themes available");
+            tooltip("Themes are defined in config/presets.toml as [theme.*] sections");
+            return;
+        }
+
+        // Build display label
+        std::string theme_label;
+        if (state.preset_ui.loaded_theme.empty()) {
+            theme_label = "(None - using individual presets)";
+        } else {
+            theme_label = state.preset_ui.loaded_theme;
+        }
+
+        ImGui::Text("Themes: %zu available", theme_names.size());
+
+        if (ImGui::BeginCombo("Theme", theme_label.c_str())) {
+            // Option to clear theme
+            if (ImGui::Selectable("(None)", state.preset_ui.loaded_theme.empty())) {
+                state.preset_ui.loaded_theme.clear();
+            }
+
+            ImGui::Separator();
+
+            // Show all themes
+            for (auto const& name : theme_names) {
+                bool is_selected = (state.preset_ui.loaded_theme == name);
+                if (ImGui::Selectable(name.c_str(), is_selected)) {
+                    if (auto theme = state.presets.getTheme(name)) {
+                        // Apply color preset from theme
+                        if (auto color_preset = state.presets.getColor(theme->color_preset_name)) {
+                            state.config.color = *color_preset;
+                            state.preset_ui.loaded_color_preset = theme->color_preset_name;
+                            state.preset_ui.loaded_color_values = *color_preset;
+                        }
+                        // Apply post-process preset from theme
+                        if (auto pp_preset = state.presets.getPostProcess(theme->post_process_preset_name)) {
+                            state.config.post_process = *pp_preset;
+                            state.preset_ui.loaded_pp_preset = theme->post_process_preset_name;
+                            state.preset_ui.loaded_pp_values = *pp_preset;
+                        }
+                        state.preset_ui.loaded_theme = name;
+
+                        // Regenerate colors for running simulation
+                        if (state.running && !state.colors.empty()) {
+                            ColorSchemeGenerator color_gen(state.config.color);
+                            int n = static_cast<int>(state.colors.size());
+                            for (int i = 0; i < n; ++i) {
+                                state.colors[i] = color_gen.getColorForIndex(i, n);
+                            }
+                            state.needs_redraw = true;
+                        }
+                    }
+                }
+                // Show tooltip with theme components
+                if (ImGui::IsItemHovered()) {
+                    if (auto theme = state.presets.getTheme(name)) {
+                        ImGui::BeginTooltip();
+                        ImGui::Text("Color: %s", theme->color_preset_name.c_str());
+                        ImGui::Text("Post-process: %s", theme->post_process_preset_name.c_str());
+                        ImGui::EndTooltip();
+                    }
+                }
+                if (is_selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+        tooltip("Apply a curated color + post-process combination");
+
+        // Show current theme details
+        if (!state.preset_ui.loaded_theme.empty()) {
+            if (auto theme = state.presets.getTheme(state.preset_ui.loaded_theme)) {
+                ImGui::TextDisabled("Color: %s", theme->color_preset_name.c_str());
+                ImGui::TextDisabled("Post-process: %s", theme->post_process_preset_name.c_str());
+            }
+        }
+    }
+}
+
 void drawColorSection(AppState& state) {
     if (ImGui::CollapsingHeader("Color", ImGuiTreeNodeFlags_DefaultOpen)) {
         bool color_changed = false;
@@ -1185,8 +1273,9 @@ void drawColorSection(AppState& state) {
         if (ImGui::Combo("Scheme", &scheme_idx, schemes, 29)) {
             state.config.color.scheme = static_cast<ColorScheme>(scheme_idx);
             color_changed = true;
-            // Clear loaded preset when scheme changes (it's no longer valid)
+            // Clear loaded preset and theme when scheme changes
             state.preset_ui.loaded_color_preset.clear();
+            state.preset_ui.loaded_theme.clear();
         }
         tooltip("Color mapping style");
 
@@ -1217,6 +1306,7 @@ void drawColorSection(AppState& state) {
                         state.config.color = *preset;
                         state.preset_ui.loaded_color_preset = name;
                         state.preset_ui.loaded_color_values = *preset;
+                        state.preset_ui.loaded_theme.clear(); // Clear theme when selecting individual preset
                         color_changed = true;
                     }
                 }
@@ -1369,6 +1459,7 @@ void drawPostProcessSection(AppState& state) {
                         state.config.post_process = *preset;
                         state.preset_ui.loaded_pp_preset = name;
                         state.preset_ui.loaded_pp_values = *preset;
+                        state.preset_ui.loaded_theme.clear(); // Clear theme when selecting individual preset
                         pp_changed = true;
                     }
                 }
@@ -2093,6 +2184,7 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
     drawPreviewSection(state);
     drawPhysicsSection(state);
     drawSimulationSection(state);
+    drawThemeSection(state);
     drawColorSection(state);
     drawPostProcessSection(state);
 

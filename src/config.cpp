@@ -1,4 +1,5 @@
 #include "config.h"
+#include "preset_library.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -708,6 +709,70 @@ bool Config::applyOverride(std::string const& key, std::string const& value) {
                 boom_metric = value;
             } else {
                 std::cerr << "Unknown boom_detection parameter: " << param << "\n";
+                return false;
+            }
+        }
+        // Preset handling - apply theme/color/post_process from presets file
+        else if (section == "preset") {
+            // Load presets file if it exists
+            if (!std::filesystem::exists(presets_file)) {
+                std::cerr << "Presets file not found: " << presets_file << "\n";
+                return false;
+            }
+            PresetLibrary presets = PresetLibrary::load(presets_file);
+
+            if (param == "theme") {
+                auto theme = presets.getTheme(value);
+                if (!theme) {
+                    std::cerr << "Theme not found: " << value << "\n";
+                    std::cerr << "Available themes: ";
+                    auto names = presets.getThemeNames();
+                    for (size_t i = 0; i < std::min(names.size(), size_t(10)); ++i) {
+                        if (i > 0) std::cerr << ", ";
+                        std::cerr << names[i];
+                    }
+                    if (names.size() > 10) std::cerr << "... (" << names.size() << " total)";
+                    std::cerr << "\n";
+                    return false;
+                }
+                // Apply color from theme
+                if (auto color_preset = presets.getColor(theme->color_preset_name)) {
+                    color = *color_preset;
+                    selected_color_preset_name = theme->color_preset_name;
+                } else {
+                    std::cerr << "Theme references unknown color: " << theme->color_preset_name << "\n";
+                    return false;
+                }
+                // Apply post_process from theme
+                if (auto pp_preset = presets.getPostProcess(theme->post_process_preset_name)) {
+                    post_process = *pp_preset;
+                    selected_post_process_preset_name = theme->post_process_preset_name;
+                } else {
+                    std::cerr << "Theme references unknown post_process: " << theme->post_process_preset_name << "\n";
+                    return false;
+                }
+                selected_theme_name = value;
+            } else if (param == "color") {
+                auto preset = presets.getColor(value);
+                if (!preset) {
+                    std::cerr << "Color preset not found: " << value << "\n";
+                    return false;
+                }
+                color = *preset;
+                selected_color_preset_name = value;
+            } else if (param == "post_process") {
+                auto preset = presets.getPostProcess(value);
+                if (!preset) {
+                    std::cerr << "Post-process preset not found: " << value << "\n";
+                    return false;
+                }
+                post_process = *preset;
+                selected_post_process_preset_name = value;
+            } else if (param == "file") {
+                presets_file = value;
+            } else {
+                std::cerr << "Unknown preset parameter: " << param << "\n";
+                std::cerr << "Valid options: theme, color, post_process, file\n";
                 return false;
             }
         } else {
