@@ -418,7 +418,7 @@ effects = { fade_in = 300, fade_out = 400 }
 # =============================================================================
 # TWO-CAPTION OPENERS
 # These templates have setup + followup at the beginning for more dynamic feel
-# Second caption ends at 7s (boom can't happen before 8s)
+# Second caption ends at 8s (boom happens around 9-12s)
 # =============================================================================
 
 # =============================================================================
@@ -443,7 +443,7 @@ effects = { fade_in = 200, fade_out = 300 }
 pool = "hooks.mystery_followup"
 position = "hook"
 start = 4.0
-end = 7.0
+end = 8.0
 effects = { fade_in = 200, fade_out = 300 }
 
 
@@ -469,7 +469,7 @@ effects = { fade_in = 200, fade_out = 300 }
 pool = "hooks.mystery_followup"
 position = "hook"
 start = 3.5
-end = 7.0
+end = 8.0
 effects = { fade_in = 200, fade_out = 300 }
 
 
@@ -495,7 +495,7 @@ effects = { fade_in = 300, fade_out = 300 }
 pool = "hooks.mystery_followup"
 position = "hook"
 start = 4.0
-end = 7.0
+end = 8.0
 effects = { fade_in = 200, fade_out = 300 }
 
 
@@ -521,11 +521,240 @@ effects = { fade_in = 200, fade_out = 300 }
 pool = "hooks.mystery_followup"
 position = "hook"
 start = 4.0
-end = 7.0
+end = 8.0
 effects = { fade_in = 200, fade_out = 300 }
 
 [[template.science_then_tease.captions]]
 pool = "engagement.tease"
+position = "main"
+start = "end-8"
+end = "end-0.5"
+effects = { fade_in = 300, fade_out = 400 }
+
+
+# =============================================================================
+# TEMPLATE: wait_then
+# Wait for it → dramatic followup
+# =============================================================================
+
+[template.wait_then]
+description = "Wait hook with dramatic followup"
+
+[template.wait_then.motion]
+slow_zoom = { start = 1.0, end = 1.08 }
+
+[[template.wait_then.captions]]
+pool = "hooks.wait"
+position = "main"
+start = 0
+end = 4.0
+effects = { fade_in = 300, fade_out = 300 }
+
+[[template.wait_then.captions]]
+pool = "hooks.mystery_followup"
+position = "hook"
+start = 4.0
+end = 8.0
+effects = { fade_in = 200, fade_out = 300 }
+
+
+# =============================================================================
+# TEMPLATE: satisfying_then
+# Satisfying hook → dramatic followup
+# =============================================================================
+
+[template.satisfying_then]
+description = "Satisfying hook with dramatic followup"
+
+[template.satisfying_then.motion]
+slow_zoom = { start = 1.0, end = 1.08 }
+
+[[template.satisfying_then.captions]]
+pool = "hooks.satisfying"
+position = "hook"
+start = 0
+end = 4.0
+effects = { fade_in = 300, fade_out = 300 }
+
+[[template.satisfying_then.captions]]
+pool = "hooks.mystery_followup"
+position = "hook"
+start = 4.0
+end = 8.0
+effects = { fade_in = 200, fade_out = 300 }
+
+
+# =============================================================================
+# TEMPLATE: challenge_then
+# Challenge hook → dramatic followup
+# =============================================================================
+
+[template.challenge_then]
+description = "Challenge hook with dramatic followup"
+
+[template.challenge_then.motion]
+slow_zoom = { start = 1.0, end = 1.08 }
+
+[[template.challenge_then.captions]]
+pool = "hooks.challenge"
+position = "hook"
+start = 0
+end = 4.0
+effects = { fade_in = 150, fade_out = 300 }
+
+[[template.challenge_then.captions]]
+pool = "hooks.mystery_followup"
+position = "hook"
+start = 4.0
+end = 8.0
+effects = { fade_in = 200, fade_out = 300 }
+
+
+# =============================================================================
+# TEMPLATE: pov_then
+# POV hook → dramatic followup
+# =============================================================================
+
+[template.pov_then]
+description = "POV hook with dramatic followup"
+
+[template.pov_then.motion]
+slow_zoom = { start = 1.0, end = 1.08 }
+
+[[template.pov_then.captions]]
+pool = "hooks.pov"
+position = "hook"
+start = 0
+end = 4.0
+effects = { fade_in = 150, fade_out = 300 }
+
+[[template.pov_then.captions]]
+pool = "hooks.mystery_followup"
+position = "hook"
+start = 4.0
+end = 8.0
+effects = { fade_in = 200, fade_out = 300 }
+
+
+# =============================================================================
+# TEMPLATE: context_then
+# Context hook → dramatic followup
+# =============================================================================
+
+[template.context_then]
+description = "Context hook with dramatic followup"
+
+[template.context_then.motion]
+slow_zoom = { start = 1.0, end = 1.08 }
+
+[[template.context_then.captions]]
+pool = "hooks.context"
+position = "hook"
+start = 0
+end = 4.0
+effects = { fade_in = 150, fade_out = 300 }
+
+[[template.context_then.captions]]
+pool = "hooks.mystery_followup"
+position = "hook"
+start = 4.0
+end = 8.0
+effects = { fade_in = 200, fade_out = 300 }
+
+
+# =============================================================================
+# TEMPLATE: count_then_subscribe
+# Count → followup → subscribe CTA (full arc)
+# =============================================================================
+
+[template.count_then_subscribe]
+description = "Count setup, followup, and subscribe CTA"
+
+[template.count_then_subscribe.motion]
+slow_zoom = { start = 1.0, end = 1.08 }
+
+[[template.count_then_subscribe.captions]]
+pool = "hooks.count"
+position = "hook"
+start = 0
+end = 3.5
+effects = { fade_in = 200, fade_out = 300 }
+
+[[template.count_then_subscribe.captions]]
+pool = "hooks.mystery_followup"
+position = "hook"
+start = 3.5
+end = 8.0
+effects = { fade_in = 200, fade_out = 300 }
+
+[[template.count_then_subscribe.captions]]
+pool = "engagement.subscribe"
+position = "main"
+start = "end-8"
+end = "end-0.5"
+effects = { fade_in = 300, fade_out = 400 }
+
+
+# =============================================================================
+# TEMPLATE: wait_then_tease
+# Wait → followup → tease (full arc)
+# =============================================================================
+
+[template.wait_then_tease]
+description = "Wait hook, followup, and end tease"
+
+[template.wait_then_tease.motion]
+slow_zoom = { start = 1.0, end = 1.08 }
+
+[[template.wait_then_tease.captions]]
+pool = "hooks.wait"
+position = "main"
+start = 0
+end = 4.0
+effects = { fade_in = 300, fade_out = 300 }
+
+[[template.wait_then_tease.captions]]
+pool = "hooks.mystery_followup"
+position = "hook"
+start = 4.0
+end = 8.0
+effects = { fade_in = 200, fade_out = 300 }
+
+[[template.wait_then_tease.captions]]
+pool = "engagement.tease"
+position = "main"
+start = "end-8"
+end = "end-0.5"
+effects = { fade_in = 300, fade_out = 400 }
+
+
+# =============================================================================
+# TEMPLATE: mystery_then_question
+# Mystery → followup → engagement question (full arc)
+# =============================================================================
+
+[template.mystery_then_question]
+description = "Mystery setup, followup, and engagement question"
+
+[template.mystery_then_question.motion]
+slow_zoom = { start = 1.0, end = 1.08 }
+
+[[template.mystery_then_question.captions]]
+pool = "hooks.mystery"
+position = "hook"
+start = 0
+end = 4.0
+effects = { fade_in = 300, fade_out = 300 }
+
+[[template.mystery_then_question.captions]]
+pool = "hooks.mystery_followup"
+position = "hook"
+start = 4.0
+end = 8.0
+effects = { fade_in = 200, fade_out = 300 }
+
+[[template.mystery_then_question.captions]]
+pool = "engagement.question"
 position = "main"
 start = "end-8"
 end = "end-0.5"
