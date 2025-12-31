@@ -2507,7 +2507,14 @@ int main(int argc, char* argv[]) {
 
         // Re-render if needed (e.g., color/post-processing changed while paused)
         if (state.needs_redraw) {
-            renderFrame(state, renderer);
+            // If viewing a historical frame (timeline scrubbing), render from history
+            // Otherwise render the current state
+            if (state.display_frame < state.current_frame &&
+                state.display_frame < static_cast<int>(state.frame_history.size())) {
+                renderFrameFromHistory(state, renderer, state.display_frame);
+            } else {
+                renderFrame(state, renderer);
+            }
             state.needs_redraw = false;
 
             // Update GPU metrics at the current display frame
