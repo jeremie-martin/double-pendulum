@@ -10,6 +10,7 @@
 namespace {
 
 ColorScheme parseColorScheme(std::string const& str) {
+    // Original schemes
     if (str == "spectrum")
         return ColorScheme::Spectrum;
     if (str == "rainbow")
@@ -28,6 +29,51 @@ ColorScheme parseColorScheme(std::string const& str) {
         return ColorScheme::Inferno;
     if (str == "sunset")
         return ColorScheme::Sunset;
+
+    // New gradient-based schemes
+    if (str == "ember")
+        return ColorScheme::Ember;
+    if (str == "deep_ocean")
+        return ColorScheme::DeepOcean;
+    if (str == "neon_violet")
+        return ColorScheme::NeonViolet;
+    if (str == "aurora")
+        return ColorScheme::Aurora;
+    if (str == "pearl")
+        return ColorScheme::Pearl;
+    if (str == "turbo_pop")
+        return ColorScheme::TurboPop;
+    if (str == "nebula")
+        return ColorScheme::Nebula;
+    if (str == "blackbody")
+        return ColorScheme::Blackbody;
+    if (str == "magma")
+        return ColorScheme::Magma;
+    if (str == "cyberpunk")
+        return ColorScheme::Cyberpunk;
+    if (str == "biolume")
+        return ColorScheme::Biolume;
+    if (str == "gold")
+        return ColorScheme::Gold;
+    if (str == "rose_gold")
+        return ColorScheme::RoseGold;
+    if (str == "twilight")
+        return ColorScheme::Twilight;
+    if (str == "forest_fire")
+        return ColorScheme::ForestFire;
+
+    // Curve-based schemes
+    if (str == "abyssal_glow")
+        return ColorScheme::AbyssalGlow;
+    if (str == "molten_core")
+        return ColorScheme::MoltenCore;
+    if (str == "iridescent")
+        return ColorScheme::Iridescent;
+    if (str == "stellar_nursery")
+        return ColorScheme::StellarNursery;
+    if (str == "whiskey_amber")
+        return ColorScheme::WhiskeyAmber;
+
     std::cerr << "Unknown color scheme: " << str << ", using spectrum\n";
     return ColorScheme::Spectrum;
 }
@@ -118,18 +164,23 @@ static void loadConfigFromTable(Config& config, toml::table const& tbl) {
         if (physics->contains("initial_angle2_deg")) {
             config.physics.initial_angle2 = deg2rad(get_or(*physics, "initial_angle2_deg", 0.0));
         }
-        config.physics.initial_velocity1 = get_or(*physics, "initial_velocity1", config.physics.initial_velocity1);
-        config.physics.initial_velocity2 = get_or(*physics, "initial_velocity2", config.physics.initial_velocity2);
+        config.physics.initial_velocity1 =
+            get_or(*physics, "initial_velocity1", config.physics.initial_velocity1);
+        config.physics.initial_velocity2 =
+            get_or(*physics, "initial_velocity2", config.physics.initial_velocity2);
     }
 
     // Simulation
     if (auto sim = tbl["simulation"].as_table()) {
-        config.simulation.pendulum_count = get_or(*sim, "pendulum_count", config.simulation.pendulum_count);
+        config.simulation.pendulum_count =
+            get_or(*sim, "pendulum_count", config.simulation.pendulum_count);
         if (sim->contains("angle_variation_deg")) {
             config.simulation.angle_variation = deg2rad(get_or(*sim, "angle_variation_deg", 0.0));
         }
-        config.simulation.duration_seconds = get_or(*sim, "duration_seconds", config.simulation.duration_seconds);
-        config.simulation.total_frames = get_or(*sim, "total_frames", config.simulation.total_frames);
+        config.simulation.duration_seconds =
+            get_or(*sim, "duration_seconds", config.simulation.duration_seconds);
+        config.simulation.total_frames =
+            get_or(*sim, "total_frames", config.simulation.total_frames);
         auto quality_str = get_string_or(*sim, "physics_quality", "");
         if (!quality_str.empty()) {
             config.simulation.physics_quality = parsePhysicsQuality(quality_str);
@@ -154,7 +205,8 @@ static void loadConfigFromTable(Config& config, toml::table const& tbl) {
         if (!tone_map_str.empty()) {
             config.post_process.tone_map = parseToneMapOperator(tone_map_str);
         }
-        config.post_process.reinhard_white_point = get_or(*pp, "reinhard_white_point", config.post_process.reinhard_white_point);
+        config.post_process.reinhard_white_point =
+            get_or(*pp, "reinhard_white_point", config.post_process.reinhard_white_point);
         config.post_process.exposure = get_or(*pp, "exposure", config.post_process.exposure);
         config.post_process.contrast = get_or(*pp, "contrast", config.post_process.contrast);
         config.post_process.gamma = get_or(*pp, "gamma", config.post_process.gamma);
@@ -196,23 +248,29 @@ static void loadConfigFromTable(Config& config, toml::table const& tbl) {
                     auto& p = std::get<SectorMetricParams>(mc.params);
                     p.min_sectors = get_or(*metric_tbl, "min_sectors", p.min_sectors);
                     p.max_sectors = get_or(*metric_tbl, "max_sectors", p.max_sectors);
-                    p.target_per_sector = get_or(*metric_tbl, "target_per_sector", p.target_per_sector);
+                    p.target_per_sector =
+                        get_or(*metric_tbl, "target_per_sector", p.target_per_sector);
                     break;
                 }
                 case MetricType::CVSector: {
                     auto& p = std::get<CVSectorMetricParams>(mc.params);
                     p.min_sectors = get_or(*metric_tbl, "min_sectors", p.min_sectors);
                     p.max_sectors = get_or(*metric_tbl, "max_sectors", p.max_sectors);
-                    p.target_per_sector = get_or(*metric_tbl, "target_per_sector", p.target_per_sector);
-                    p.cv_normalization = get_or(*metric_tbl, "cv_normalization", p.cv_normalization);
+                    p.target_per_sector =
+                        get_or(*metric_tbl, "target_per_sector", p.target_per_sector);
+                    p.cv_normalization =
+                        get_or(*metric_tbl, "cv_normalization", p.cv_normalization);
                     break;
                 }
                 case MetricType::LocalCoherence: {
                     auto& p = std::get<LocalCoherenceMetricParams>(mc.params);
                     p.max_radius = get_or(*metric_tbl, "max_radius", p.max_radius);
-                    p.min_spread_threshold = get_or(*metric_tbl, "min_spread_threshold", p.min_spread_threshold);
-                    p.log_inverse_baseline = get_or(*metric_tbl, "log_inverse_baseline", p.log_inverse_baseline);
-                    p.log_inverse_divisor = get_or(*metric_tbl, "log_inverse_divisor", p.log_inverse_divisor);
+                    p.min_spread_threshold =
+                        get_or(*metric_tbl, "min_spread_threshold", p.min_spread_threshold);
+                    p.log_inverse_baseline =
+                        get_or(*metric_tbl, "log_inverse_baseline", p.log_inverse_baseline);
+                    p.log_inverse_divisor =
+                        get_or(*metric_tbl, "log_inverse_divisor", p.log_inverse_divisor);
                     break;
                 }
                 case MetricType::None:
@@ -248,11 +306,15 @@ static void loadConfigFromTable(Config& config, toml::table const& tbl) {
 
                 // Frame detection parameters
                 tc.offset_seconds = get_or(*target_tbl, "offset_seconds", tc.offset_seconds);
-                tc.peak_percent_threshold = get_or(*target_tbl, "peak_percent_threshold", tc.peak_percent_threshold);
-                tc.min_peak_prominence = get_or(*target_tbl, "min_peak_prominence", tc.min_peak_prominence);
+                tc.peak_percent_threshold =
+                    get_or(*target_tbl, "peak_percent_threshold", tc.peak_percent_threshold);
+                tc.min_peak_prominence =
+                    get_or(*target_tbl, "min_peak_prominence", tc.min_peak_prominence);
                 tc.smoothing_window = get_or(*target_tbl, "smoothing_window", tc.smoothing_window);
-                tc.crossing_threshold = get_or(*target_tbl, "crossing_threshold", tc.crossing_threshold);
-                tc.crossing_confirmation = get_or(*target_tbl, "crossing_confirmation", tc.crossing_confirmation);
+                tc.crossing_threshold =
+                    get_or(*target_tbl, "crossing_threshold", tc.crossing_threshold);
+                tc.crossing_confirmation =
+                    get_or(*target_tbl, "crossing_confirmation", tc.crossing_confirmation);
 
                 // Score weights (for composite scoring)
                 if (auto weights_arr = target_tbl->get("weights")) {
@@ -274,9 +336,9 @@ static void loadConfigFromTable(Config& config, toml::table const& tbl) {
                 auto it = std::find_if(config.targets.begin(), config.targets.end(),
                                        [&](auto const& t) { return t.name == tc.name; });
                 if (it != config.targets.end()) {
-                    *it = tc;  // Override existing target
+                    *it = tc; // Override existing target
                 } else {
-                    config.targets.push_back(tc);  // Add new target
+                    config.targets.push_back(tc); // Add new target
                 }
             }
         }
@@ -303,7 +365,8 @@ static void loadConfigFromTable(Config& config, toml::table const& tbl) {
         config.output.video_crf = get_or(*out, "video_crf", config.output.video_crf);
         config.output.video_fps = get_or(*out, "video_fps", config.output.video_fps);
         if (out->contains("save_simulation_data")) {
-            config.output.save_simulation_data = get_or(*out, "save_simulation_data", config.output.save_simulation_data);
+            config.output.save_simulation_data =
+                get_or(*out, "save_simulation_data", config.output.save_simulation_data);
         }
     }
 
@@ -324,7 +387,8 @@ Config Config::load(std::string const& path) {
     try {
         auto tbl = toml::parse_file(path);
         std::string base_path = std::filesystem::path(path).parent_path().string();
-        if (base_path.empty()) base_path = ".";
+        if (base_path.empty())
+            base_path = ".";
 
         // Process includes first (they provide base values that can be overridden)
         if (auto includes = tbl["include"].as_array()) {
@@ -341,7 +405,8 @@ Config Config::load(std::string const& path) {
                             auto inc_tbl = toml::parse_file(full_path.string());
                             loadConfigFromTable(config, inc_tbl);
                         } catch (toml::parse_error const& err) {
-                            std::cerr << "Error parsing included config " << full_path << ": " << err.description() << "\n";
+                            std::cerr << "Error parsing included config " << full_path << ": "
+                                      << err.description() << "\n";
                         }
                     } else {
                         std::cerr << "Warning: Included config not found: " << full_path << "\n";
@@ -411,8 +476,8 @@ Config Config::load(std::string const& path) {
     }
 
     // Color range validation
-    if (config.color.start < 0 || config.color.start > 1 ||
-        config.color.end < 0 || config.color.end > 1) {
+    if (config.color.start < 0 || config.color.start > 1 || config.color.end < 0 ||
+        config.color.end > 1) {
         std::cerr << "Warning: color range values must be in [0,1], using defaults\n";
         config.color.start = defaults.color.start;
         config.color.end = defaults.color.end;
@@ -554,10 +619,12 @@ bool Config::applyOverride(std::string const& key, std::string const& value) {
                 return false;
             }
         }
-        // Per-metric parameters (format: metrics.metric_name.param or metrics.metric_name.boom.param)
+        // Per-metric parameters (format: metrics.metric_name.param or
+        // metrics.metric_name.boom.param)
         else if (section == "metrics") {
-            // Parse: metrics.angular_causticness.min_sectors -> metric_name=angular_causticness, param=min_sectors
-            // Or: metrics.angular_causticness.boom.method -> metric_name=angular_causticness, boom_param=method
+            // Parse: metrics.angular_causticness.min_sectors -> metric_name=angular_causticness,
+            // param=min_sectors Or: metrics.angular_causticness.boom.method ->
+            // metric_name=angular_causticness, boom_param=method
             auto second_dot = param.find('.');
             if (second_dot == std::string::npos) {
                 std::cerr << "Invalid metrics key format. Use metrics.metric_name.param\n";
@@ -577,25 +644,50 @@ bool Config::applyOverride(std::string const& key, std::string const& value) {
                 switch (type) {
                 case MetricType::Sector: {
                     auto& p = std::get<SectorMetricParams>(mc.params);
-                    if (rest == "min_sectors") { p.min_sectors = std::stoi(value); handled = true; }
-                    else if (rest == "max_sectors") { p.max_sectors = std::stoi(value); handled = true; }
-                    else if (rest == "target_per_sector") { p.target_per_sector = std::stoi(value); handled = true; }
+                    if (rest == "min_sectors") {
+                        p.min_sectors = std::stoi(value);
+                        handled = true;
+                    } else if (rest == "max_sectors") {
+                        p.max_sectors = std::stoi(value);
+                        handled = true;
+                    } else if (rest == "target_per_sector") {
+                        p.target_per_sector = std::stoi(value);
+                        handled = true;
+                    }
                     break;
                 }
                 case MetricType::CVSector: {
                     auto& p = std::get<CVSectorMetricParams>(mc.params);
-                    if (rest == "min_sectors") { p.min_sectors = std::stoi(value); handled = true; }
-                    else if (rest == "max_sectors") { p.max_sectors = std::stoi(value); handled = true; }
-                    else if (rest == "target_per_sector") { p.target_per_sector = std::stoi(value); handled = true; }
-                    else if (rest == "cv_normalization") { p.cv_normalization = std::stod(value); handled = true; }
+                    if (rest == "min_sectors") {
+                        p.min_sectors = std::stoi(value);
+                        handled = true;
+                    } else if (rest == "max_sectors") {
+                        p.max_sectors = std::stoi(value);
+                        handled = true;
+                    } else if (rest == "target_per_sector") {
+                        p.target_per_sector = std::stoi(value);
+                        handled = true;
+                    } else if (rest == "cv_normalization") {
+                        p.cv_normalization = std::stod(value);
+                        handled = true;
+                    }
                     break;
                 }
                 case MetricType::LocalCoherence: {
                     auto& p = std::get<LocalCoherenceMetricParams>(mc.params);
-                    if (rest == "max_radius") { p.max_radius = std::stod(value); handled = true; }
-                    else if (rest == "min_spread_threshold") { p.min_spread_threshold = std::stod(value); handled = true; }
-                    else if (rest == "log_inverse_baseline") { p.log_inverse_baseline = std::stod(value); handled = true; }
-                    else if (rest == "log_inverse_divisor") { p.log_inverse_divisor = std::stod(value); handled = true; }
+                    if (rest == "max_radius") {
+                        p.max_radius = std::stod(value);
+                        handled = true;
+                    } else if (rest == "min_spread_threshold") {
+                        p.min_spread_threshold = std::stod(value);
+                        handled = true;
+                    } else if (rest == "log_inverse_baseline") {
+                        p.log_inverse_baseline = std::stod(value);
+                        handled = true;
+                    } else if (rest == "log_inverse_divisor") {
+                        p.log_inverse_divisor = std::stod(value);
+                        handled = true;
+                    }
                     break;
                 }
                 case MetricType::None:
@@ -604,7 +696,8 @@ bool Config::applyOverride(std::string const& key, std::string const& value) {
                 }
 
                 if (!handled) {
-                    std::cerr << "Unknown parameter '" << rest << "' for metric " << metric_name << "\n";
+                    std::cerr << "Unknown parameter '" << rest << "' for metric " << metric_name
+                              << "\n";
                     return false;
                 }
             }
@@ -630,55 +723,121 @@ bool Config::applyOverride(std::string const& key, std::string const& value) {
 }
 
 namespace {
+
+// Also update colorSchemeToString in config.cpp save():
+
 std::string colorSchemeToString(ColorScheme scheme) {
     switch (scheme) {
-    case ColorScheme::Spectrum: return "spectrum";
-    case ColorScheme::Rainbow: return "rainbow";
-    case ColorScheme::Heat: return "heat";
-    case ColorScheme::Cool: return "cool";
-    case ColorScheme::Monochrome: return "monochrome";
-    case ColorScheme::Plasma: return "plasma";
-    case ColorScheme::Viridis: return "viridis";
-    case ColorScheme::Inferno: return "inferno";
-    case ColorScheme::Sunset: return "sunset";
+    case ColorScheme::Spectrum:
+        return "spectrum";
+    case ColorScheme::Rainbow:
+        return "rainbow";
+    case ColorScheme::Heat:
+        return "heat";
+    case ColorScheme::Cool:
+        return "cool";
+    case ColorScheme::Monochrome:
+        return "monochrome";
+    case ColorScheme::Plasma:
+        return "plasma";
+    case ColorScheme::Viridis:
+        return "viridis";
+    case ColorScheme::Inferno:
+        return "inferno";
+    case ColorScheme::Sunset:
+        return "sunset";
+    case ColorScheme::Ember:
+        return "ember";
+    case ColorScheme::DeepOcean:
+        return "deep_ocean";
+    case ColorScheme::NeonViolet:
+        return "neon_violet";
+    case ColorScheme::Aurora:
+        return "aurora";
+    case ColorScheme::Pearl:
+        return "pearl";
+    case ColorScheme::TurboPop:
+        return "turbo_pop";
+    case ColorScheme::Nebula:
+        return "nebula";
+    case ColorScheme::Blackbody:
+        return "blackbody";
+    case ColorScheme::Magma:
+        return "magma";
+    case ColorScheme::Cyberpunk:
+        return "cyberpunk";
+    case ColorScheme::Biolume:
+        return "biolume";
+    case ColorScheme::Gold:
+        return "gold";
+    case ColorScheme::RoseGold:
+        return "rose_gold";
+    case ColorScheme::Twilight:
+        return "twilight";
+    case ColorScheme::ForestFire:
+        return "forest_fire";
+    case ColorScheme::AbyssalGlow:
+        return "abyssal_glow";
+    case ColorScheme::MoltenCore:
+        return "molten_core";
+    case ColorScheme::Iridescent:
+        return "iridescent";
+    case ColorScheme::StellarNursery:
+        return "stellar_nursery";
+    case ColorScheme::WhiskeyAmber:
+        return "whiskey_amber";
     }
     return "spectrum";
 }
 
 std::string outputFormatToString(OutputFormat format) {
     switch (format) {
-    case OutputFormat::PNG: return "png";
-    case OutputFormat::Video: return "video";
+    case OutputFormat::PNG:
+        return "png";
+    case OutputFormat::Video:
+        return "video";
     }
     return "png";
 }
 
 std::string toneMapToString(ToneMapOperator op) {
     switch (op) {
-    case ToneMapOperator::None: return "none";
-    case ToneMapOperator::Reinhard: return "reinhard";
-    case ToneMapOperator::ReinhardExtended: return "reinhard_extended";
-    case ToneMapOperator::ACES: return "aces";
-    case ToneMapOperator::Logarithmic: return "logarithmic";
+    case ToneMapOperator::None:
+        return "none";
+    case ToneMapOperator::Reinhard:
+        return "reinhard";
+    case ToneMapOperator::ReinhardExtended:
+        return "reinhard_extended";
+    case ToneMapOperator::ACES:
+        return "aces";
+    case ToneMapOperator::Logarithmic:
+        return "logarithmic";
     }
     return "none";
 }
 
 std::string normalizationToString(NormalizationMode mode) {
     switch (mode) {
-    case NormalizationMode::PerFrame: return "per_frame";
-    case NormalizationMode::ByCount: return "by_count";
+    case NormalizationMode::PerFrame:
+        return "per_frame";
+    case NormalizationMode::ByCount:
+        return "by_count";
     }
     return "per_frame";
 }
 
 std::string physicsQualityToString(PhysicsQuality quality) {
     switch (quality) {
-    case PhysicsQuality::Low: return "low";
-    case PhysicsQuality::Medium: return "medium";
-    case PhysicsQuality::High: return "high";
-    case PhysicsQuality::Ultra: return "ultra";
-    case PhysicsQuality::Custom: return "custom";
+    case PhysicsQuality::Low:
+        return "low";
+    case PhysicsQuality::Medium:
+        return "medium";
+    case PhysicsQuality::High:
+        return "high";
+    case PhysicsQuality::Ultra:
+        return "ultra";
+    case PhysicsQuality::Custom:
+        return "custom";
     }
     return "high";
 }
@@ -819,8 +978,7 @@ void Config::save(std::string const& path) const {
     file << "video_codec = \"" << output.video_codec << "\"\n";
     file << "video_crf = " << output.video_crf << "\n";
     file << "video_fps = " << output.video_fps << "\n";
-    file << "save_simulation_data = " << (output.save_simulation_data ? "true" : "false")
-         << "\n";
+    file << "save_simulation_data = " << (output.save_simulation_data ? "true" : "false") << "\n";
     file << "\n";
 
     // Analysis section

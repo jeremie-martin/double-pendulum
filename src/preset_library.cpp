@@ -7,63 +7,181 @@
 namespace {
 
 ColorScheme parseColorScheme(std::string const& str) {
-    if (str == "spectrum") return ColorScheme::Spectrum;
-    if (str == "rainbow") return ColorScheme::Rainbow;
-    if (str == "heat") return ColorScheme::Heat;
-    if (str == "cool") return ColorScheme::Cool;
-    if (str == "monochrome") return ColorScheme::Monochrome;
-    if (str == "plasma") return ColorScheme::Plasma;
-    if (str == "viridis") return ColorScheme::Viridis;
-    if (str == "inferno") return ColorScheme::Inferno;
-    if (str == "sunset") return ColorScheme::Sunset;
+    // Original
+    if (str == "spectrum")
+        return ColorScheme::Spectrum;
+    if (str == "rainbow")
+        return ColorScheme::Rainbow;
+    if (str == "heat")
+        return ColorScheme::Heat;
+    if (str == "cool")
+        return ColorScheme::Cool;
+    if (str == "monochrome")
+        return ColorScheme::Monochrome;
+    if (str == "plasma")
+        return ColorScheme::Plasma;
+    if (str == "viridis")
+        return ColorScheme::Viridis;
+    if (str == "inferno")
+        return ColorScheme::Inferno;
+    if (str == "sunset")
+        return ColorScheme::Sunset;
+
+    // New gradient-based
+    if (str == "ember")
+        return ColorScheme::Ember;
+    if (str == "deep_ocean")
+        return ColorScheme::DeepOcean;
+    if (str == "neon_violet")
+        return ColorScheme::NeonViolet;
+    if (str == "aurora")
+        return ColorScheme::Aurora;
+    if (str == "pearl")
+        return ColorScheme::Pearl;
+    if (str == "turbo_pop")
+        return ColorScheme::TurboPop;
+    if (str == "nebula")
+        return ColorScheme::Nebula;
+    if (str == "blackbody")
+        return ColorScheme::Blackbody;
+    if (str == "magma")
+        return ColorScheme::Magma;
+    if (str == "cyberpunk")
+        return ColorScheme::Cyberpunk;
+    if (str == "biolume")
+        return ColorScheme::Biolume;
+    if (str == "gold")
+        return ColorScheme::Gold;
+    if (str == "rose_gold")
+        return ColorScheme::RoseGold;
+    if (str == "twilight")
+        return ColorScheme::Twilight;
+    if (str == "forest_fire")
+        return ColorScheme::ForestFire;
+
+    // Curve-based
+    if (str == "abyssal_glow")
+        return ColorScheme::AbyssalGlow;
+    if (str == "molten_core")
+        return ColorScheme::MoltenCore;
+    if (str == "iridescent")
+        return ColorScheme::Iridescent;
+    if (str == "stellar_nursery")
+        return ColorScheme::StellarNursery;
+    if (str == "whiskey_amber")
+        return ColorScheme::WhiskeyAmber;
+
     return ColorScheme::Spectrum;
 }
 
 std::string colorSchemeToString(ColorScheme scheme) {
     switch (scheme) {
-    case ColorScheme::Spectrum: return "spectrum";
-    case ColorScheme::Rainbow: return "rainbow";
-    case ColorScheme::Heat: return "heat";
-    case ColorScheme::Cool: return "cool";
-    case ColorScheme::Monochrome: return "monochrome";
-    case ColorScheme::Plasma: return "plasma";
-    case ColorScheme::Viridis: return "viridis";
-    case ColorScheme::Inferno: return "inferno";
-    case ColorScheme::Sunset: return "sunset";
+    case ColorScheme::Spectrum:
+        return "spectrum";
+    case ColorScheme::Rainbow:
+        return "rainbow";
+    case ColorScheme::Heat:
+        return "heat";
+    case ColorScheme::Cool:
+        return "cool";
+    case ColorScheme::Monochrome:
+        return "monochrome";
+    case ColorScheme::Plasma:
+        return "plasma";
+    case ColorScheme::Viridis:
+        return "viridis";
+    case ColorScheme::Inferno:
+        return "inferno";
+    case ColorScheme::Sunset:
+        return "sunset";
+    case ColorScheme::Ember:
+        return "ember";
+    case ColorScheme::DeepOcean:
+        return "deep_ocean";
+    case ColorScheme::NeonViolet:
+        return "neon_violet";
+    case ColorScheme::Aurora:
+        return "aurora";
+    case ColorScheme::Pearl:
+        return "pearl";
+    case ColorScheme::TurboPop:
+        return "turbo_pop";
+    case ColorScheme::Nebula:
+        return "nebula";
+    case ColorScheme::Blackbody:
+        return "blackbody";
+    case ColorScheme::Magma:
+        return "magma";
+    case ColorScheme::Cyberpunk:
+        return "cyberpunk";
+    case ColorScheme::Biolume:
+        return "biolume";
+    case ColorScheme::Gold:
+        return "gold";
+    case ColorScheme::RoseGold:
+        return "rose_gold";
+    case ColorScheme::Twilight:
+        return "twilight";
+    case ColorScheme::ForestFire:
+        return "forest_fire";
+    case ColorScheme::AbyssalGlow:
+        return "abyssal_glow";
+    case ColorScheme::MoltenCore:
+        return "molten_core";
+    case ColorScheme::Iridescent:
+        return "iridescent";
+    case ColorScheme::StellarNursery:
+        return "stellar_nursery";
+    case ColorScheme::WhiskeyAmber:
+        return "whiskey_amber";
     }
     return "spectrum";
 }
 
 ToneMapOperator parseToneMapOperator(std::string const& str) {
-    if (str == "none") return ToneMapOperator::None;
-    if (str == "reinhard") return ToneMapOperator::Reinhard;
-    if (str == "reinhard_extended") return ToneMapOperator::ReinhardExtended;
-    if (str == "aces") return ToneMapOperator::ACES;
-    if (str == "logarithmic") return ToneMapOperator::Logarithmic;
+    if (str == "none")
+        return ToneMapOperator::None;
+    if (str == "reinhard")
+        return ToneMapOperator::Reinhard;
+    if (str == "reinhard_extended")
+        return ToneMapOperator::ReinhardExtended;
+    if (str == "aces")
+        return ToneMapOperator::ACES;
+    if (str == "logarithmic")
+        return ToneMapOperator::Logarithmic;
     return ToneMapOperator::None;
 }
 
 std::string toneMapToString(ToneMapOperator op) {
     switch (op) {
-    case ToneMapOperator::None: return "none";
-    case ToneMapOperator::Reinhard: return "reinhard";
-    case ToneMapOperator::ReinhardExtended: return "reinhard_extended";
-    case ToneMapOperator::ACES: return "aces";
-    case ToneMapOperator::Logarithmic: return "logarithmic";
+    case ToneMapOperator::None:
+        return "none";
+    case ToneMapOperator::Reinhard:
+        return "reinhard";
+    case ToneMapOperator::ReinhardExtended:
+        return "reinhard_extended";
+    case ToneMapOperator::ACES:
+        return "aces";
+    case ToneMapOperator::Logarithmic:
+        return "logarithmic";
     }
     return "none";
 }
 
 NormalizationMode parseNormalizationMode(std::string const& str) {
-    if (str == "per_frame") return NormalizationMode::PerFrame;
-    if (str == "by_count") return NormalizationMode::ByCount;
+    if (str == "per_frame")
+        return NormalizationMode::PerFrame;
+    if (str == "by_count")
+        return NormalizationMode::ByCount;
     return NormalizationMode::PerFrame;
 }
 
 std::string normalizationToString(NormalizationMode mode) {
     switch (mode) {
-    case NormalizationMode::PerFrame: return "per_frame";
-    case NormalizationMode::ByCount: return "by_count";
+    case NormalizationMode::PerFrame:
+        return "per_frame";
+    case NormalizationMode::ByCount:
+        return "by_count";
     }
     return "per_frame";
 }
@@ -122,8 +240,8 @@ PresetLibrary PresetLibrary::load(std::string const& path) {
                         params.gamma = gam->value<double>().value_or(2.2);
                     }
                     if (auto norm = preset->get("normalization")) {
-                        params.normalization =
-                            parseNormalizationMode(norm->value<std::string>().value_or("per_frame"));
+                        params.normalization = parseNormalizationMode(
+                            norm->value<std::string>().value_or("per_frame"));
                     }
 
                     lib.post_process[std::string(name)] = params;
@@ -155,7 +273,8 @@ bool PresetLibrary::save(std::string const& path) const {
     if (!color.empty()) {
         file << "# =============================================================================\n";
         file << "# Color Presets\n";
-        file << "# =============================================================================\n\n";
+        file << "# "
+                "=============================================================================\n\n";
 
         for (auto const& [name, params] : color) {
             file << "[color." << name << "]\n";
@@ -169,7 +288,8 @@ bool PresetLibrary::save(std::string const& path) const {
     if (!post_process.empty()) {
         file << "# =============================================================================\n";
         file << "# Post-Processing Presets\n";
-        file << "# =============================================================================\n\n";
+        file << "# "
+                "=============================================================================\n\n";
 
         for (auto const& [name, params] : post_process) {
             file << "[post_process." << name << "]\n";

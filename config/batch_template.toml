@@ -12,15 +12,16 @@ initial_angle1_deg = 152
 initial_angle2_deg = 152.0
 
 [simulation]
-pendulum_count = 500000       # Reduced for quick test
+pendulum_count = 1000000       # Reduced for quick test
 angle_variation_deg = 0.1
 duration_seconds = 20.0      # Just 20 second of physics
 total_frames = 1800           # 300 frames output (5s at 60 FPS)
 physics_quality = "high"
 
 [render]
-width = 1080
-height = 1080
+width = 2160
+height = 2160
+thread_count = 16
 
 [post_process]
 exposure = 6.0
@@ -37,7 +38,7 @@ format = "video"
 directory = "output/long_test"
 filename_prefix = "frame"
 video_fps = 60              # Lower FPS for test videos
-video_crf = 0              # Near-lossless for post-processing
+video_crf = 10              # Near-lossless for post-processing
 
 [analysis]
 enabled = true              # Enable metrics tracking for scoring

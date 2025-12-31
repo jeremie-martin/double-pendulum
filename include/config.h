@@ -40,11 +40,16 @@ enum class PhysicsQuality {
 // Get max_dt value for a quality preset
 inline double qualityToMaxDt(PhysicsQuality quality) {
     switch (quality) {
-    case PhysicsQuality::Low: return 0.020;
-    case PhysicsQuality::Medium: return 0.012;
-    case PhysicsQuality::High: return 0.007;
-    case PhysicsQuality::Ultra: return 0.003;
-    case PhysicsQuality::Custom: return 0.007; // Default to high if somehow used
+    case PhysicsQuality::Low:
+        return 0.020;
+    case PhysicsQuality::Medium:
+        return 0.012;
+    case PhysicsQuality::High:
+        return 0.007;
+    case PhysicsQuality::Ultra:
+        return 0.003;
+    case PhysicsQuality::Custom:
+        return 0.007; // Default to high if somehow used
     }
     return 0.007;
 }
@@ -84,8 +89,8 @@ enum class ToneMapOperator { None, Reinhard, ReinhardExtended, ACES, Logarithmic
 // Normalization mode for HDR rendering
 // Controls how accumulated pixel values are normalized before exposure/tonemapping
 enum class NormalizationMode {
-    PerFrame,  // Normalize to per-frame max (default, auto-adjusts brightness)
-    ByCount    // Normalize by pendulum count (consistent across different counts)
+    PerFrame, // Normalize to per-frame max (default, auto-adjusts brightness)
+    ByCount   // Normalize by pendulum count (consistent across different counts)
 };
 
 struct PostProcessParams {
@@ -107,7 +112,42 @@ struct PostProcessParams {
     NormalizationMode normalization = NormalizationMode::PerFrame;
 };
 
-enum class ColorScheme { Spectrum, Rainbow, Heat, Cool, Monochrome, Plasma, Viridis, Inferno, Sunset };
+enum class ColorScheme {
+    // Original schemes
+    Spectrum,
+    Rainbow,
+    Heat,
+    Cool,
+    Monochrome,
+    Plasma,
+    Viridis,
+    Inferno,
+    Sunset,
+
+    // New gradient-based schemes
+    Ember,      // Glowing coals: deep red -> orange -> golden -> soft white
+    DeepOcean,  // Underwater: inky black -> teal -> cyan -> ice
+    NeonViolet, // Moody: dark purple -> magenta -> pink glow
+    Aurora,     // Northern lights: blue -> teal -> green -> warm spark
+    Pearl,      // Elegant: espresso -> cream -> lilac sheen
+    TurboPop,   // High-energy rainbow with dark lows
+    Nebula,     // Deep space: purple -> magenta -> cyan wisps
+    Blackbody,  // Heated object: dark -> red -> orange -> white -> blue tint
+    Magma,      // Matplotlib Magma: black -> purple -> red -> yellow
+    Cyberpunk,  // Neon: hot pink -> purple -> electric blue -> acid green
+    Biolume,    // Deep sea: dark navy -> teal -> electric lime
+    Gold,       // Ethereal: chocolate -> bronze -> gold -> white
+    RoseGold,   // Metallics: deep rose -> rose gold -> champagne
+    Twilight,   // Sunset to night: orange -> pink -> purple -> deep blue
+    ForestFire, // Igniting: dark forest -> amber -> flame -> yellow
+
+    // Curve-based schemes with unique character
+    AbyssalGlow,    // Bioluminescent cyan-green from deep black
+    MoltenCore,     // Volcanic incandescent with controlled peaks
+    Iridescent,     // Thin-film interference shifting hues
+    StellarNursery, // Cosmic emission nebula colors
+    WhiskeyAmber    // Warm organic: mahogany -> amber -> honey -> cream
+};
 
 struct ColorParams {
     ColorScheme scheme = ColorScheme::Spectrum;
@@ -146,11 +186,8 @@ struct LocalCoherenceMetricParams {
 };
 
 // Variant type for unified per-metric parameter storage
-using MetricParamsVariant = std::variant<
-    SectorMetricParams,
-    CVSectorMetricParams,
-    LocalCoherenceMetricParams
->;
+using MetricParamsVariant =
+    std::variant<SectorMetricParams, CVSectorMetricParams, LocalCoherenceMetricParams>;
 
 // Configuration for a single metric (name + computation params)
 struct MetricConfig {
@@ -184,7 +221,7 @@ inline MetricType getMetricType(std::string const& name) {
 inline MetricConfig createDefaultMetricConfig(std::string const& name) {
     MetricConfig config;
     config.name = name;
-    config.params = SectorMetricParams{};  // Default
+    config.params = SectorMetricParams{}; // Default
 
     switch (getMetricType(name)) {
     case MetricType::Sector:
@@ -212,10 +249,10 @@ inline MetricConfig createDefaultMetricConfig(std::string const& name) {
 // Configuration for a single prediction target
 // Supports both frame predictions (boom, chaos) and score predictions (boom_quality)
 struct TargetConfig {
-    std::string name;              // e.g., "boom", "chaos", "boom_quality"
-    std::string type = "frame";    // "frame" or "score"
-    std::string metric;            // Metric to use for detection
-    std::string method;            // Detection/scoring method
+    std::string name;           // e.g., "boom", "chaos", "boom_quality"
+    std::string type = "frame"; // "frame" or "score"
+    std::string metric;         // Metric to use for detection
+    std::string method;         // Detection/scoring method
 
     // Frame detection parameters
     double offset_seconds = 0.0;
@@ -234,8 +271,8 @@ enum class OutputFormat { PNG, Video };
 // Output directory mode (internal use only - not configurable via TOML)
 // This is set programmatically by batch mode; single runs always use Timestamped
 enum class OutputMode {
-    Timestamped,  // Create run_YYYYMMDD_HHMMSS subdirectory (default for single runs)
-    Direct        // Write directly to output.directory (used by batch mode)
+    Timestamped, // Create run_YYYYMMDD_HHMMSS subdirectory (default for single runs)
+    Direct       // Write directly to output.directory (used by batch mode)
 };
 
 struct OutputParams {
@@ -244,8 +281,8 @@ struct OutputParams {
     std::string filename_prefix = "frame";
     std::string video_codec = "libx264";
     int video_crf = 23;
-    int video_fps = 60; // Only affects video encoding, not simulation
-    OutputMode mode = OutputMode::Timestamped;  // Internal: set by batch mode, not TOML
+    int video_fps = 60;                        // Only affects video encoding, not simulation
+    OutputMode mode = OutputMode::Timestamped; // Internal: set by batch mode, not TOML
 
     // Save raw simulation data for metric iteration
     // When enabled, saves simulation_data.bin alongside video/frames

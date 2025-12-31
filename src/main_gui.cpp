@@ -14,19 +14,19 @@
 #include "simulation.h"
 #include "simulation_data.h"
 
-#include <cstring>
-#include <filesystem>
 #include <GL/glew.h>
 #include <SDL2/SDL.h>
 #include <atomic>
-#include <map>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
+#include <filesystem>
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
 #include <imgui_impl_sdl2.h>
 #include <implot.h>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <random>
 #include <thread>
@@ -38,7 +38,7 @@ struct PreviewParams {
     int height = 540;
     int pendulum_count = 10000;
     PhysicsQuality physics_quality = PhysicsQuality::High;
-    double max_dt = 0.007;  // Computed from quality
+    double max_dt = 0.007; // Computed from quality
 
     // Compute substeps for a given frame duration
     int substeps(double frame_dt) const {
@@ -48,9 +48,9 @@ struct PreviewParams {
 
 // Plot scaling mode for multi-axis support
 enum class PlotMode {
-    SingleAxis,   // All metrics on one Y-axis (auto-fit)
-    MultiAxis,    // Group by scale: Y1=large, Y2=normalized, Y3=medium
-    Normalized    // All metrics scaled to 0-1
+    SingleAxis, // All metrics on one Y-axis (auto-fit)
+    MultiAxis,  // Group by scale: Y1=large, Y2=normalized, Y3=medium
+    Normalized  // All metrics scaled to 0-1
 };
 
 // Graph metric flags for multi-select (with derivative toggles)
@@ -76,13 +76,9 @@ struct MetricFlags {
         return it != flags.end() && it->second.second;
     }
 
-    bool* enabledPtr(std::string const& name) {
-        return &flags[name].first;
-    }
+    bool* enabledPtr(std::string const& name) { return &flags[name].first; }
 
-    bool* derivPtr(std::string const& name) {
-        return &flags[name].second;
-    }
+    bool* derivPtr(std::string const& name) { return &flags[name].second; }
 };
 
 // Export state (thread-safe)
@@ -110,8 +106,8 @@ struct ExportState {
 // Preset UI state
 struct PresetUIState {
     // Color preset
-    std::string loaded_color_preset;      // Name of currently loaded preset (empty if none)
-    ColorParams loaded_color_values;      // Values when preset was loaded (for detecting changes)
+    std::string loaded_color_preset; // Name of currently loaded preset (empty if none)
+    ColorParams loaded_color_values; // Values when preset was loaded (for detecting changes)
     char new_color_preset_name[64] = "";
     bool show_color_save_popup = false;
     bool show_color_delete_confirm = false;
@@ -125,7 +121,8 @@ struct PresetUIState {
 
     // Check if color values have been modified from loaded preset
     bool isColorModified(ColorParams const& current) const {
-        if (loaded_color_preset.empty()) return false;
+        if (loaded_color_preset.empty())
+            return false;
         return current.scheme != loaded_color_values.scheme ||
                std::abs(current.start - loaded_color_values.start) > 0.001 ||
                std::abs(current.end - loaded_color_values.end) > 0.001;
@@ -133,22 +130,24 @@ struct PresetUIState {
 
     // Check if post-process values have been modified
     bool isPPModified(PostProcessParams const& current) const {
-        if (loaded_pp_preset.empty()) return false;
+        if (loaded_pp_preset.empty())
+            return false;
         return current.tone_map != loaded_pp_values.tone_map ||
                std::abs(current.exposure - loaded_pp_values.exposure) > 0.001 ||
                std::abs(current.contrast - loaded_pp_values.contrast) > 0.001 ||
                std::abs(current.gamma - loaded_pp_values.gamma) > 0.001 ||
-               std::abs(current.reinhard_white_point - loaded_pp_values.reinhard_white_point) > 0.001 ||
+               std::abs(current.reinhard_white_point - loaded_pp_values.reinhard_white_point) >
+                   0.001 ||
                current.normalization != loaded_pp_values.normalization;
     }
 };
 
 // Per-metric boom detection state (for multi-boom visualization)
 struct MetricBoomState {
-    bool enabled = false;       // Show this metric's boom line on graph
-    bool show_params = false;   // Show this metric's params in UI panel
-    int boom_frame = -1;        // Detected boom frame for this metric
-    double boom_value = 0.0;    // Causticness/metric value at boom
+    bool enabled = false;     // Show this metric's boom line on graph
+    bool show_params = false; // Show this metric's params in UI panel
+    int boom_frame = -1;      // Detected boom frame for this metric
+    double boom_value = 0.0;  // Causticness/metric value at boom
 };
 
 // List of all metrics that support boom detection (uses centralized registry)
@@ -176,7 +175,7 @@ struct AppState {
     metrics::MetricsCollector metrics_collector;
     metrics::EventDetector event_detector;
     metrics::CausticnessAnalyzer causticness_analyzer;
-    MetricFlags detailed_flags;   // For Detailed Analysis window
+    MetricFlags detailed_flags; // For Detailed Analysis window
 
     // Frame history for timeline scrubbing
     std::vector<std::vector<PendulumState>> frame_history;
@@ -217,17 +216,17 @@ struct AppState {
     // Loaded simulation data (for replay mode)
     std::unique_ptr<simulation_data::Reader> loaded_data;
     std::string loaded_data_path;
-    bool replay_mode = false;  // True when playing back loaded data
+    bool replay_mode = false; // True when playing back loaded data
 
     // Replay timing
     std::chrono::high_resolution_clock::time_point replay_start_time;
     int replay_start_frame = 0;
-    bool replay_playing = false;  // True when actively replaying in real-time
+    bool replay_playing = false; // True when actively replaying in real-time
 
     // Metric parameters window
     bool show_metric_params_window = false;
     bool needs_metric_recompute = false;
-    std::string editing_metric;  // Which metric's params are being edited (separate from primary)
+    std::string editing_metric; // Which metric's params are being edited (separate from primary)
 
     // Multi-metric boom detection state
     std::map<std::string, MetricBoomState> boom_metrics;
@@ -253,11 +252,9 @@ void updateBoomDetection(AppState& state, bool run_analyzer = true) {
     for (auto const& tc : state.config.targets) {
         if (tc.name == "boom" && tc.type == "frame") {
             auto target = optimize::targetConfigToPredictionTarget(
-                tc.name, tc.type, tc.metric, tc.method,
-                tc.offset_seconds, tc.peak_percent_threshold,
-                tc.min_peak_prominence, tc.smoothing_window,
-                tc.crossing_threshold, tc.crossing_confirmation,
-                tc.weights);
+                tc.name, tc.type, tc.metric, tc.method, tc.offset_seconds,
+                tc.peak_percent_threshold, tc.min_peak_prominence, tc.smoothing_window,
+                tc.crossing_threshold, tc.crossing_confirmation, tc.weights);
             boom_params = target.frameParams();
             has_boom_target = true;
             break;
@@ -319,8 +316,7 @@ void updateAllBoomDetections(AppState& state) {
         params.method = optimize::FrameDetectionMethod::MaxValue;
         params.offset_seconds = 0.3;
 
-        auto boom = metrics::findBoomFrame(state.metrics_collector,
-                                           state.frame_duration, params);
+        auto boom = metrics::findBoomFrame(state.metrics_collector, state.frame_duration, params);
         boom_state.boom_frame = boom.frame;
         boom_state.boom_value = boom.metric_value;
     }
@@ -361,12 +357,12 @@ void initSimulation(AppState& state, GLRenderer& renderer) {
     }
 
     // Initialize metrics system using common helper
-    state.updateFrameDuration();  // Cache frame_duration and set on analyzer
+    state.updateFrameDuration(); // Cache frame_duration and set on analyzer
     metrics::resetMetricsSystem(state.metrics_collector, state.event_detector,
                                 state.causticness_analyzer);
-    metrics::initializeMetricsSystem(
-        state.metrics_collector, state.event_detector, state.causticness_analyzer,
-        state.frame_duration, /*with_gpu=*/true);
+    metrics::initializeMetricsSystem(state.metrics_collector, state.event_detector,
+                                     state.causticness_analyzer, state.frame_duration,
+                                     /*with_gpu=*/true);
 
     // Apply per-metric configs from config
     state.metrics_collector.setAllMetricConfigs(state.config.metric_configs);
@@ -446,9 +442,9 @@ bool loadSimulationData(AppState& state, GLRenderer& renderer, std::string const
     state.updateFrameDuration();
     metrics::resetMetricsSystem(state.metrics_collector, state.event_detector,
                                 state.causticness_analyzer);
-    metrics::initializeMetricsSystem(
-        state.metrics_collector, state.event_detector, state.causticness_analyzer,
-        state.frame_duration, /*with_gpu=*/true);
+    metrics::initializeMetricsSystem(state.metrics_collector, state.event_detector,
+                                     state.causticness_analyzer, state.frame_duration,
+                                     /*with_gpu=*/true);
 
     for (uint32_t f = 0; f < reader->frameCount(); ++f) {
         auto states = reader->getFrame(f);
@@ -468,10 +464,10 @@ bool loadSimulationData(AppState& state, GLRenderer& renderer, std::string const
     state.replay_mode = true;
     state.replay_playing = false;
     state.running = true;
-    state.paused = true;  // Start paused so user can see frame 0
+    state.paused = true; // Start paused so user can see frame 0
     state.current_frame = static_cast<int>(state.frame_history.size()) - 1;
     state.display_frame = 0;
-    state.scrubbing = true;  // Show scrubbing UI initially
+    state.scrubbing = true; // Show scrubbing UI initially
 
     // Resize renderer to match config
     renderer.resize(state.config.render.width, state.config.render.height);
@@ -489,7 +485,8 @@ bool loadSimulationData(AppState& state, GLRenderer& renderer, std::string const
 
 // Start real-time replay from current display frame
 void startReplay(AppState& state) {
-    if (!state.replay_mode || state.frame_history.empty()) return;
+    if (!state.replay_mode || state.frame_history.empty())
+        return;
 
     state.replay_playing = true;
     state.paused = false;
@@ -505,7 +502,8 @@ void stopReplay(AppState& state) {
 
 // Update replay - advances display_frame based on real time
 void updateReplay(AppState& state, GLRenderer& renderer) {
-    if (!state.replay_playing || state.frame_history.empty()) return;
+    if (!state.replay_playing || state.frame_history.empty())
+        return;
 
     auto now = std::chrono::high_resolution_clock::now();
     double elapsed = std::chrono::duration<double>(now - state.replay_start_time).count();
@@ -518,7 +516,7 @@ void updateReplay(AppState& state, GLRenderer& renderer) {
     int max_frame = static_cast<int>(state.frame_history.size()) - 1;
     if (target_frame > max_frame) {
         target_frame = max_frame;
-        stopReplay(state);  // Stop at end
+        stopReplay(state); // Stop at end
     }
 
     // Update display if frame changed
@@ -550,7 +548,7 @@ void renderStates(AppState& state, GLRenderer& renderer,
         float x0 = cx;
         float y0 = cy;
         float x1 = cx + s.x1 * scale;
-        float y1 = cy + s.y1 * scale;  // Positive Y = below pivot (screen Y also increases downward)
+        float y1 = cy + s.y1 * scale; // Positive Y = below pivot (screen Y also increases downward)
         float x2 = cx + s.x2 * scale;
         float y2 = cy + s.y2 * scale;
 
@@ -593,7 +591,8 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
     auto start = std::chrono::high_resolution_clock::now();
 
     int n = state.pendulums.size();
-    double frame_dt = state.config.simulation.duration_seconds / state.config.simulation.total_frames;
+    double frame_dt =
+        state.config.simulation.duration_seconds / state.config.simulation.total_frames;
     int substeps = state.preview.substeps(frame_dt);
     double dt = frame_dt / substeps;
 
@@ -664,11 +663,13 @@ void stepSimulation(AppState& state, GLRenderer& renderer) {
 static PlotMode s_plot_mode = PlotMode::MultiAxis;
 
 // Helper to get metric value at a specific frame (for timeline scrubbing)
-double getMetricAtFrame(metrics::MetricsCollector const& collector,
-                        std::string const& name, int frame) {
+double getMetricAtFrame(metrics::MetricsCollector const& collector, std::string const& name,
+                        int frame) {
     auto const* series = collector.getMetric(name);
-    if (!series || series->empty()) return 0.0;
-    if (frame < 0) return 0.0;
+    if (!series || series->empty())
+        return 0.0;
+    if (frame < 0)
+        return 0.0;
     auto const& values = series->values();
     size_t idx = std::min(static_cast<size_t>(frame), values.size() - 1);
     return values[idx];
@@ -695,11 +696,13 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
 
     // Helper to normalize a series to 0-1 range
     auto normalizeData = [](std::vector<double> const& data) -> std::vector<double> {
-        if (data.empty()) return {};
+        if (data.empty())
+            return {};
         double min_val = *std::min_element(data.begin(), data.end());
         double max_val = *std::max_element(data.begin(), data.end());
         double range = max_val - min_val;
-        if (range < 1e-10) range = 1.0;  // Avoid division by zero
+        if (range < 1e-10)
+            range = 1.0; // Avoid division by zero
         std::vector<double> result(data.size());
         for (size_t i = 0; i < data.size(); ++i) {
             result[i] = (data[i] - min_val) / range;
@@ -712,8 +715,10 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
         if (s_plot_mode == PlotMode::MultiAxis) {
             // Multi-axis: Y1=Large scale, Y2=Normalized (0-1), Y3=Medium scale
             ImPlot::SetupAxes("Frame", "Large", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-            ImPlot::SetupAxis(ImAxis_Y2, "[0-1]", ImPlotAxisFlags_AuxDefault | ImPlotAxisFlags_AutoFit);
-            ImPlot::SetupAxis(ImAxis_Y3, "Med", ImPlotAxisFlags_AuxDefault | ImPlotAxisFlags_AutoFit);
+            ImPlot::SetupAxis(ImAxis_Y2, "[0-1]",
+                              ImPlotAxisFlags_AuxDefault | ImPlotAxisFlags_AutoFit);
+            ImPlot::SetupAxis(ImAxis_Y3, "Med",
+                              ImPlotAxisFlags_AuxDefault | ImPlotAxisFlags_AutoFit);
         } else if (s_plot_mode == PlotMode::Normalized) {
             // Normalized mode: all metrics on 0-1 scale
             ImPlot::SetupAxes("Frame", "[0-1]", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
@@ -725,24 +730,26 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
         // Plot all metrics from centralized registry
         for (auto const& m : metrics::METRIC_REGISTRY) {
             // Skip if not enabled
-            if (!state.detailed_flags.enabled(m.name)) continue;
+            if (!state.detailed_flags.enabled(m.name))
+                continue;
 
             // Get metric series
             auto const* series = state.metrics_collector.getMetric(m.name);
-            if (!series || series->empty()) continue;
+            if (!series || series->empty())
+                continue;
 
             // Set axis based on registry
             if (s_plot_mode == PlotMode::MultiAxis) {
                 switch (m.axis) {
-                    case metrics::PlotAxis::Y1_Large:
-                        ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-                        break;
-                    case metrics::PlotAxis::Y2_Normalized:
-                        ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                        break;
-                    case metrics::PlotAxis::Y3_Medium:
-                        ImPlot::SetAxes(ImAxis_X1, ImAxis_Y3);
-                        break;
+                case metrics::PlotAxis::Y1_Large:
+                    ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
+                    break;
+                case metrics::PlotAxis::Y2_Normalized:
+                    ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+                    break;
+                case metrics::PlotAxis::Y3_Medium:
+                    ImPlot::SetAxes(ImAxis_X1, ImAxis_Y3);
+                    break;
                 }
             }
 
@@ -764,13 +771,16 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
                 if (!derivs.empty()) {
                     // Derivative uses same color with lower alpha
                     auto deriv_color = m.color.deriv();
-                    ImPlot::SetNextLineStyle(ImVec4(deriv_color.r, deriv_color.g, deriv_color.b, deriv_color.a), 1.0f);
+                    ImPlot::SetNextLineStyle(
+                        ImVec4(deriv_color.r, deriv_color.g, deriv_color.b, deriv_color.a), 1.0f);
                     std::string deriv_name = std::string(m.short_name) + "'";
                     if (s_plot_mode == PlotMode::Normalized) {
                         auto normalized = normalizeData(derivs);
-                        ImPlot::PlotLine(deriv_name.c_str(), frames.data() + 1, normalized.data(), derivs.size());
+                        ImPlot::PlotLine(deriv_name.c_str(), frames.data() + 1, normalized.data(),
+                                         derivs.size());
                     } else {
-                        ImPlot::PlotLine(deriv_name.c_str(), frames.data() + 1, derivs.data(), derivs.size());
+                        ImPlot::PlotLine(deriv_name.c_str(), frames.data() + 1, derivs.data(),
+                                         derivs.size());
                     }
                 }
             }
@@ -780,7 +790,8 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
         // Primary metric = bright thick red-orange line
         // Secondary metrics = visible cyan lines
         for (auto const& [metric_name, boom_state] : state.boom_metrics) {
-            if (!boom_state.enabled || boom_state.boom_frame < 0) continue;
+            if (!boom_state.enabled || boom_state.boom_frame < 0)
+                continue;
 
             bool is_primary = (metric_name == state.config.boom_metric);
             double boom_x = static_cast<double>(boom_state.boom_frame);
@@ -800,8 +811,8 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
             if (is_primary) {
                 auto limits = ImPlot::GetPlotLimits();
                 double y_top = limits.Y.Max * 0.92;
-                ImPlot::Annotation(boom_x, y_top, ImVec4(1.0f, 0.4f, 0.1f, 1.0f),
-                                   ImVec2(3, 0), true, "BOOM");
+                ImPlot::Annotation(boom_x, y_top, ImVec4(1.0f, 0.4f, 0.1f, 1.0f), ImVec2(3, 0),
+                                   true, "BOOM");
             }
         }
 
@@ -809,7 +820,10 @@ void drawMetricGraph(AppState& state, ImVec2 size) {
         if (state.boom_frame.has_value()) {
             bool any_enabled = false;
             for (auto const& [_, bs] : state.boom_metrics) {
-                if (bs.enabled) { any_enabled = true; break; }
+                if (bs.enabled) {
+                    any_enabled = true;
+                    break;
+                }
             }
             if (!any_enabled) {
                 double boom_x = static_cast<double>(*state.boom_frame);
@@ -950,7 +964,7 @@ static std::mt19937 rng(rd());
 
 // Randomize physics parameters within sensible ranges
 void randomizePhysics(AppState& state) {
-    std::uniform_real_distribution<double> angle_dist(100.0, 260.0);  // degrees, around 180
+    std::uniform_real_distribution<double> angle_dist(100.0, 260.0); // degrees, around 180
     std::uniform_real_distribution<double> length_dist(0.5, 1.5);
     std::uniform_real_distribution<double> mass_dist(0.5, 2.0);
     std::uniform_real_distribution<double> vel_dist(-2.0, 2.0);
@@ -988,8 +1002,7 @@ void drawColorRamp(ColorParams const& params, float width, float height) {
     }
 
     // Draw border
-    draw_list->AddRect(pos, ImVec2(pos.x + width, pos.y + height),
-                       IM_COL32(100, 100, 100, 255));
+    draw_list->AddRect(pos, ImVec2(pos.x + width, pos.y + height), IM_COL32(100, 100, 100, 255));
 
     // Draw start/end markers (triangular handles like Blender)
     float marker_size = 8.0f;
@@ -1039,7 +1052,8 @@ void drawPreviewSection(AppState& state) {
         tooltip("Low=20ms, Medium=12ms, High=7ms, Ultra=3ms max timestep");
 
         // Show computed values
-        double frame_dt = state.config.simulation.duration_seconds / state.config.simulation.total_frames;
+        double frame_dt =
+            state.config.simulation.duration_seconds / state.config.simulation.total_frames;
         int computed_substeps = state.preview.substeps(frame_dt);
         ImGui::Text("Computed: substeps=%d, dt=%.2fms", computed_substeps,
                     (frame_dt / computed_substeps) * 1000.0);
@@ -1115,12 +1129,12 @@ void drawSimulationSection(AppState& state) {
         auto duration = static_cast<float>(state.config.simulation.duration_seconds);
         if (ImGui::SliderFloat("Duration (s)", &duration, 1.0f, 60.0f)) {
             state.config.simulation.duration_seconds = duration;
-            state.updateFrameDuration();  // Update cached frame_duration
+            state.updateFrameDuration(); // Update cached frame_duration
         }
         tooltip("Total simulation time in physical seconds");
 
         if (ImGui::SliderInt("Total Frames", &state.config.simulation.total_frames, 60, 3600)) {
-            state.updateFrameDuration();  // Update cached frame_duration
+            state.updateFrameDuration(); // Update cached frame_duration
         }
         tooltip("Number of frames to render");
 
@@ -1159,10 +1173,16 @@ void drawColorSection(AppState& state) {
         drawColorRamp(state.config.color, ramp_width, 24.0f);
 
         // Scheme selector (this determines which presets are shown)
-        const char* schemes[] = {"Spectrum", "Rainbow", "Heat", "Cool", "Monochrome",
-                                 "Plasma", "Viridis", "Inferno", "Sunset"};
+        const char* schemes[] = {
+            "Spectrum",   "Rainbow",    "Heat",           "Cool",        "Monochrome",
+            "Plasma",     "Viridis",    "Inferno",        "Sunset",      "Ember",
+            "DeepOcean",  "NeonViolet", "Aurora",         "Pearl",       "TurboPop",
+            "Nebula",     "Blackbody",  "Magma",          "Cyberpunk",   "Biolume",
+            "Gold",       "RoseGold",   "Twilight",       "ForestFire",  "AbyssalGlow",
+            "MoltenCore", "Iridescent", "StellarNursery", "WhiskeyAmber"};
+
         int scheme_idx = static_cast<int>(state.config.color.scheme);
-        if (ImGui::Combo("Scheme", &scheme_idx, schemes, 9)) {
+        if (ImGui::Combo("Scheme", &scheme_idx, schemes, 29)) {
             state.config.color.scheme = static_cast<ColorScheme>(scheme_idx);
             color_changed = true;
             // Clear loaded preset when scheme changes (it's no longer valid)
@@ -1500,7 +1520,8 @@ void drawPostProcessSection(AppState& state) {
 
 // Recompute all metrics from frame history using current parameters
 void recomputeMetrics(AppState& state) {
-    if (state.frame_history.empty()) return;
+    if (state.frame_history.empty())
+        return;
 
     // Update per-metric configs on collector
     state.metrics_collector.setAllMetricConfigs(state.config.metric_configs);
@@ -1520,11 +1541,9 @@ void recomputeMetrics(AppState& state) {
     for (auto const& tc : state.config.targets) {
         if (tc.name == "boom" && tc.type == "frame") {
             auto target = optimize::targetConfigToPredictionTarget(
-                tc.name, tc.type, tc.metric, tc.method,
-                tc.offset_seconds, tc.peak_percent_threshold,
-                tc.min_peak_prominence, tc.smoothing_window,
-                tc.crossing_threshold, tc.crossing_confirmation,
-                tc.weights);
+                tc.name, tc.type, tc.metric, tc.method, tc.offset_seconds,
+                tc.peak_percent_threshold, tc.min_peak_prominence, tc.smoothing_window,
+                tc.crossing_threshold, tc.crossing_confirmation, tc.weights);
             boom_params = target.frameParams();
             break;
         }
@@ -1532,10 +1551,9 @@ void recomputeMetrics(AppState& state) {
 
     metrics::BoomDetection boom;
     if (!boom_params.metric_name.empty()) {
-        boom = metrics::findBoomFrame(state.metrics_collector,
-                                      state.frame_duration, boom_params);
+        boom = metrics::findBoomFrame(state.metrics_collector, state.frame_duration, boom_params);
     } else {
-        boom.frame = -1;  // No boom target configured
+        boom.frame = -1; // No boom target configured
     }
 
     if (boom.frame >= 0) {
@@ -1564,7 +1582,8 @@ MetricConfig& getOrCreateMetricConfig(Config& config, std::string const& metric_
 
 // Draw metric parameters window - redesigned with clear separation of concerns
 void drawMetricParametersWindow(AppState& state) {
-    if (!state.show_metric_params_window) return;
+    if (!state.show_metric_params_window)
+        return;
 
     ImGui::SetNextWindowSize(ImVec2(420, 600), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("Metric Parameters", &state.show_metric_params_window)) {
@@ -1584,8 +1603,8 @@ void drawMetricParametersWindow(AppState& state) {
                 break;
             }
         }
-        state.editing_metric = state.config.boom_metric.empty()
-            ? default_metric : state.config.boom_metric;
+        state.editing_metric =
+            state.config.boom_metric.empty() ? default_metric : state.config.boom_metric;
     }
 
     // ========== SECTION 1: Metric selector dropdown ==========
@@ -1626,37 +1645,55 @@ void drawMetricParametersWindow(AppState& state) {
         ImGui::Text("Metric Parameters:");
         ImGui::Indent();
 
-        std::visit([&params_changed](auto& p) {
-            using T = std::decay_t<decltype(p)>;
-            if constexpr (std::is_same_v<T, SectorMetricParams> || std::is_same_v<T, CVSectorMetricParams>) {
-                if (ImGui::SliderInt("Min Sectors", &p.min_sectors, 4, 32)) params_changed = true;
-                if (ImGui::SliderInt("Max Sectors", &p.max_sectors, 8, 144)) params_changed = true;
-                if (ImGui::SliderInt("Target/Sector", &p.target_per_sector, 10, 500)) params_changed = true;
-            }
-            if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
-                auto cv = static_cast<float>(p.cv_normalization);
-                if (ImGui::SliderFloat("CV Norm", &cv, 0.5f, 3.0f, "%.2f")) {
-                    p.cv_normalization = cv;
-                    params_changed = true;
+        std::visit(
+            [&params_changed](auto& p) {
+                using T = std::decay_t<decltype(p)>;
+                if constexpr (std::is_same_v<T, SectorMetricParams> ||
+                              std::is_same_v<T, CVSectorMetricParams>) {
+                    if (ImGui::SliderInt("Min Sectors", &p.min_sectors, 4, 32))
+                        params_changed = true;
+                    if (ImGui::SliderInt("Max Sectors", &p.max_sectors, 8, 144))
+                        params_changed = true;
+                    if (ImGui::SliderInt("Target/Sector", &p.target_per_sector, 10, 500))
+                        params_changed = true;
                 }
-            }
-            if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
-                auto r = static_cast<float>(p.max_radius);
-                if (ImGui::SliderFloat("Max Radius", &r, 0.5f, 4.0f)) { p.max_radius = r; params_changed = true; }
-                auto s = static_cast<float>(p.min_spread_threshold);
-                if (ImGui::SliderFloat("Min Spread", &s, 0.01f, 0.2f, "%.3f")) { p.min_spread_threshold = s; params_changed = true; }
-                auto lb = static_cast<float>(p.log_inverse_baseline);
-                if (ImGui::SliderFloat("Log Baseline", &lb, 0.1f, 2.0f)) { p.log_inverse_baseline = lb; params_changed = true; }
-                auto ld = static_cast<float>(p.log_inverse_divisor);
-                if (ImGui::SliderFloat("Log Divisor", &ld, 0.5f, 3.0f)) { p.log_inverse_divisor = ld; params_changed = true; }
-            }
-        }, editing_config.params);
+                if constexpr (std::is_same_v<T, CVSectorMetricParams>) {
+                    auto cv = static_cast<float>(p.cv_normalization);
+                    if (ImGui::SliderFloat("CV Norm", &cv, 0.5f, 3.0f, "%.2f")) {
+                        p.cv_normalization = cv;
+                        params_changed = true;
+                    }
+                }
+                if constexpr (std::is_same_v<T, LocalCoherenceMetricParams>) {
+                    auto r = static_cast<float>(p.max_radius);
+                    if (ImGui::SliderFloat("Max Radius", &r, 0.5f, 4.0f)) {
+                        p.max_radius = r;
+                        params_changed = true;
+                    }
+                    auto s = static_cast<float>(p.min_spread_threshold);
+                    if (ImGui::SliderFloat("Min Spread", &s, 0.01f, 0.2f, "%.3f")) {
+                        p.min_spread_threshold = s;
+                        params_changed = true;
+                    }
+                    auto lb = static_cast<float>(p.log_inverse_baseline);
+                    if (ImGui::SliderFloat("Log Baseline", &lb, 0.1f, 2.0f)) {
+                        p.log_inverse_baseline = lb;
+                        params_changed = true;
+                    }
+                    auto ld = static_cast<float>(p.log_inverse_divisor);
+                    if (ImGui::SliderFloat("Log Divisor", &ld, 0.5f, 3.0f)) {
+                        p.log_inverse_divisor = ld;
+                        params_changed = true;
+                    }
+                }
+            },
+            editing_config.params);
 
         ImGui::Unindent();
 
         // Note: params_changed is set by metric-specific parameter edits above
         // The changes are applied directly to editing_config.params via std::visit
-        (void)params_changed;  // Suppress unused variable warning
+        (void)params_changed; // Suppress unused variable warning
     }
 
     ImGui::Spacing();
@@ -1670,10 +1707,9 @@ void drawMetricParametersWindow(AppState& state) {
 
         // Show currently configured targets
         if (state.config.targets.empty()) {
-            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f),
-                "No explicit targets configured.");
+            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "No explicit targets configured.");
             ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
-                "Using defaults: boom, chaos, boom_quality");
+                               "Using defaults: boom, chaos, boom_quality");
             ImGui::Spacing();
 
             // Button to add default targets to config
@@ -1713,8 +1749,8 @@ void drawMetricParametersWindow(AppState& state) {
 
                 // Target header with type indicator
                 ImVec4 type_color = (tc.type == "score")
-                    ? ImVec4(0.4f, 0.8f, 0.4f, 1.0f)   // Green for score
-                    : ImVec4(0.8f, 0.6f, 0.2f, 1.0f);  // Orange for frame
+                                        ? ImVec4(0.4f, 0.8f, 0.4f, 1.0f)  // Green for score
+                                        : ImVec4(0.8f, 0.6f, 0.2f, 1.0f); // Orange for frame
                 ImGui::TextColored(type_color, "[%s]", tc.type.c_str());
                 ImGui::SameLine();
                 ImGui::Text("%s", tc.name.c_str());
@@ -1738,10 +1774,14 @@ void drawMetricParametersWindow(AppState& state) {
                 // Method selection (different for frame vs score)
                 if (tc.type == "frame") {
                     const char* frame_methods[] = {"max_value", "first_peak_percent",
-                        "derivative_peak", "threshold_crossing", "second_derivative_peak"};
+                                                   "derivative_peak", "threshold_crossing",
+                                                   "second_derivative_peak"};
                     int method_idx = 0;
                     for (int j = 0; j < 5; ++j) {
-                        if (tc.method == frame_methods[j]) { method_idx = j; break; }
+                        if (tc.method == frame_methods[j]) {
+                            method_idx = j;
+                            break;
+                        }
                     }
                     if (ImGui::Combo("Method", &method_idx, frame_methods, 5)) {
                         tc.method = frame_methods[method_idx];
@@ -1762,10 +1802,14 @@ void drawMetricParametersWindow(AppState& state) {
                     }
                 } else {
                     // Score methods
-                    const char* score_methods[] = {"peak_clarity", "post_boom_sustain", "composite"};
+                    const char* score_methods[] = {"peak_clarity", "post_boom_sustain",
+                                                   "composite"};
                     int method_idx = 0;
                     for (int j = 0; j < 3; ++j) {
-                        if (tc.method == score_methods[j]) { method_idx = j; break; }
+                        if (tc.method == score_methods[j]) {
+                            method_idx = j;
+                            break;
+                        }
                     }
                     if (ImGui::Combo("Method", &method_idx, score_methods, 3)) {
                         tc.method = score_methods[method_idx];
@@ -1779,8 +1823,7 @@ void drawMetricParametersWindow(AppState& state) {
 
             // Remove target if requested
             if (target_to_remove >= 0) {
-                state.config.targets.erase(
-                    state.config.targets.begin() + target_to_remove);
+                state.config.targets.erase(state.config.targets.begin() + target_to_remove);
             }
 
             ImGui::Spacing();
@@ -1852,7 +1895,8 @@ void drawMetricParametersWindow(AppState& state) {
             bool is_primary = (name == state.config.boom_metric);
 
             std::string label = short_name;
-            if (is_primary) label += "*";
+            if (is_primary)
+                label += "*";
             if (bs.boom_frame >= 0) {
                 label += " [" + std::to_string(bs.boom_frame) + "]";
             }
@@ -1893,7 +1937,8 @@ void drawMetricParametersWindow(AppState& state) {
         state.needs_metric_recompute = true;
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Recompute all metrics from history\n(needed after changing metric parameters)");
+        ImGui::SetTooltip(
+            "Recompute all metrics from history\n(needed after changing metric parameters)");
     }
 
     ImGui::SameLine();
@@ -1928,7 +1973,8 @@ void drawControlPanel(AppState& state, GLRenderer& renderer) {
     // File path input for loading simulation data
     static char load_path[512] = "";
     ImGui::SetNextItemWidth(300);
-    ImGui::InputTextWithHint("##loadpath", "Path to simulation_data.bin", load_path, sizeof(load_path));
+    ImGui::InputTextWithHint("##loadpath", "Path to simulation_data.bin", load_path,
+                             sizeof(load_path));
     ImGui::SameLine();
     if (ImGui::Button("Load")) {
         if (strlen(load_path) > 0) {
@@ -2095,7 +2141,8 @@ void drawTimeline(AppState& state, GLRenderer& renderer) {
 
     // Step backward
     if (ImGui::Button("<<") && state.display_frame > 0) {
-        if (state.replay_mode) stopReplay(state);
+        if (state.replay_mode)
+            stopReplay(state);
         state.paused = true;
         state.display_frame--;
         state.scrubbing = true;
@@ -2105,7 +2152,8 @@ void drawTimeline(AppState& state, GLRenderer& renderer) {
 
     // Step forward (only within history)
     if (ImGui::Button(">>") && state.display_frame < history_size - 1) {
-        if (state.replay_mode) stopReplay(state);
+        if (state.replay_mode)
+            stopReplay(state);
         state.paused = true;
         state.display_frame++;
         state.scrubbing = true;
@@ -2116,7 +2164,8 @@ void drawTimeline(AppState& state, GLRenderer& renderer) {
     // Jump to end (or live in normal mode)
     const char* end_label = state.replay_mode ? "End" : "Live";
     if (ImGui::Button(end_label)) {
-        if (state.replay_mode) stopReplay(state);
+        if (state.replay_mode)
+            stopReplay(state);
         state.scrubbing = false;
         state.display_frame = history_size - 1;
         if (!state.frame_history.empty()) {
@@ -2129,7 +2178,8 @@ void drawTimeline(AppState& state, GLRenderer& renderer) {
     int slider_frame = std::min(state.display_frame, max_frame);
 
     if (ImGui::SliderInt("Frame", &slider_frame, 0, max_frame)) {
-        if (state.replay_mode) stopReplay(state);
+        if (state.replay_mode)
+            stopReplay(state);
         state.paused = true;
         state.scrubbing = true;
         state.display_frame = slider_frame;
@@ -2139,8 +2189,8 @@ void drawTimeline(AppState& state, GLRenderer& renderer) {
     // Frame info with time display
     double display_time = state.display_frame * state.frame_duration;
     double total_time = max_frame * state.frame_duration;
-    ImGui::Text("Frame: %d / %d  (%.2fs / %.2fs)",
-                state.display_frame, history_size - 1, display_time, total_time);
+    ImGui::Text("Frame: %d / %d  (%.2fs / %.2fs)", state.display_frame, history_size - 1,
+                display_time, total_time);
     if (!state.replay_mode && history_size >= state.max_history_frames) {
         ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "History limit reached (%d frames)",
                            state.max_history_frames);
@@ -2270,7 +2320,7 @@ int main(int argc, char* argv[]) {
     // Load config and presets
     AppState state;
     state.config = Config::load(config_path);
-    state.initBoomMetrics();  // Initialize multi-metric boom state
+    state.initBoomMetrics(); // Initialize multi-metric boom state
     std::cout << "Loaded config from: " << config_path << "\n";
     state.presets = PresetLibrary::load("config/presets.toml");
 
@@ -2304,7 +2354,7 @@ int main(int argc, char* argv[]) {
                         }
                     } else if (state.scrubbing && state.display_frame < state.current_frame) {
                         // Resume playback from scrubbed position using real-time replay
-                        state.replay_mode = true;  // Enter replay mode temporarily
+                        state.replay_mode = true; // Enter replay mode temporarily
                         startReplay(state);
                     } else {
                         state.paused = !state.paused;
@@ -2379,7 +2429,8 @@ int main(int argc, char* argv[]) {
 
                 // Re-run causticness analyzer to update quality score
                 if (state.boom_frame.has_value()) {
-                    state.causticness_analyzer.analyze(state.metrics_collector, state.event_detector);
+                    state.causticness_analyzer.analyze(state.metrics_collector,
+                                                       state.event_detector);
                 }
             }
         }
@@ -2412,9 +2463,9 @@ int main(int argc, char* argv[]) {
             double caustic_score = state.causticness_analyzer.score();
 
             // Primary quality score (causticness-based)
-            ImVec4 bar_color = caustic_score < 0.4f ? ImVec4(0.8f, 0.2f, 0.2f, 1.0f) :
-                               caustic_score < 0.7f ? ImVec4(0.8f, 0.8f, 0.2f, 1.0f) :
-                                                      ImVec4(0.2f, 0.8f, 0.2f, 1.0f);
+            ImVec4 bar_color = caustic_score < 0.4f   ? ImVec4(0.8f, 0.2f, 0.2f, 1.0f)
+                               : caustic_score < 0.7f ? ImVec4(0.8f, 0.8f, 0.2f, 1.0f)
+                                                      : ImVec4(0.2f, 0.8f, 0.2f, 1.0f);
             ImGui::Text("Quality Score:");
             ImGui::SameLine();
             ImGui::PushStyleColor(ImGuiCol_PlotHistogram, bar_color);
@@ -2441,9 +2492,9 @@ int main(int argc, char* argv[]) {
             // Peak clarity (important for filtering)
             double peak_clarity = metrics.value("peak_clarity_score", 1.0);
             int competing_peaks = metrics.value("competing_peaks_count", 0);
-            ImVec4 clarity_color = peak_clarity < 0.6f ? ImVec4(0.8f, 0.2f, 0.2f, 1.0f) :
-                                   peak_clarity < 0.8f ? ImVec4(0.8f, 0.8f, 0.2f, 1.0f) :
-                                                         ImVec4(0.2f, 0.8f, 0.2f, 1.0f);
+            ImVec4 clarity_color = peak_clarity < 0.6f   ? ImVec4(0.8f, 0.2f, 0.2f, 1.0f)
+                                   : peak_clarity < 0.8f ? ImVec4(0.8f, 0.8f, 0.2f, 1.0f)
+                                                         : ImVec4(0.2f, 0.8f, 0.2f, 1.0f);
             ImGui::Text("Peak Clarity:");
             ImGui::SameLine();
             ImGui::PushStyleColor(ImGuiCol_PlotHistogram, clarity_color);
@@ -2497,7 +2548,8 @@ int main(int argc, char* argv[]) {
         ImGui::SameLine();
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Single: All on one axis\nMulti: Y1=large, Y2=normalized, Y3=medium\nNormalized: All scaled 0-1");
+            ImGui::SetTooltip("Single: All on one axis\nMulti: Y1=large, Y2=normalized, "
+                              "Y3=medium\nNormalized: All scaled 0-1");
         }
         ImGui::SameLine();
         if (ImGui::Button("Params")) {
@@ -2511,7 +2563,8 @@ int main(int argc, char* argv[]) {
         auto metricWithDeriv = [](const char* label, bool* metric, bool* deriv, const char* id) {
             ImGui::Checkbox(label, metric);
             ImGui::SameLine(0, 2);
-            ImGui::PushStyleColor(ImGuiCol_Text, *deriv ? ImVec4(0.4f, 0.8f, 0.4f, 1.0f) : ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, *deriv ? ImVec4(0.4f, 0.8f, 0.4f, 1.0f)
+                                                        : ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 0));
             char btn_id[32];
             snprintf(btn_id, sizeof(btn_id), "d##%s", id);
@@ -2527,15 +2580,14 @@ int main(int argc, char* argv[]) {
                          metrics::MetricCategory::LocalCoherence, metrics::MetricCategory::Velocity,
                          metrics::MetricCategory::GPU, metrics::MetricCategory::Other}) {
             auto cat_metrics = metrics::getByCategory(cat);
-            if (cat_metrics.empty()) continue;
+            if (cat_metrics.empty())
+                continue;
 
             ImGui::Text("%s:", metrics::categoryName(cat));
             ImGui::SameLine();
             for (auto const* m : cat_metrics) {
-                metricWithDeriv(m->short_name,
-                                state.detailed_flags.enabledPtr(m->name),
-                                state.detailed_flags.derivPtr(m->name),
-                                m->name);
+                metricWithDeriv(m->short_name, state.detailed_flags.enabledPtr(m->name),
+                                state.detailed_flags.derivPtr(m->name), m->name);
                 ImGui::SameLine();
             }
             ImGui::NewLine();
@@ -2550,7 +2602,8 @@ int main(int argc, char* argv[]) {
         ImGui::Separator();
         ImGui::Text("Current Values (frame %d):", state.display_frame);
 
-        if (ImGui::BeginTable("##MetricValues", 4, ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit)) {
+        if (ImGui::BeginTable("##MetricValues", 4,
+                              ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit)) {
             ImGui::TableSetupColumn("Metric");
             ImGui::TableSetupColumn("Value");
             ImGui::TableSetupColumn("Metric");
