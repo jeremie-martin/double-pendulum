@@ -1167,6 +1167,64 @@ void drawSimulationSection(AppState& state) {
     }
 }
 
+// Helper to apply a theme by name and regenerate colors
+void applyTheme(AppState& state, std::string const& theme_name) {
+    auto theme = state.presets.getTheme(theme_name);
+    if (!theme) return;
+
+    // Apply color preset from theme
+    if (auto color_preset = state.presets.getColor(theme->color_preset_name)) {
+        state.config.color = *color_preset;
+        state.preset_ui.loaded_color_preset = theme->color_preset_name;
+        state.preset_ui.loaded_color_values = *color_preset;
+    }
+    // Apply post-process preset from theme
+    if (auto pp_preset = state.presets.getPostProcess(theme->post_process_preset_name)) {
+        state.config.post_process = *pp_preset;
+        state.preset_ui.loaded_pp_preset = theme->post_process_preset_name;
+        state.preset_ui.loaded_pp_values = *pp_preset;
+    }
+    state.preset_ui.loaded_theme = theme_name;
+
+    // Regenerate colors for running simulation
+    if (state.running && !state.colors.empty()) {
+        ColorSchemeGenerator color_gen(state.config.color);
+        int n = static_cast<int>(state.colors.size());
+        for (int i = 0; i < n; ++i) {
+            state.colors[i] = color_gen.getColorForIndex(i, n);
+        }
+        state.needs_redraw = true;
+    }
+}
+
+// Cycle to next/previous theme
+void cycleTheme(AppState& state, int direction) {
+    auto theme_names = state.presets.getThemeNames();
+    if (theme_names.empty()) return;
+
+    int current_idx = -1;
+    if (!state.preset_ui.loaded_theme.empty()) {
+        for (size_t i = 0; i < theme_names.size(); ++i) {
+            if (theme_names[i] == state.preset_ui.loaded_theme) {
+                current_idx = static_cast<int>(i);
+                break;
+            }
+        }
+    }
+
+    // Calculate new index with wrapping
+    int new_idx;
+    if (current_idx < 0) {
+        new_idx = (direction > 0) ? 0 : static_cast<int>(theme_names.size()) - 1;
+    } else {
+        new_idx = current_idx + direction;
+        if (new_idx < 0) new_idx = static_cast<int>(theme_names.size()) - 1;
+        if (new_idx >= static_cast<int>(theme_names.size())) new_idx = 0;
+    }
+
+    applyTheme(state, theme_names[new_idx]);
+}
+
 void drawThemeSection(AppState& state) {
     if (ImGui::CollapsingHeader("Theme Presets")) {
         auto theme_names = state.presets.getThemeNames();
@@ -1199,31 +1257,7 @@ void drawThemeSection(AppState& state) {
             for (auto const& name : theme_names) {
                 bool is_selected = (state.preset_ui.loaded_theme == name);
                 if (ImGui::Selectable(name.c_str(), is_selected)) {
-                    if (auto theme = state.presets.getTheme(name)) {
-                        // Apply color preset from theme
-                        if (auto color_preset = state.presets.getColor(theme->color_preset_name)) {
-                            state.config.color = *color_preset;
-                            state.preset_ui.loaded_color_preset = theme->color_preset_name;
-                            state.preset_ui.loaded_color_values = *color_preset;
-                        }
-                        // Apply post-process preset from theme
-                        if (auto pp_preset = state.presets.getPostProcess(theme->post_process_preset_name)) {
-                            state.config.post_process = *pp_preset;
-                            state.preset_ui.loaded_pp_preset = theme->post_process_preset_name;
-                            state.preset_ui.loaded_pp_values = *pp_preset;
-                        }
-                        state.preset_ui.loaded_theme = name;
-
-                        // Regenerate colors for running simulation
-                        if (state.running && !state.colors.empty()) {
-                            ColorSchemeGenerator color_gen(state.config.color);
-                            int n = static_cast<int>(state.colors.size());
-                            for (int i = 0; i < n; ++i) {
-                                state.colors[i] = color_gen.getColorForIndex(i, n);
-                            }
-                            state.needs_redraw = true;
-                        }
-                    }
+                    applyTheme(state, name);
                 }
                 // Show tooltip with theme components
                 if (ImGui::IsItemHovered()) {
@@ -2480,6 +2514,13 @@ int main(int argc, char* argv[]) {
                             state.display_frame = target;
                             renderFrameFromHistory(state, renderer, target);
                         }
+                    }
+                    break;
+                case SDLK_t:  // T - cycle themes (Shift+T = previous, T = next)
+                    if (event.key.keysym.mod & KMOD_SHIFT) {
+                        cycleTheme(state, -1);
+                    } else {
+                        cycleTheme(state, 1);
                     }
                     break;
                 default:
