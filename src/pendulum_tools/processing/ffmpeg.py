@@ -5,6 +5,7 @@ from __future__ import annotations
 import shlex
 import subprocess
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -15,6 +16,28 @@ from ..constants import (
     DEFAULT_THUMBNAIL_QUALITY,
 )
 from ..exceptions import FFmpegError, VideoValidationError
+
+
+@lru_cache(maxsize=1)
+def is_nvenc_available() -> bool:
+    """Check if NVIDIA NVENC encoder is available.
+
+    Uses ffmpeg -encoders to check if h264_nvenc is listed.
+    Result is cached for the lifetime of the process.
+
+    Returns:
+        True if h264_nvenc encoder is available, False otherwise.
+    """
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return "h264_nvenc" in result.stdout
+    except (subprocess.SubprocessError, FileNotFoundError, subprocess.TimeoutExpired):
+        return False
 
 
 @dataclass

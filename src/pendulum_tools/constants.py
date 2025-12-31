@@ -33,11 +33,11 @@ DEFAULT_BACKGROUND_BRIGHTNESS = 1.0
 # Encoding Quality Constants
 # =============================================================================
 
-# libx264 CRF (0-51, lower = better, 18 = visually lossless)
-DEFAULT_CRF_QUALITY = 18
+# libx264 CRF (0-51, lower = better, 17 = high quality for YouTube re-encoding)
+DEFAULT_CRF_QUALITY = 17
 
-# NVENC CQ (0-51, lower = better)
-DEFAULT_NVENC_CQ = 23
+# NVENC CQ (0-51, lower = better, 19 = high quality for YouTube re-encoding)
+DEFAULT_NVENC_CQ = 19
 
 # Encoding preset
 DEFAULT_ENCODING_PRESET = "medium"

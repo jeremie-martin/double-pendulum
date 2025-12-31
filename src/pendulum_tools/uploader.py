@@ -15,8 +15,11 @@ from googleapiclient.http import MediaFileUpload
 
 from .exceptions import RateLimitError, UploadError
 
-# OAuth 2.0 scope for uploading videos
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+# OAuth 2.0 scopes for uploading videos and managing playlists
+SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube",  # Needed for playlist management
+]
 
 # YouTube category IDs
 CATEGORY_MUSIC = "10"
@@ -176,6 +179,46 @@ class YouTubeUploader:
                 f"YouTube API error ({e.resp.status}): {e.reason}",
                 video_path=video_path,
             )
+
+    def add_to_playlist(self, video_id: str, playlist_id: str) -> bool:
+        """Add a video to a playlist.
+
+        Args:
+            video_id: The ID of the video to add.
+            playlist_id: The ID of the playlist to add the video to.
+
+        Returns:
+            True if successful, False otherwise.
+
+        Raises:
+            RuntimeError: If not authenticated.
+        """
+        if not self.youtube:
+            raise RuntimeError("Not authenticated. Call authenticate() first.")
+
+        body = {
+            "snippet": {
+                "playlistId": playlist_id,
+                "resourceId": {
+                    "kind": "youtube#video",
+                    "videoId": video_id,
+                },
+            },
+        }
+
+        try:
+            self.youtube.playlistItems().insert(
+                part="snippet",
+                body=body,
+            ).execute()
+            return True
+        except HttpError as e:
+            # Log the error but don't fail the whole upload
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Failed to add video {video_id} to playlist {playlist_id}: {e}"
+            )
+            return False
 
     @property
     def is_authenticated(self) -> bool:

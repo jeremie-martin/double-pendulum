@@ -1,6 +1,6 @@
 """Video post-processing module for pendulum simulation videos."""
 
-from .ffmpeg import FFmpegCommand
+from .ffmpeg import FFmpegCommand, is_nvenc_available
 from .motion import (
     BoomPunchConfig,
     MotionConfig,
@@ -28,6 +28,7 @@ from .thumbnails import extract_thumbnails
 __all__ = [
     # FFmpeg
     "FFmpegCommand",
+    "is_nvenc_available",
     # Thumbnails
     "extract_thumbnails",
     # Motion effects

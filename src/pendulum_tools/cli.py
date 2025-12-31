@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -16,9 +15,16 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-from .config import get_config, UserConfig
-from .constants import DEFAULT_NVENC_CQ, DEFAULT_CRF_QUALITY, FALLBACK_BOOM_SECONDS
+from .config import UserConfig, get_config
+from .constants import DEFAULT_CRF_QUALITY, DEFAULT_NVENC_CQ, FALLBACK_BOOM_SECONDS
 from .models import VideoMetadata
+from .processing import (
+    ProcessingConfig,
+    ProcessingPipeline,
+    is_nvenc_available,
+    load_template_system,
+)
+from .processing.thumbnails import extract_thumbnails
 from .templates import (
     generate_all_titles,
     generate_description,
@@ -26,13 +32,6 @@ from .templates import (
     generate_title,
 )
 from .uploader import CATEGORY_MUSIC, YouTubeUploader
-from .processing import (
-    ProcessingConfig,
-    ProcessingPipeline,
-    TemplateLibrary,
-    load_template_system,
-)
-from .processing.thumbnails import extract_thumbnails
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -55,7 +54,7 @@ def setup_logging(log_file: Optional[Path] = None, verbose: bool = False) -> Non
         log_file.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(log_file)
         file_handler.setFormatter(
-            logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         )
         handlers.append(file_handler)
 
@@ -155,7 +154,9 @@ def _add_music_to_video(
 
     console.print("[bold]Adding Music:[/bold]")
     console.print(f"  Track: {selected_track.title}")
-    console.print(f"  Boom: {video_boom_seconds:.2f}s → Drop: {selected_track.drop_time_seconds:.2f}s")
+    console.print(
+        f"  Boom: {video_boom_seconds:.2f}s → Drop: {selected_track.drop_time_seconds:.2f}s"
+    )
 
     with Progress(
         SpinnerColumn(),
@@ -363,11 +364,15 @@ def music_add(
 
             if not force_random:
                 if not click.confirm("Use a random track anyway?"):
-                    console.print("[red]Aborted.[/red] Use --track to specify a track manually.")
+                    console.print(
+                        "[red]Aborted.[/red] Use --track to specify a track manually."
+                    )
                     raise SystemExit(1)
 
             selected_track = manager.random_track()
-            console.print(f"[yellow]Selected random track:[/yellow] {selected_track.title}")
+            console.print(
+                f"[yellow]Selected random track:[/yellow] {selected_track.title}"
+            )
 
     # Determine output path
     output_path = output or (video_dir / "video.mp4")
@@ -462,7 +467,9 @@ def music_sync(video_dir: Path, music_dir: Optional[Path]):
     video_boom_seconds = boom_frame / video_fps if boom_frame else 0
 
     console.print()
-    console.print(f"[bold]Boom time (video):[/bold] {video_boom_seconds:.2f}s (frame {boom_frame})")
+    console.print(
+        f"[bold]Boom time (video):[/bold] {video_boom_seconds:.2f}s (frame {boom_frame})"
+    )
     console.print()
 
     table = Table(title="Track Compatibility")
@@ -552,7 +559,9 @@ def upload(video_dir: Path, credentials: Optional[Path], privacy: str, dry_run: 
     console.print(f"[bold]Tags:[/bold] {', '.join(tags[:10])}...")
     console.print(f"[bold]Privacy:[/bold] {privacy}")
     console.print(f"[bold]Video:[/bold] {video_path}")
-    console.print(f"[bold]Size:[/bold] {video_path.stat().st_size / 1024 / 1024:.1f} MB")
+    console.print(
+        f"[bold]Size:[/bold] {video_path.stat().st_size / 1024 / 1024:.1f} MB"
+    )
 
     if dry_run:
         console.print()
@@ -663,7 +672,9 @@ def batch(
     for item in batch_dir.iterdir():
         if item.is_dir():
             has_metadata = (item / "metadata.json").exists()
-            has_video = (item / "video.mp4").exists() or (item / "video_raw.mp4").exists()
+            has_video = (item / "video.mp4").exists() or (
+                item / "video_raw.mp4"
+            ).exists()
             if has_metadata and has_video:
                 video_dirs.append(item)
 
@@ -710,7 +721,7 @@ def batch(
         try:
             video_path = get_video_path(video_dir, for_upload=True)
         except FileNotFoundError:
-            console.print(f"  [red]No video file found[/red]")
+            console.print("  [red]No video file found[/red]")
             logger.error(f"{video_dir.name}: No video file found")
             results.append((video_dir.name, None, "No video file"))
             continue
@@ -740,7 +751,7 @@ def batch(
                 logger.info(f"{video_dir.name}: Uploaded successfully - {url}")
                 results.append((video_dir.name, video_id, url))
             else:
-                console.print(f"  [red]Upload failed[/red]")
+                console.print("  [red]Upload failed[/red]")
                 logger.error(f"{video_dir.name}: Upload failed (no video ID returned)")
                 results.append((video_dir.name, None, "Upload failed"))
         except Exception as e:
@@ -771,7 +782,9 @@ def batch(
 
     # Log final summary
     if log_file:
-        logger.info(f"Batch upload completed: {succeeded} succeeded, {failed} failed out of {len(results)} total")
+        logger.info(
+            f"Batch upload completed: {succeeded} succeeded, {failed} failed out of {len(results)} total"
+        )
 
 
 @main.command()
@@ -798,7 +811,9 @@ def preview(video_dir: Path):
     console.print("[bold]Simulation Info:[/bold]")
     console.print(f"  Pendulums: {metadata.config.pendulum_count:,}")
     console.print(f"  Duration: {metadata.config.duration_seconds:.1f}s physics")
-    console.print(f"  Video: {metadata.video_duration:.1f}s at {metadata.config.video_fps}fps")
+    console.print(
+        f"  Video: {metadata.video_duration:.1f}s at {metadata.config.video_fps}fps"
+    )
     console.print(f"  Speed: {metadata.simulation_speed:.1f}x")
     console.print(f"  Resolution: {metadata.config.width}x{metadata.config.height}")
     if metadata.boom_seconds:
@@ -1055,17 +1070,30 @@ def process(
     console.print(f"  Shorts mode: {'Yes' if shorts else 'No'}")
     if shorts:
         console.print(f"  Blurred BG: {'Yes' if blur_bg else 'No'}")
-    console.print(f"  Encoder: {'NVENC (GPU)' if config.use_nvenc else 'libx264 (CPU)'}")
-    console.print(f"  Quality: {config.nvenc_cq if config.use_nvenc else quality}")
+    # Show effective encoder (considering NVENC availability)
+    effective_nvenc = config.use_nvenc and is_nvenc_available()
+    if config.use_nvenc and not effective_nvenc:
+        console.print("  Encoder: libx264 (CPU) [dim](NVENC not available)[/dim]")
+    else:
+        console.print(
+            f"  Encoder: {'NVENC (GPU)' if effective_nvenc else 'libx264 (CPU)'}"
+        )
+    console.print(f"  Quality: {config.nvenc_cq if effective_nvenc else quality}")
 
     if pipeline.metadata.boom_seconds:
         console.print(f"  Boom at: {pipeline.metadata.boom_seconds:.2f}s")
     else:
-        console.print(f"  [yellow]Warning: No boom detected, using fallback time of {FALLBACK_BOOM_SECONDS}s[/yellow]")
-        console.print("  [dim]Motion effects may not sync correctly with visual content[/dim]")
+        console.print(
+            f"  [yellow]Warning: No boom detected, using fallback time of {FALLBACK_BOOM_SECONDS}s[/yellow]"
+        )
+        console.print(
+            "  [dim]Motion effects may not sync correctly with visual content[/dim]"
+        )
 
     if pipeline.metadata.scores:
-        console.print(f"  Causticness score: {pipeline.metadata.scores.causticness or 0:.4f}")
+        console.print(
+            f"  Causticness score: {pipeline.metadata.scores.causticness or 0:.4f}"
+        )
 
     console.print()
 
@@ -1202,8 +1230,12 @@ def thumbnail(video_dir: Path, output: Path | None, timestamps: str):
         thumbs = extract_thumbnails(
             video_path,
             output_dir,
-            boom_seconds=metadata.boom_seconds if any(t in ["pre_boom", "boom"] for t in timestamp_list) else None,
-            best_frame_seconds=metadata.best_frame_seconds if "best" in timestamp_list else None,
+            boom_seconds=metadata.boom_seconds
+            if any(t in ["pre_boom", "boom"] for t in timestamp_list)
+            else None,
+            best_frame_seconds=metadata.best_frame_seconds
+            if "best" in timestamp_list
+            else None,
             video_duration=metadata.video_duration,
         )
 
@@ -1312,7 +1344,9 @@ def batch_process(
     for item in batch_dir.iterdir():
         if item.is_dir():
             has_metadata = (item / "metadata.json").exists()
-            has_video = (item / "video.mp4").exists() or (item / "video_raw.mp4").exists()
+            has_video = (item / "video.mp4").exists() or (
+                item / "video_raw.mp4"
+            ).exists()
             if has_metadata and has_video:
                 video_dirs.append(item)
 
@@ -1357,8 +1391,12 @@ def batch_process(
                 if not dry_run:
                     result.save_to_metadata(video_dir / "metadata.json")
                 status = "DRY RUN" if dry_run else "OK"
-                console.print(f"  [green]{status}[/green] (template: {result.template_used})")
-                logger.info(f"{video_dir.name}: Processed successfully (template: {result.template_used})")
+                console.print(
+                    f"  [green]{status}[/green] (template: {result.template_used})"
+                )
+                logger.info(
+                    f"{video_dir.name}: Processed successfully (template: {result.template_used})"
+                )
                 results.append((video_dir.name, True, result.template_used or template))
             else:
                 console.print(f"  [red]FAILED:[/red] {result.error}")
@@ -1393,7 +1431,9 @@ def batch_process(
 
     # Log final summary
     if log_file:
-        logger.info(f"Batch processing completed: {succeeded} succeeded, {failed} failed out of {len(results)} total")
+        logger.info(
+            f"Batch processing completed: {succeeded} succeeded, {failed} failed out of {len(results)} total"
+        )
 
 
 # =============================================================================
@@ -1423,6 +1463,8 @@ def _auto_process_single(
     dry_run: bool,
     user_config: "UserConfig",
     log: Any,
+    playlist_id: Optional[str] = None,
+    delete_after_upload: bool = False,
 ) -> AutoProcessResult:
     """Process, add music, and upload a single video.
 
@@ -1434,11 +1476,14 @@ def _auto_process_single(
         dry_run: If True, don't actually upload
         user_config: User configuration
         log: Logger instance
+        playlist_id: Optional playlist ID to add video to after upload
+        delete_after_upload: If True, delete video directory after successful upload
 
     Returns:
         AutoProcessResult with status and optional error message.
     """
     import json
+
     from .exceptions import RateLimitError, UploadError
     from .music import MusicManager
 
@@ -1451,7 +1496,9 @@ def _auto_process_single(
         if "upload" in meta_data and meta_data["upload"].get("video_id"):
             video_id = meta_data["upload"]["video_id"]
             log.info(f"Skipping {video_dir.name}: already uploaded as {video_id}")
-            return AutoProcessResult(video_dir, "skipped", error=f"Already uploaded: {video_id}")
+            return AutoProcessResult(
+                video_dir, "skipped", error=f"Already uploaded: {video_id}"
+            )
     except (FileNotFoundError, json.JSONDecodeError, KeyError):
         pass
 
@@ -1489,7 +1536,9 @@ def _auto_process_single(
             return AutoProcessResult(video_dir, "process_failed", error=result.error)
 
         result.save_to_metadata(metadata_path)
-        log.info(f"{video_dir.name}: Processing complete (template: {result.template_used})")
+        log.info(
+            f"{video_dir.name}: Processing complete (template: {result.template_used})"
+        )
 
     except Exception as e:
         log.error(f"{video_dir.name}: Processing exception: {e}")
@@ -1510,13 +1559,17 @@ def _auto_process_single(
                 manager = MusicManager(resolved_music_dir)
             except FileNotFoundError as e:
                 log.error(f"{video_dir.name}: Music directory not found: {e}")
-                return AutoProcessResult(video_dir, "music_failed", error=f"Music directory not found: {e}")
+                return AutoProcessResult(
+                    video_dir, "music_failed", error=f"Music directory not found: {e}"
+                )
 
             # Get boom info
             boom_frame = metadata.results.boom_frame if metadata.results else None
             if not boom_frame or boom_frame <= 0:
                 log.error(f"{video_dir.name}: No boom frame detected, cannot add music")
-                return AutoProcessResult(video_dir, "music_failed", error="No boom frame detected")
+                return AutoProcessResult(
+                    video_dir, "music_failed", error="No boom frame detected"
+                )
 
             video_fps = metadata.config.video_fps
             video_boom_seconds = boom_frame / video_fps
@@ -1528,7 +1581,9 @@ def _auto_process_single(
 
             if not selected_track:
                 log.error(f"{video_dir.name}: No music tracks available")
-                return AutoProcessResult(video_dir, "music_failed", error="No music tracks available")
+                return AutoProcessResult(
+                    video_dir, "music_failed", error="No music tracks available"
+                )
 
             # Output path
             output_path = result.video_path.with_name(
@@ -1550,7 +1605,9 @@ def _auto_process_single(
                 music_added = True
             else:
                 log.error(f"{video_dir.name}: FFmpeg muxing failed")
-                return AutoProcessResult(video_dir, "music_failed", error="FFmpeg muxing failed")
+                return AutoProcessResult(
+                    video_dir, "music_failed", error="FFmpeg muxing failed"
+                )
 
         except Exception as e:
             log.error(f"{video_dir.name}: Music error: {e}")
@@ -1601,11 +1658,35 @@ def _auto_process_single(
             except Exception as e:
                 log.warning(f"{video_dir.name}: Failed to save upload info: {e}")
 
-            log.info(f"{video_dir.name}: Uploaded successfully: https://youtu.be/{video_id}")
+            log.info(
+                f"{video_dir.name}: Uploaded successfully: https://youtu.be/{video_id}"
+            )
+
+            # Add to playlist if configured
+            if playlist_id and uploader:
+                if uploader.add_to_playlist(video_id, playlist_id):
+                    log.info(f"{video_dir.name}: Added to playlist {playlist_id}")
+                else:
+                    log.warning(
+                        f"{video_dir.name}: Failed to add to playlist {playlist_id}"
+                    )
+
+            # Delete video directory if requested
+            if delete_after_upload:
+                import shutil
+
+                try:
+                    shutil.rmtree(video_dir)
+                    log.info(f"{video_dir.name}: Deleted video directory")
+                except Exception as e:
+                    log.warning(f"{video_dir.name}: Failed to delete directory: {e}")
+
             return AutoProcessResult(video_dir, "success", video_id=video_id)
         else:
             log.error(f"{video_dir.name}: Upload returned no video ID")
-            return AutoProcessResult(video_dir, "upload_failed", error="No video ID returned")
+            return AutoProcessResult(
+                video_dir, "upload_failed", error="No video ID returned"
+            )
 
     except RateLimitError as e:
         log.warning(f"{video_dir.name}: Rate limited: {e}")
@@ -1625,12 +1706,22 @@ def _print_auto_summary(results: list[AutoProcessResult]) -> None:
     table.add_column("Status")
     table.add_column("Info")
 
-    counts = {"success": 0, "skipped": 0, "failed": 0, "rate_limited": 0, "music_failed": 0}
+    counts = {
+        "success": 0,
+        "skipped": 0,
+        "failed": 0,
+        "rate_limited": 0,
+        "music_failed": 0,
+    }
 
     for r in results:
         if r.succeeded:
             status = "[green]SUCCESS[/green]"
-            info = f"https://youtu.be/{r.video_id}" if r.video_id and r.video_id != "dry-run" else "dry run"
+            info = (
+                f"https://youtu.be/{r.video_id}"
+                if r.video_id and r.video_id != "dry-run"
+                else "dry run"
+            )
             counts["success"] += 1
         elif r.status == "skipped":
             status = "[yellow]SKIPPED[/yellow]"
@@ -1699,6 +1790,18 @@ def _print_auto_summary(results: list[AutoProcessResult]) -> None:
     help="Show what would be done without executing",
 )
 @click.option(
+    "--playlist",
+    type=str,
+    default=None,
+    help="Playlist ID to add uploaded videos to (default: from config)",
+)
+@click.option(
+    "--delete-after-upload",
+    is_flag=True,
+    default=None,
+    help="Delete video directory after successful upload (default: from config)",
+)
+@click.option(
     "--verbose",
     "-v",
     is_flag=True,
@@ -1711,6 +1814,8 @@ def auto(
     privacy: str,
     limit: Optional[int],
     dry_run: bool,
+    playlist: Optional[str],
+    delete_after_upload: Optional[bool],
     verbose: bool,
 ):
     """Auto-process all unprocessed videos: process -> music -> upload.
@@ -1732,7 +1837,7 @@ def auto(
         # Preview without executing
         pendulum-tools auto /path/to/batch_output --dry-run
     """
-    from .logging import setup_logging, get_logger
+    from .logging import get_logger, setup_logging
 
     setup_logging(verbose=verbose)
     log = get_logger("auto")
@@ -1741,12 +1846,23 @@ def auto(
     resolved_credentials = user_config.get_credentials_dir(credentials)
     resolved_music_dir = user_config.get_music_dir(music_dir)
 
+    # Resolve playlist_id: CLI > config
+    resolved_playlist_id = playlist if playlist is not None else user_config.playlist_id
+    # Resolve delete_after_upload: CLI > config
+    resolved_delete_after_upload = (
+        delete_after_upload
+        if delete_after_upload is not None
+        else user_config.delete_after_upload
+    )
+
     # Find video directories that need processing
     video_dirs = []
     for item in sorted(batch_dir.iterdir()):
         if item.is_dir() and item.name.startswith("video_"):
             has_metadata = (item / "metadata.json").exists()
-            has_video = (item / "video.mp4").exists() or (item / "video_raw.mp4").exists()
+            has_video = (item / "video.mp4").exists() or (
+                item / "video_raw.mp4"
+            ).exists()
             has_final = (item / "video_processed_final.mp4").exists()
 
             if has_metadata and has_video and not has_final:
@@ -1763,6 +1879,10 @@ def auto(
     console.print(f"  Shorts: {'Yes' if user_config.processing.shorts else 'No'}")
     console.print(f"  Blur BG: {'Yes' if user_config.processing.blur_bg else 'No'}")
     console.print(f"  Privacy: {privacy}")
+    if resolved_playlist_id:
+        console.print(f"  Playlist: {resolved_playlist_id}")
+    if resolved_delete_after_upload:
+        console.print("  Delete after upload: Yes")
     log.info(f"Starting auto-process of {len(video_dirs)} videos in {batch_dir}")
 
     # Authenticate uploader
@@ -1788,15 +1908,19 @@ def auto(
             dry_run=dry_run,
             user_config=user_config,
             log=log,
+            playlist_id=resolved_playlist_id,
+            delete_after_upload=resolved_delete_after_upload,
         )
         results.append(result)
 
         # Display result
         if result.succeeded:
             if result.video_id and result.video_id != "dry-run":
-                console.print(f"  [green]SUCCESS[/green] https://youtu.be/{result.video_id}")
+                console.print(
+                    f"  [green]SUCCESS[/green] https://youtu.be/{result.video_id}"
+                )
             else:
-                console.print(f"  [green]SUCCESS[/green] (dry run)")
+                console.print("  [green]SUCCESS[/green] (dry run)")
         elif result.status == "skipped":
             console.print(f"  [yellow]SKIPPED[/yellow] {result.error}")
         elif result.status == "rate_limited":
@@ -1858,6 +1982,18 @@ def auto(
     help="Seconds to wait between uploads to avoid rate limiting (default: 60.0)",
 )
 @click.option(
+    "--playlist",
+    type=str,
+    default=None,
+    help="Playlist ID to add uploaded videos to (default: from config)",
+)
+@click.option(
+    "--delete-after-upload",
+    is_flag=True,
+    default=None,
+    help="Delete video directory after successful upload (default: from config)",
+)
+@click.option(
     "--verbose",
     "-v",
     is_flag=True,
@@ -1871,6 +2007,8 @@ def watch(
     poll_interval: float,
     settle_time: float,
     upload_delay: float,
+    playlist: Optional[str],
+    delete_after_upload: Optional[bool],
     verbose: bool,
 ):
     """Watch batch directory and auto-process new videos as they appear.
@@ -1894,7 +2032,7 @@ def watch(
     import signal
     import time
 
-    from .logging import setup_logging, get_logger
+    from .logging import get_logger, setup_logging
 
     setup_logging(verbose=verbose)
     log = get_logger("watch")
@@ -1902,6 +2040,15 @@ def watch(
     user_config = get_config()
     resolved_credentials = user_config.get_credentials_dir(credentials)
     resolved_music_dir = user_config.get_music_dir(music_dir)
+
+    # Resolve playlist_id: CLI > config
+    resolved_playlist_id = playlist if playlist is not None else user_config.playlist_id
+    # Resolve delete_after_upload: CLI > config
+    resolved_delete_after_upload = (
+        delete_after_upload
+        if delete_after_upload is not None
+        else user_config.delete_after_upload
+    )
 
     # Authenticate uploader
     try:
@@ -1917,6 +2064,7 @@ def watch(
 
     # Find already-processed or already-uploaded directories
     import json
+
     for item in batch_dir.iterdir():
         if item.is_dir() and item.name.startswith("video_"):
             # Check for final video
@@ -1946,7 +2094,13 @@ def watch(
     console.print(f"  Shorts: {'Yes' if user_config.processing.shorts else 'No'}")
     console.print(f"  Blur BG: {'Yes' if user_config.processing.blur_bg else 'No'}")
     console.print(f"  Privacy: {privacy}")
-    console.print(f"[dim]Poll: {poll_interval}s, Settle: {settle_time}s, Upload delay: {upload_delay}s[/dim]")
+    if resolved_playlist_id:
+        console.print(f"  Playlist: {resolved_playlist_id}")
+    if resolved_delete_after_upload:
+        console.print("  Delete after upload: Yes")
+    console.print(
+        f"[dim]Poll: {poll_interval}s, Settle: {settle_time}s, Upload delay: {upload_delay}s[/dim]"
+    )
     console.print("[dim]Press Ctrl+C to stop[/dim]")
     console.print()
     log.info(f"Starting watch on {batch_dir}")
@@ -1971,7 +2125,9 @@ def watch(
 
                 # Check if ready (has required files)
                 has_metadata = (item / "metadata.json").exists()
-                has_video = (item / "video.mp4").exists() or (item / "video_raw.mp4").exists()
+                has_video = (item / "video.mp4").exists() or (
+                    item / "video_raw.mp4"
+                ).exists()
 
                 if not (has_metadata and has_video):
                     continue
@@ -1999,26 +2155,34 @@ def watch(
                     dry_run=False,
                     user_config=user_config,
                     log=log,
+                    playlist_id=resolved_playlist_id,
+                    delete_after_upload=resolved_delete_after_upload,
                 )
 
                 processed.add(dir_name)
 
                 if result.succeeded:
                     total_processed += 1
-                    console.print(f"  [green]SUCCESS[/green] https://youtu.be/{result.video_id}")
+                    console.print(
+                        f"  [green]SUCCESS[/green] https://youtu.be/{result.video_id}"
+                    )
                     # Wait before next upload to avoid rate limiting
                     if upload_delay > 0 and running:
-                        console.print(f"[dim]Waiting {upload_delay}s before next upload...[/dim]")
+                        console.print(
+                            f"[dim]Waiting {upload_delay}s before next upload...[/dim]"
+                        )
                         log.info(f"Upload delay: waiting {upload_delay}s")
                         time.sleep(upload_delay)
                 elif result.status == "rate_limited":
                     total_failed += 1
-                    console.print(f"  [yellow]RATE LIMITED[/yellow] - skipping")
+                    console.print("  [yellow]RATE LIMITED[/yellow] - skipping")
                 else:
                     total_failed += 1
                     console.print(f"  [red]FAILED[/red] {result.error}")
 
-                console.print(f"[dim]Total: {total_processed} processed, {total_failed} failed[/dim]")
+                console.print(
+                    f"[dim]Total: {total_processed} processed, {total_failed} failed[/dim]"
+                )
 
                 # Process only ONE video per loop iteration, then rescan
                 break
@@ -2033,7 +2197,7 @@ def watch(
 
     # Final summary
     console.print()
-    console.print(f"[bold]Watch stopped.[/bold]")
+    console.print("[bold]Watch stopped.[/bold]")
     console.print(f"Processed: {total_processed}, Failed: {total_failed}")
     log.info(f"Watch stopped. Processed: {total_processed}, Failed: {total_failed}")
 

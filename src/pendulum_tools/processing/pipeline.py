@@ -16,7 +16,7 @@ from ..constants import (
     FALLBACK_BOOM_SECONDS,
 )
 from ..exceptions import FFmpegError
-from .ffmpeg import FFmpegCommand, get_video_dimensions
+from .ffmpeg import FFmpegCommand, get_video_dimensions, is_nvenc_available
 from .motion import apply_motion_effects, build_motion_filters, MotionConfig, SlowZoomConfig
 from .subtitles_ass import generate_ass_from_resolved, CaptionPreset
 from .templates import (
@@ -48,10 +48,10 @@ class ProcessingConfig:
     extract_thumbnails: bool = True
 
     # Quality settings
-    crf_quality: int = DEFAULT_CRF_QUALITY  # Lower = better (18 = visually lossless)
+    crf_quality: int = DEFAULT_CRF_QUALITY  # Lower = better (17 = high quality)
     preset: str = "medium"  # Encoding preset (slower = better compression)
     use_nvenc: bool = True  # Use NVIDIA hardware encoding (much faster)
-    nvenc_cq: int = DEFAULT_NVENC_CQ  # NVENC quality (0-51, lower = better)
+    nvenc_cq: int = DEFAULT_NVENC_CQ  # NVENC quality (0-51, 19 = high quality)
 
     # Motion overrides (None = use template defaults)
     slow_zoom_start: Optional[float] = None  # Override slow zoom start scale
@@ -302,8 +302,13 @@ class ProcessingPipeline:
                 cmd.add_subtitles(ass_path)
 
         # Set output quality and encoding
+        # Automatically fall back to libx264 if NVENC is requested but unavailable
+        use_nvenc = self.config.use_nvenc and is_nvenc_available()
+        if self.config.use_nvenc and not use_nvenc:
+            logger.info("NVENC not available, falling back to libx264")
+
         cmd.set_pixel_format("yuv420p")
-        if self.config.use_nvenc:
+        if use_nvenc:
             cmd.use_nvenc(cq=self.config.nvenc_cq)
         else:
             cmd.set_codec("libx264")

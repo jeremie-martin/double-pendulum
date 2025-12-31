@@ -13,14 +13,18 @@ Example config file (~/.config/pendulum-tools/config.toml):
 
     [encoding]
     use_nvenc = true
-    nvenc_cq = 23
-    crf_quality = 18
+    nvenc_cq = 19
+    crf_quality = 17
 
     [processing]
     default_template = "minimal_science"
     shorts = true
     blur_bg = true
     force = true
+
+    [youtube]
+    playlist_id = "PLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    delete_after_upload = false
 """
 
 from __future__ import annotations
@@ -80,6 +84,10 @@ class UserConfig:
 
     # Processing defaults (for auto/watch commands)
     processing: ProcessingDefaults = field(default_factory=ProcessingDefaults)
+
+    # YouTube settings
+    playlist_id: Optional[str] = None  # Playlist to add uploaded videos to
+    delete_after_upload: bool = False  # Delete video directory after successful upload
 
     # Internal: track where config was loaded from
     _config_source: Optional[Path] = field(default=None, repr=False)
@@ -148,6 +156,13 @@ class UserConfig:
             self.processing.blur_bg = bool(processing["blur_bg"])
         if "force" in processing:
             self.processing.force = bool(processing["force"])
+
+        # YouTube section
+        youtube = data.get("youtube", {})
+        if "playlist_id" in youtube:
+            self.playlist_id = str(youtube["playlist_id"])
+        if "delete_after_upload" in youtube:
+            self.delete_after_upload = bool(youtube["delete_after_upload"])
 
     def _load_from_env(self) -> None:
         """Override configuration from environment variables."""
