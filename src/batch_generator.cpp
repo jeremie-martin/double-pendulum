@@ -202,7 +202,17 @@ BatchConfig BatchConfig::load(std::string const& path) {
 
         // Randomization settings (which presets to randomly select from)
         if (auto randomize = tbl["randomize"].as_table()) {
-            // Color preset names
+            // Theme preset names (takes precedence over independent color/post_process)
+            if (auto theme_arr = randomize->get("theme_presets")) {
+                if (auto arr = theme_arr->as_array()) {
+                    for (auto const& item : *arr) {
+                        if (auto name = item.value<std::string>()) {
+                            config.theme_preset_names.push_back(*name);
+                        }
+                    }
+                }
+            }
+            // Color preset names (only used if theme_presets is empty)
             if (auto color_arr = randomize->get("color_presets")) {
                 if (auto arr = color_arr->as_array()) {
                     for (auto const& item : *arr) {
@@ -212,7 +222,7 @@ BatchConfig BatchConfig::load(std::string const& path) {
                     }
                 }
             }
-            // Post-process preset names
+            // Post-process preset names (only used if theme_presets is empty)
             if (auto pp_arr = randomize->get("post_process_presets")) {
                 if (auto arr = pp_arr->as_array()) {
                     for (auto const& item : *arr) {
@@ -701,27 +711,56 @@ Config BatchGenerator::generateRandomConfig() {
         config.physics.initial_velocity2 = vel2_dist(rng_);
     }
 
-    // --- Color preset --------------------------------------------------------
-    if (!config_.color_preset_names.empty()) {
-        std::uniform_int_distribution<size_t> dist(0, config_.color_preset_names.size() - 1);
-        std::string const& name = config_.color_preset_names[dist(rng_)];
-        if (auto preset = config_.presets.getColor(name)) {
-            config.color = *preset;
-            config.selected_color_preset_name = name;
+    // --- Theme or independent color/post-process presets ----------------------
+    // Theme presets take precedence - they bundle color + post_process together
+    if (!config_.theme_preset_names.empty()) {
+        std::uniform_int_distribution<size_t> dist(0, config_.theme_preset_names.size() - 1);
+        std::string const& theme_name = config_.theme_preset_names[dist(rng_)];
+        if (auto theme = config_.presets.getTheme(theme_name)) {
+            // Resolve the color preset
+            if (auto color_preset = config_.presets.getColor(theme->color_preset_name)) {
+                config.color = *color_preset;
+                config.selected_color_preset_name = theme->color_preset_name;
+            } else {
+                std::cerr << "Warning: Theme '" << theme_name << "' references unknown color '"
+                          << theme->color_preset_name << "'\n";
+            }
+            // Resolve the post-process preset
+            if (auto pp_preset = config_.presets.getPostProcess(theme->post_process_preset_name)) {
+                config.post_process = *pp_preset;
+                config.selected_post_process_preset_name = theme->post_process_preset_name;
+            } else {
+                std::cerr << "Warning: Theme '" << theme_name << "' references unknown post_process '"
+                          << theme->post_process_preset_name << "'\n";
+            }
+            config.selected_theme_name = theme_name;
         } else {
-            std::cerr << "Warning: Color preset '" << name << "' not found in library\n";
+            std::cerr << "Warning: Theme preset '" << theme_name << "' not found in library\n";
         }
-    }
+    } else {
+        // Fall back to independent color/post-process randomization
+        // --- Color preset --------------------------------------------------------
+        if (!config_.color_preset_names.empty()) {
+            std::uniform_int_distribution<size_t> dist(0, config_.color_preset_names.size() - 1);
+            std::string const& name = config_.color_preset_names[dist(rng_)];
+            if (auto preset = config_.presets.getColor(name)) {
+                config.color = *preset;
+                config.selected_color_preset_name = name;
+            } else {
+                std::cerr << "Warning: Color preset '" << name << "' not found in library\n";
+            }
+        }
 
-    // --- Post-process preset -------------------------------------------------
-    if (!config_.post_process_preset_names.empty()) {
-        std::uniform_int_distribution<size_t> dist(0, config_.post_process_preset_names.size() - 1);
-        std::string const& name = config_.post_process_preset_names[dist(rng_)];
-        if (auto preset = config_.presets.getPostProcess(name)) {
-            config.post_process = *preset;
-            config.selected_post_process_preset_name = name;
-        } else {
-            std::cerr << "Warning: Post-process preset '" << name << "' not found in library\n";
+        // --- Post-process preset -------------------------------------------------
+        if (!config_.post_process_preset_names.empty()) {
+            std::uniform_int_distribution<size_t> dist(0, config_.post_process_preset_names.size() - 1);
+            std::string const& name = config_.post_process_preset_names[dist(rng_)];
+            if (auto preset = config_.presets.getPostProcess(name)) {
+                config.post_process = *preset;
+                config.selected_post_process_preset_name = name;
+            } else {
+                std::cerr << "Warning: Post-process preset '" << name << "' not found in library\n";
+            }
         }
     }
 

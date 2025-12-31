@@ -249,8 +249,39 @@ PresetLibrary PresetLibrary::load(std::string const& path) {
             }
         }
 
+        // Parse [theme.*] presets
+        if (auto theme_tbl = tbl["theme"].as_table()) {
+            for (auto const& [name, node] : *theme_tbl) {
+                if (auto preset = node.as_table()) {
+                    ThemePreset theme;
+
+                    if (auto color_name = preset->get("color")) {
+                        theme.color_preset_name = color_name->value<std::string>().value_or("");
+                    }
+                    if (auto pp_name = preset->get("post_process")) {
+                        theme.post_process_preset_name = pp_name->value<std::string>().value_or("");
+                    }
+
+                    // Validate that referenced presets exist
+                    if (!theme.color_preset_name.empty() &&
+                        lib.color.find(theme.color_preset_name) == lib.color.end()) {
+                        std::cerr << "Warning: Theme '" << name << "' references unknown color preset '"
+                                  << theme.color_preset_name << "'\n";
+                    }
+                    if (!theme.post_process_preset_name.empty() &&
+                        lib.post_process.find(theme.post_process_preset_name) == lib.post_process.end()) {
+                        std::cerr << "Warning: Theme '" << name << "' references unknown post_process preset '"
+                                  << theme.post_process_preset_name << "'\n";
+                    }
+
+                    lib.themes[std::string(name)] = theme;
+                }
+            }
+        }
+
         std::cout << "Loaded preset library: " << lib.color.size() << " color, "
-                  << lib.post_process.size() << " post_process presets\n";
+                  << lib.post_process.size() << " post_process, "
+                  << lib.themes.size() << " theme presets\n";
 
     } catch (toml::parse_error const& err) {
         std::cerr << "Error parsing preset library: " << err.description() << "\n";
@@ -302,6 +333,20 @@ bool PresetLibrary::save(std::string const& path) const {
             file << "contrast = " << params.contrast << "\n";
             file << "gamma = " << params.gamma << "\n";
             file << "normalization = \"" << normalizationToString(params.normalization) << "\"\n\n";
+        }
+    }
+
+    // Write theme presets
+    if (!themes.empty()) {
+        file << "# =============================================================================\n";
+        file << "# Theme Presets\n";
+        file << "# "
+                "=============================================================================\n\n";
+
+        for (auto const& [name, theme] : themes) {
+            file << "[theme." << name << "]\n";
+            file << "color = \"" << theme.color_preset_name << "\"\n";
+            file << "post_process = \"" << theme.post_process_preset_name << "\"\n\n";
         }
     }
 

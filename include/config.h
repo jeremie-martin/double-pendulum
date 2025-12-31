@@ -320,6 +320,7 @@ struct Config {
     // These are for metadata output only - not saved to config.toml
     std::string selected_color_preset_name;
     std::string selected_post_process_preset_name;
+    std::string selected_theme_name;  // Set when using theme presets
 
     // Get config for a specific metric (returns nullptr if not configured)
     MetricConfig const* getMetricConfig(std::string const& name) const {

@@ -181,6 +181,7 @@ struct BatchConfig {
     // Names of presets to randomly select from (empty = use base_config)
     std::vector<std::string> color_preset_names;
     std::vector<std::string> post_process_preset_names;
+    std::vector<std::string> theme_preset_names;  // If non-empty, use themes instead of independent color/pp
 
     // Remote transfer settings
     TransferConfig transfer;

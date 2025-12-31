@@ -48,6 +48,7 @@ struct SimulationResults {
     // Preset names for metadata (set by batch generator, empty for single-run)
     std::string color_preset_name;
     std::string post_process_preset_name;
+    std::string theme_name;  // Set when using theme presets
 
     // Convenience accessors for backward compatibility
     std::optional<int> getBoomFrame() const {

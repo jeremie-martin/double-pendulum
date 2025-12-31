@@ -275,6 +275,11 @@ void Simulation::saveMetadata(SimulationResults const& results) {
     }
     out << "\n  },\n";
 
+    // Theme preset (if used)
+    if (!results.theme_name.empty()) {
+        out << "  \"theme\": \"" << results.theme_name << "\",\n";
+    }
+
     // Video output parameters
     out << "  \"output\": {\n";
     out << "    \"video_fps\": " << config_.output.video_fps << ",\n";
@@ -521,6 +526,7 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     // Copy preset names from config (set by batch generator for metadata)
     results.color_preset_name = config_.selected_color_preset_name;
     results.post_process_preset_name = config_.selected_post_process_preset_name;
+    results.theme_name = config_.selected_theme_name;
 
     // Frame duration for event timing
     double const frame_duration = config_.simulation.frameDuration();

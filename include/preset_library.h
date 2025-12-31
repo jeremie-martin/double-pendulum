@@ -7,12 +7,20 @@
 #include <string>
 #include <vector>
 
+// Theme preset: bundles a color preset and post-process preset
+// for guaranteed aesthetic coherence in batch generation
+struct ThemePreset {
+    std::string color_preset_name;        // References a [color.*] preset
+    std::string post_process_preset_name; // References a [post_process.*] preset
+};
+
 // Preset library loaded from TOML file
 // Contains named presets for each config category
 struct PresetLibrary {
     // Named presets for each category
     std::map<std::string, ColorParams> color;
     std::map<std::string, PostProcessParams> post_process;
+    std::map<std::string, ThemePreset> themes;
 
     // Path to the loaded preset file (for saving back)
     std::string source_path;
@@ -72,6 +80,20 @@ struct PresetLibrary {
         return names;
     }
 
+    std::optional<ThemePreset> getTheme(std::string const& name) const {
+        auto it = themes.find(name);
+        return it != themes.end() ? std::optional{it->second} : std::nullopt;
+    }
+
+    std::vector<std::string> getThemeNames() const {
+        std::vector<std::string> names;
+        names.reserve(themes.size());
+        for (auto const& [name, _] : themes) {
+            names.push_back(name);
+        }
+        return names;
+    }
+
     // Delete presets
     bool deleteColor(std::string const& name) {
         return color.erase(name) > 0;
@@ -82,5 +104,5 @@ struct PresetLibrary {
     }
 
     // Check if library has any presets
-    bool empty() const { return color.empty() && post_process.empty(); }
+    bool empty() const { return color.empty() && post_process.empty() && themes.empty(); }
 };
