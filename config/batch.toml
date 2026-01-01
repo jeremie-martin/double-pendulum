@@ -1,16 +1,17 @@
 # =============================================================================
-# Example Batch Configuration with New Color Schemes
+# Batch Generation Configuration with Theme Support
 # =============================================================================
 #
-# This shows recommended color_preset + post_process_preset combinations
-# based on the color families.
+# Uses curated theme presets for guaranteed aesthetic coherence.
+# Each theme combines a color scheme with appropriate post-processing.
 #
+# =============================================================================
 
 include = ["best_params.toml"]
 
 [batch]
 output_directory = "batch_output"
-count = 50
+count = 100
 base_config = "config/batch_template.toml"
 presets = "config/presets_extended.toml"
 
@@ -44,119 +45,131 @@ required = true
 [filter.targets.boom_quality]
 min_score = 0.0001
 
-# =============================================================================
-# RECOMMENDED COMBINATIONS
-# =============================================================================
-#
-# WARM FAMILY (use with: warm_glow, volcanic_heat, vibrant)
-#   ember_full, ember_core, ember_glow
-#   gold_full, gold_bright, gold_rich
-#   whiskey_amber_full, whiskey_amber_bright, whiskey_amber_honey
-#   blackbody_full, blackbody_hot, blackbody_star
-#   molten_core_full, molten_core_hot, molten_core_bright
-#   forest_fire_full, forest_fire_bright, forest_fire_blaze
-#
-# COOL FAMILY (use with: cool_depth, underwater_haze, glassy)
-#   deep_ocean_full, deep_ocean_bright, deep_ocean_teal
-#   aurora_full, aurora_bright, aurora_cold
-#   biolume_full, biolume_bright, biolume_glow
-#   abyssal_glow_full, abyssal_glow_bright, abyssal_glow_core
-#
-# NEON FAMILY (use with: neon_pop, punchy, caustics_raw)
-#   cyberpunk_full, cyberpunk_bright, cyberpunk_cold, cyberpunk_hot
-#   neon_violet_full, neon_violet_bright, neon_violet_pastel
-#   turbo_pop_full, turbo_pop_warm, turbo_pop_cool
-#
-# ELEGANT FAMILY (use with: elegant_soft, pearlescent, soft)
-#   pearl_full, pearl_cream, pearl_soft
-#   rose_gold_full, rose_gold_bright, rose_gold_soft
-#   iridescent_full, iridescent_bright, iridescent_soft
-#
-# COSMIC FAMILY (use with: cosmic_depth, cinematic, filmic)
-#   nebula_full, nebula_bright, nebula_core
-#   stellar_nursery_full, stellar_nursery_bright, stellar_nursery_emission
-#   twilight_full, twilight_warm, twilight_cold
-#
-# SCIENTIFIC FAMILY (use with: balanced, studio_neutral, crisp)
-#   magma_full, magma_hot, magma_bright
-#   viridis_full, viridis_bright
-#   inferno_full, inferno_hot
-#   plasma_full, plasma_warm
-#
-# =============================================================================
-
 [randomize]
-# Mix of schemes from different families for variety
-color_presets = [
-  # Warm
-  "ember_full",
-  "ember_core",
-  "gold_full",
-  "whiskey_amber_full",
-  "blackbody_full",
-  "molten_core_full",
+# =============================================================================
+# THEME PRESETS
+# =============================================================================
+# Using themes ensures color + post-processing are aesthetically matched.
+# Organized by visual family for balanced variety.
+# =============================================================================
 
-  # Cool
-  "deep_ocean_full",
-  "aurora_full",
-  "biolume_full",
-  "abyssal_glow_full",
+theme_presets = [
+    # -------------------------------------------------------------------------
+    # WARM FIRE (10 themes)
+    # -------------------------------------------------------------------------
+    "ember_cinematic",
+    "ember_warm_glow",
+    "ember_dramatic",
+    "heat_classic",
+    "heat_intense",
+    "blackbody_star",
+    "blackbody_incandescent",
+    "molten_core_volcanic",
+    "molten_core_glow",
+    "forest_fire_blaze",
 
-  # Neon
-  "cyberpunk_full",
-  "neon_violet_full",
-  "turbo_pop_full",
+    # -------------------------------------------------------------------------
+    # WARM GOLD (8 themes)
+    # -------------------------------------------------------------------------
+    "gold_luxe",
+    "gold_cinematic",
+    "gold_elegant",
+    "whiskey_warm",
+    "whiskey_cinematic",
+    "whiskey_rich",
+    "inferno_classic",
+    "inferno_dramatic",
 
-  # Elegant
-  "pearl_full",
-  "rose_gold_full",
-  "iridescent_full",
+    # -------------------------------------------------------------------------
+    # COOL OCEAN (8 themes)
+    # -------------------------------------------------------------------------
+    "deep_ocean_abyss",
+    "deep_ocean_glass",
+    "deep_ocean_cinematic",
+    "cool_ice",
+    "cool_glass",
+    "abyssal_depths",
+    "abyssal_glow",
+    "abyssal_cinematic",
 
-  # Cosmic
-  "nebula_full",
-  "stellar_nursery_full",
-  "twilight_full",
+    # -------------------------------------------------------------------------
+    # COOL AURORA (7 themes)
+    # -------------------------------------------------------------------------
+    "aurora_northern",
+    "aurora_cinematic",
+    "aurora_cold",
+    "aurora_soft",
+    "biolume_deep",
+    "biolume_glow",
+    "biolume_cinematic",
 
-  # Scientific
-  "magma_full",
-  "viridis_bright",
-  "inferno_hot",
+    # -------------------------------------------------------------------------
+    # NEON ELECTRIC (10 themes)
+    # -------------------------------------------------------------------------
+    "cyberpunk_neon",
+    "cyberpunk_punchy",
+    "cyberpunk_raw",
+    "cyberpunk_hot",
+    "neon_violet_glow",
+    "neon_violet_vibrant",
+    "neon_violet_punchy",
+    "turbo_pop_full",
+    "turbo_pop_vibrant",
+    "turbo_pop_crisp",
 
-  # Original favorites
-  "full_spectrum",
-  "vibrant",
-  "fire",
-  "ice",
-  "sunset_dusk",
-  "plasma_warm"
-]
+    # -------------------------------------------------------------------------
+    # ELEGANT SOFT (9 themes)
+    # -------------------------------------------------------------------------
+    "pearl_elegant",
+    "pearl_soft",
+    "pearl_pearlescent",
+    "rose_gold_elegant",
+    "rose_gold_soft",
+    "rose_gold_cinematic",
+    "iridescent_shimmer",
+    "iridescent_soft",
+    "iridescent_cinematic",
 
-post_process_presets = [
-  # General purpose
-  "default",
-  "balanced",
-  "studio_neutral",
-  "crisp",
+    # -------------------------------------------------------------------------
+    # COSMIC SPACE (10 themes)
+    # -------------------------------------------------------------------------
+    "nebula_cosmic",
+    "nebula_cinematic",
+    "nebula_dramatic",
+    "stellar_nursery_cosmic",
+    "stellar_nursery_emission",
+    "stellar_nursery_cinematic",
+    "twilight_dusk",
+    "twilight_warm",
+    "twilight_cinematic",
+    "twilight_dramatic",
 
-  # Family-optimized
-  "warm_glow",
-  "cool_depth",
-  "neon_pop",
-  "elegant_soft",
-  "cosmic_depth",
-  "volcanic_heat",
+    # -------------------------------------------------------------------------
+    # SCIENTIFIC (7 themes)
+    # -------------------------------------------------------------------------
+    "viridis_balanced",
+    "viridis_crisp",
+    "plasma_balanced",
+    "plasma_vibrant",
+    "magma_balanced",
+    "magma_cinematic",
+    "magma_dramatic",
 
-  # Specialized looks
-  "cinematic",
-  "filmic",
-  "vibrant",
-  "glassy",
-  "dramatic",
-  "soft",
-  "additive_optimized"
+    # -------------------------------------------------------------------------
+    # CLASSIC (9 themes)
+    # -------------------------------------------------------------------------
+    "spectrum_balanced",
+    "spectrum_vibrant",
+    "spectrum_cinematic",
+    "rainbow_vibrant",
+    "rainbow_punchy",
+    "sunset_cinematic",
+    "sunset_warm",
+    "sunset_dramatic",
+    "monochrome_noir"
 ]
 
 [transfer]
 enabled = true
 host = "holo@rpi.local"
-remote_path = "/home/holo/double-pendulum/watch"
+remote_path = "/home/holo/double-pendulum/watch2"
