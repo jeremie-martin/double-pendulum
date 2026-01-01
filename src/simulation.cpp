@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -512,9 +513,19 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         }
     }
 
-    // Allocate buffers
-    std::vector<PendulumState> states(pendulum_count);
-    std::vector<uint8_t> rgb_buffer(width * height * 3);
+    // Allocate buffers (double-buffer states for async physics)
+    std::vector<PendulumState> states_buffers[2] = {
+        std::vector<PendulumState>(pendulum_count),
+        std::vector<PendulumState>(pendulum_count)
+    };
+    int state_buf_idx = 0;
+
+    // Double-buffer rgb for async video writes
+    std::vector<uint8_t> rgb_buffers[2] = {
+        std::vector<uint8_t>(width * height * 3),
+        std::vector<uint8_t>(width * height * 3)
+    };
+    int rgb_buf_idx = 0;
 
     // Coordinate transform
     float centerX = static_cast<float>(width) / 2.0f;
@@ -535,12 +546,23 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     metrics_collector_.reset();
     event_detector_.reset();
 
+    // Future for async physics computation (returns physics duration)
+    std::future<Duration> physics_future;
+
+    // Future for async video write (returns I/O duration)
+    std::future<Duration> video_future;
+
+    // Prime the pipeline: compute frame 0 physics before the loop
+    {
+        auto physics_start = Clock::now();
+        stepPendulums(pendulums, states_buffers[0], substeps, dt, thread_count);
+        physics_time += Clock::now() - physics_start;
+    }
+
     // Main simulation loop (streaming mode)
     for (int frame = 0; frame < total_frames; ++frame) {
-        // Physics timing
-        auto physics_start = Clock::now();
-        stepPendulums(pendulums, states, substeps, dt, thread_count);
-        physics_time += Clock::now() - physics_start;
+        // Reference to current frame's state buffer (already computed)
+        auto& states = states_buffers[state_buf_idx];
 
         // Save raw simulation data for metric iteration
         if (data_writer) {
@@ -582,7 +604,25 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
             renderer_.drawLine(x1, y1, x2, y2, color.r, color.g, color.b);
         }
 
+        // Launch async physics for next frame while GPU renders current frame
+        // This overlaps CPU physics computation with GPU rendering
+        if (frame + 1 < total_frames) {
+            auto& next_states = states_buffers[1 - state_buf_idx];
+            physics_future = std::async(std::launch::async, [&, next_states_ptr = &next_states]() {
+                auto physics_start = Clock::now();
+                stepPendulums(pendulums, *next_states_ptr, substeps, dt, thread_count);
+                return Duration(Clock::now() - physics_start);
+            });
+        }
+
+        // Wait for previous video write to complete before reusing the rgb buffer
+        // (previous frame was written from the opposite buffer)
+        if (video_future.valid()) {
+            io_time += video_future.get();
+        }
+
         // Read pixels with full post-processing pipeline
+        auto& rgb_buffer = rgb_buffers[rgb_buf_idx];
         renderer_.readPixels(rgb_buffer, static_cast<float>(config_.post_process.exposure),
                              static_cast<float>(config_.post_process.contrast),
                              static_cast<float>(config_.post_process.gamma),
@@ -605,14 +645,18 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
 
         render_time += Clock::now() - render_start;
 
-        // I/O timing
-        auto io_start = Clock::now();
+        // Launch async video write (or sync PNG write)
         if (config_.output.format == OutputFormat::Video) {
-            video_writer->writeFrame(rgb_buffer.data());
+            video_future = std::async(std::launch::async, [&video_writer, &rgb_buffer]() {
+                auto io_start = Clock::now();
+                video_writer->writeFrame(rgb_buffer.data());
+                return Duration(Clock::now() - io_start);
+            });
         } else {
+            auto io_start = Clock::now();
             savePNG(rgb_buffer, width, height, frame);
+            io_time += Clock::now() - io_start;
         }
-        io_time += Clock::now() - io_start;
 
         results.frames_completed = frame + 1;
 
@@ -623,6 +667,22 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
             std::cout << "\rFrame " << std::setw(4) << (frame + 1) << "/" << total_frames
                       << std::flush;
         }
+
+        // Wait for async physics to complete and accumulate timing
+        if (physics_future.valid()) {
+            physics_time += physics_future.get();
+        }
+
+        // Swap to the buffer that now contains next frame's physics
+        state_buf_idx = 1 - state_buf_idx;
+
+        // Swap rgb buffer for next iteration
+        rgb_buf_idx = 1 - rgb_buf_idx;
+    }
+
+    // Wait for final video write to complete
+    if (video_future.valid()) {
+        io_time += video_future.get();
     }
 
     if (video_writer) {
