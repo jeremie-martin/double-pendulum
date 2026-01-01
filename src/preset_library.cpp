@@ -1,192 +1,11 @@
 #include "preset_library.h"
+#include "enum_utils.h"
 
 #include <fstream>
 #include <iostream>
 #include <toml.hpp>
 
-namespace {
-
-ColorScheme parseColorScheme(std::string const& str) {
-    // Original
-    if (str == "spectrum")
-        return ColorScheme::Spectrum;
-    if (str == "rainbow")
-        return ColorScheme::Rainbow;
-    if (str == "heat")
-        return ColorScheme::Heat;
-    if (str == "cool")
-        return ColorScheme::Cool;
-    if (str == "monochrome")
-        return ColorScheme::Monochrome;
-    if (str == "plasma")
-        return ColorScheme::Plasma;
-    if (str == "viridis")
-        return ColorScheme::Viridis;
-    if (str == "inferno")
-        return ColorScheme::Inferno;
-    if (str == "sunset")
-        return ColorScheme::Sunset;
-
-    // New gradient-based
-    if (str == "ember")
-        return ColorScheme::Ember;
-    if (str == "deep_ocean")
-        return ColorScheme::DeepOcean;
-    if (str == "neon_violet")
-        return ColorScheme::NeonViolet;
-    if (str == "aurora")
-        return ColorScheme::Aurora;
-    if (str == "pearl")
-        return ColorScheme::Pearl;
-    if (str == "turbo_pop")
-        return ColorScheme::TurboPop;
-    if (str == "nebula")
-        return ColorScheme::Nebula;
-    if (str == "blackbody")
-        return ColorScheme::Blackbody;
-    if (str == "magma")
-        return ColorScheme::Magma;
-    if (str == "cyberpunk")
-        return ColorScheme::Cyberpunk;
-    if (str == "biolume")
-        return ColorScheme::Biolume;
-    if (str == "gold")
-        return ColorScheme::Gold;
-    if (str == "rose_gold")
-        return ColorScheme::RoseGold;
-    if (str == "twilight")
-        return ColorScheme::Twilight;
-    if (str == "forest_fire")
-        return ColorScheme::ForestFire;
-
-    // Curve-based
-    if (str == "abyssal_glow")
-        return ColorScheme::AbyssalGlow;
-    if (str == "molten_core")
-        return ColorScheme::MoltenCore;
-    if (str == "iridescent")
-        return ColorScheme::Iridescent;
-    if (str == "stellar_nursery")
-        return ColorScheme::StellarNursery;
-    if (str == "whiskey_amber")
-        return ColorScheme::WhiskeyAmber;
-
-    return ColorScheme::Spectrum;
-}
-
-std::string colorSchemeToString(ColorScheme scheme) {
-    switch (scheme) {
-    case ColorScheme::Spectrum:
-        return "spectrum";
-    case ColorScheme::Rainbow:
-        return "rainbow";
-    case ColorScheme::Heat:
-        return "heat";
-    case ColorScheme::Cool:
-        return "cool";
-    case ColorScheme::Monochrome:
-        return "monochrome";
-    case ColorScheme::Plasma:
-        return "plasma";
-    case ColorScheme::Viridis:
-        return "viridis";
-    case ColorScheme::Inferno:
-        return "inferno";
-    case ColorScheme::Sunset:
-        return "sunset";
-    case ColorScheme::Ember:
-        return "ember";
-    case ColorScheme::DeepOcean:
-        return "deep_ocean";
-    case ColorScheme::NeonViolet:
-        return "neon_violet";
-    case ColorScheme::Aurora:
-        return "aurora";
-    case ColorScheme::Pearl:
-        return "pearl";
-    case ColorScheme::TurboPop:
-        return "turbo_pop";
-    case ColorScheme::Nebula:
-        return "nebula";
-    case ColorScheme::Blackbody:
-        return "blackbody";
-    case ColorScheme::Magma:
-        return "magma";
-    case ColorScheme::Cyberpunk:
-        return "cyberpunk";
-    case ColorScheme::Biolume:
-        return "biolume";
-    case ColorScheme::Gold:
-        return "gold";
-    case ColorScheme::RoseGold:
-        return "rose_gold";
-    case ColorScheme::Twilight:
-        return "twilight";
-    case ColorScheme::ForestFire:
-        return "forest_fire";
-    case ColorScheme::AbyssalGlow:
-        return "abyssal_glow";
-    case ColorScheme::MoltenCore:
-        return "molten_core";
-    case ColorScheme::Iridescent:
-        return "iridescent";
-    case ColorScheme::StellarNursery:
-        return "stellar_nursery";
-    case ColorScheme::WhiskeyAmber:
-        return "whiskey_amber";
-    }
-    return "spectrum";
-}
-
-ToneMapOperator parseToneMapOperator(std::string const& str) {
-    if (str == "none")
-        return ToneMapOperator::None;
-    if (str == "reinhard")
-        return ToneMapOperator::Reinhard;
-    if (str == "reinhard_extended")
-        return ToneMapOperator::ReinhardExtended;
-    if (str == "aces")
-        return ToneMapOperator::ACES;
-    if (str == "logarithmic")
-        return ToneMapOperator::Logarithmic;
-    return ToneMapOperator::None;
-}
-
-std::string toneMapToString(ToneMapOperator op) {
-    switch (op) {
-    case ToneMapOperator::None:
-        return "none";
-    case ToneMapOperator::Reinhard:
-        return "reinhard";
-    case ToneMapOperator::ReinhardExtended:
-        return "reinhard_extended";
-    case ToneMapOperator::ACES:
-        return "aces";
-    case ToneMapOperator::Logarithmic:
-        return "logarithmic";
-    }
-    return "none";
-}
-
-NormalizationMode parseNormalizationMode(std::string const& str) {
-    if (str == "per_frame")
-        return NormalizationMode::PerFrame;
-    if (str == "by_count")
-        return NormalizationMode::ByCount;
-    return NormalizationMode::PerFrame;
-}
-
-std::string normalizationToString(NormalizationMode mode) {
-    switch (mode) {
-    case NormalizationMode::PerFrame:
-        return "per_frame";
-    case NormalizationMode::ByCount:
-        return "by_count";
-    }
-    return "per_frame";
-}
-
-} // namespace
+// All enum parsing/serialization now uses enum_utils
 
 PresetLibrary PresetLibrary::load(std::string const& path) {
     PresetLibrary lib;
@@ -203,7 +22,9 @@ PresetLibrary PresetLibrary::load(std::string const& path) {
 
                     if (auto scheme = preset->get("scheme")) {
                         params.scheme =
-                            parseColorScheme(scheme->value<std::string>().value_or("spectrum"));
+                            enum_utils::fromString<ColorScheme>(
+                                scheme->value<std::string>().value_or("spectrum"))
+                                .value_or(ColorScheme::Spectrum);
                     }
                     if (auto start = preset->get("start")) {
                         params.start = start->value<double>().value_or(0.0);
@@ -225,7 +46,9 @@ PresetLibrary PresetLibrary::load(std::string const& path) {
 
                     if (auto tm = preset->get("tone_map")) {
                         params.tone_map =
-                            parseToneMapOperator(tm->value<std::string>().value_or("none"));
+                            enum_utils::fromString<ToneMapOperator>(
+                                tm->value<std::string>().value_or("none"))
+                                .value_or(ToneMapOperator::None);
                     }
                     if (auto wp = preset->get("reinhard_white_point")) {
                         params.reinhard_white_point = wp->value<double>().value_or(1.0);
@@ -240,8 +63,10 @@ PresetLibrary PresetLibrary::load(std::string const& path) {
                         params.gamma = gam->value<double>().value_or(2.2);
                     }
                     if (auto norm = preset->get("normalization")) {
-                        params.normalization = parseNormalizationMode(
-                            norm->value<std::string>().value_or("per_frame"));
+                        params.normalization =
+                            enum_utils::fromString<NormalizationMode>(
+                                norm->value<std::string>().value_or("per_frame"))
+                                .value_or(NormalizationMode::PerFrame);
                     }
 
                     lib.post_process[std::string(name)] = params;
@@ -309,7 +134,7 @@ bool PresetLibrary::save(std::string const& path) const {
 
         for (auto const& [name, params] : color) {
             file << "[color." << name << "]\n";
-            file << "scheme = \"" << colorSchemeToString(params.scheme) << "\"\n";
+            file << "scheme = \"" << enum_utils::toString(params.scheme) << "\"\n";
             file << "start = " << params.start << "\n";
             file << "end = " << params.end << "\n\n";
         }
@@ -324,7 +149,7 @@ bool PresetLibrary::save(std::string const& path) const {
 
         for (auto const& [name, params] : post_process) {
             file << "[post_process." << name << "]\n";
-            file << "tone_map = \"" << toneMapToString(params.tone_map) << "\"\n";
+            file << "tone_map = \"" << enum_utils::toString(params.tone_map) << "\"\n";
             if (params.tone_map == ToneMapOperator::ReinhardExtended ||
                 params.tone_map == ToneMapOperator::Logarithmic) {
                 file << "reinhard_white_point = " << params.reinhard_white_point << "\n";
@@ -332,7 +157,7 @@ bool PresetLibrary::save(std::string const& path) const {
             file << "exposure = " << params.exposure << "\n";
             file << "contrast = " << params.contrast << "\n";
             file << "gamma = " << params.gamma << "\n";
-            file << "normalization = \"" << normalizationToString(params.normalization) << "\"\n\n";
+            file << "normalization = \"" << enum_utils::toString(params.normalization) << "\"\n\n";
         }
     }
 

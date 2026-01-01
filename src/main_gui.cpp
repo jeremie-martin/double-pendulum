@@ -1,5 +1,6 @@
 #include "color_scheme.h"
 #include "config.h"
+#include "enum_utils.h"
 #include "gl_renderer.h"
 #include "metrics/boom_detection.h"
 #include "metrics/causticness_analyzer.h"
@@ -1295,21 +1296,24 @@ void drawColorSection(AppState& state) {
         drawColorRamp(state.config.color, ramp_width, 24.0f);
 
         // Scheme selector (this determines which presets are shown)
-        const char* schemes[] = {
-            "Spectrum",   "Rainbow",    "Heat",           "Cool",        "Monochrome",
-            "Plasma",     "Viridis",    "Inferno",        "Sunset",      "Ember",
-            "DeepOcean",  "NeonViolet", "Aurora",         "Pearl",       "TurboPop",
-            "Nebula",     "Blackbody",  "Magma",          "Cyberpunk",   "Biolume",
-            "Gold",       "RoseGold",   "Twilight",       "ForestFire",  "AbyssalGlow",
-            "MoltenCore", "Iridescent", "StellarNursery", "WhiskeyAmber"};
-
-        int scheme_idx = static_cast<int>(state.config.color.scheme);
-        if (ImGui::Combo("Scheme", &scheme_idx, schemes, 29)) {
-            state.config.color.scheme = static_cast<ColorScheme>(scheme_idx);
-            color_changed = true;
-            // Clear loaded preset and theme when scheme changes
-            state.preset_ui.loaded_color_preset.clear();
-            state.preset_ui.loaded_theme.clear();
+        // Uses magic_enum for automatic enum iteration - no hardcoded list needed
+        std::string current_scheme_name = enum_utils::toDisplayString(state.config.color.scheme);
+        if (ImGui::BeginCombo("Scheme", current_scheme_name.c_str())) {
+            for (auto scheme : enum_utils::values<ColorScheme>()) {
+                bool is_selected = (state.config.color.scheme == scheme);
+                std::string name = enum_utils::toDisplayString(scheme);
+                if (ImGui::Selectable(name.c_str(), is_selected)) {
+                    state.config.color.scheme = scheme;
+                    color_changed = true;
+                    // Clear loaded preset and theme when scheme changes
+                    state.preset_ui.loaded_color_preset.clear();
+                    state.preset_ui.loaded_theme.clear();
+                }
+                if (is_selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
         }
         tooltip("Color mapping style");
 

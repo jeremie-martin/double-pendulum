@@ -1,4 +1,5 @@
 #include "config.h"
+#include "enum_utils.h"
 #include "preset_library.h"
 
 #include <algorithm>
@@ -10,119 +11,36 @@
 
 namespace {
 
+// Unified enum parsing using magic_enum
+template <typename E>
+E parseEnum(std::string const& str, E default_val, char const* type_name) {
+    auto result = enum_utils::fromString<E>(str);
+    if (result.has_value()) {
+        return *result;
+    }
+    std::cerr << "Unknown " << type_name << ": " << str << ", using "
+              << enum_utils::toString(default_val) << "\n";
+    return default_val;
+}
+
 ColorScheme parseColorScheme(std::string const& str) {
-    // Original schemes
-    if (str == "spectrum")
-        return ColorScheme::Spectrum;
-    if (str == "rainbow")
-        return ColorScheme::Rainbow;
-    if (str == "heat")
-        return ColorScheme::Heat;
-    if (str == "cool")
-        return ColorScheme::Cool;
-    if (str == "monochrome")
-        return ColorScheme::Monochrome;
-    if (str == "plasma")
-        return ColorScheme::Plasma;
-    if (str == "viridis")
-        return ColorScheme::Viridis;
-    if (str == "inferno")
-        return ColorScheme::Inferno;
-    if (str == "sunset")
-        return ColorScheme::Sunset;
-
-    // New gradient-based schemes
-    if (str == "ember")
-        return ColorScheme::Ember;
-    if (str == "deep_ocean")
-        return ColorScheme::DeepOcean;
-    if (str == "neon_violet")
-        return ColorScheme::NeonViolet;
-    if (str == "aurora")
-        return ColorScheme::Aurora;
-    if (str == "pearl")
-        return ColorScheme::Pearl;
-    if (str == "turbo_pop")
-        return ColorScheme::TurboPop;
-    if (str == "nebula")
-        return ColorScheme::Nebula;
-    if (str == "blackbody")
-        return ColorScheme::Blackbody;
-    if (str == "magma")
-        return ColorScheme::Magma;
-    if (str == "cyberpunk")
-        return ColorScheme::Cyberpunk;
-    if (str == "biolume")
-        return ColorScheme::Biolume;
-    if (str == "gold")
-        return ColorScheme::Gold;
-    if (str == "rose_gold")
-        return ColorScheme::RoseGold;
-    if (str == "twilight")
-        return ColorScheme::Twilight;
-    if (str == "forest_fire")
-        return ColorScheme::ForestFire;
-
-    // Curve-based schemes
-    if (str == "abyssal_glow")
-        return ColorScheme::AbyssalGlow;
-    if (str == "molten_core")
-        return ColorScheme::MoltenCore;
-    if (str == "iridescent")
-        return ColorScheme::Iridescent;
-    if (str == "stellar_nursery")
-        return ColorScheme::StellarNursery;
-    if (str == "whiskey_amber")
-        return ColorScheme::WhiskeyAmber;
-
-    std::cerr << "Unknown color scheme: " << str << ", using spectrum\n";
-    return ColorScheme::Spectrum;
+    return parseEnum(str, ColorScheme::Spectrum, "color scheme");
 }
 
 OutputFormat parseOutputFormat(std::string const& str) {
-    if (str == "png")
-        return OutputFormat::PNG;
-    if (str == "video")
-        return OutputFormat::Video;
-    std::cerr << "Unknown output format: " << str << ", using png\n";
-    return OutputFormat::PNG;
+    return parseEnum(str, OutputFormat::PNG, "output format");
 }
 
 ToneMapOperator parseToneMapOperator(std::string const& str) {
-    if (str == "none")
-        return ToneMapOperator::None;
-    if (str == "reinhard")
-        return ToneMapOperator::Reinhard;
-    if (str == "reinhard_extended")
-        return ToneMapOperator::ReinhardExtended;
-    if (str == "aces")
-        return ToneMapOperator::ACES;
-    if (str == "logarithmic")
-        return ToneMapOperator::Logarithmic;
-    std::cerr << "Unknown tone map operator: " << str << ", using none\n";
-    return ToneMapOperator::None;
+    return parseEnum(str, ToneMapOperator::None, "tone map operator");
 }
 
 NormalizationMode parseNormalizationMode(std::string const& str) {
-    if (str == "per_frame")
-        return NormalizationMode::PerFrame;
-    if (str == "by_count")
-        return NormalizationMode::ByCount;
-    std::cerr << "Unknown normalization mode: " << str << ", using per_frame\n";
-    return NormalizationMode::PerFrame;
+    return parseEnum(str, NormalizationMode::PerFrame, "normalization mode");
 }
 
 PhysicsQuality parsePhysicsQuality(std::string const& str) {
-    if (str == "low")
-        return PhysicsQuality::Low;
-    if (str == "medium")
-        return PhysicsQuality::Medium;
-    if (str == "high")
-        return PhysicsQuality::High;
-    if (str == "ultra")
-        return PhysicsQuality::Ultra;
-    std::cerr << "Unknown physics quality: " << str << ", using high\n";
-    return PhysicsQuality::High;
+    return parseEnum(str, PhysicsQuality::High, "physics quality");
 }
 
 // Safe value extraction helpers
@@ -787,126 +705,7 @@ bool Config::applyOverride(std::string const& key, std::string const& value) {
     return true;
 }
 
-namespace {
-
-// Also update colorSchemeToString in config.cpp save():
-
-std::string colorSchemeToString(ColorScheme scheme) {
-    switch (scheme) {
-    case ColorScheme::Spectrum:
-        return "spectrum";
-    case ColorScheme::Rainbow:
-        return "rainbow";
-    case ColorScheme::Heat:
-        return "heat";
-    case ColorScheme::Cool:
-        return "cool";
-    case ColorScheme::Monochrome:
-        return "monochrome";
-    case ColorScheme::Plasma:
-        return "plasma";
-    case ColorScheme::Viridis:
-        return "viridis";
-    case ColorScheme::Inferno:
-        return "inferno";
-    case ColorScheme::Sunset:
-        return "sunset";
-    case ColorScheme::Ember:
-        return "ember";
-    case ColorScheme::DeepOcean:
-        return "deep_ocean";
-    case ColorScheme::NeonViolet:
-        return "neon_violet";
-    case ColorScheme::Aurora:
-        return "aurora";
-    case ColorScheme::Pearl:
-        return "pearl";
-    case ColorScheme::TurboPop:
-        return "turbo_pop";
-    case ColorScheme::Nebula:
-        return "nebula";
-    case ColorScheme::Blackbody:
-        return "blackbody";
-    case ColorScheme::Magma:
-        return "magma";
-    case ColorScheme::Cyberpunk:
-        return "cyberpunk";
-    case ColorScheme::Biolume:
-        return "biolume";
-    case ColorScheme::Gold:
-        return "gold";
-    case ColorScheme::RoseGold:
-        return "rose_gold";
-    case ColorScheme::Twilight:
-        return "twilight";
-    case ColorScheme::ForestFire:
-        return "forest_fire";
-    case ColorScheme::AbyssalGlow:
-        return "abyssal_glow";
-    case ColorScheme::MoltenCore:
-        return "molten_core";
-    case ColorScheme::Iridescent:
-        return "iridescent";
-    case ColorScheme::StellarNursery:
-        return "stellar_nursery";
-    case ColorScheme::WhiskeyAmber:
-        return "whiskey_amber";
-    }
-    return "spectrum";
-}
-
-std::string outputFormatToString(OutputFormat format) {
-    switch (format) {
-    case OutputFormat::PNG:
-        return "png";
-    case OutputFormat::Video:
-        return "video";
-    }
-    return "png";
-}
-
-std::string toneMapToString(ToneMapOperator op) {
-    switch (op) {
-    case ToneMapOperator::None:
-        return "none";
-    case ToneMapOperator::Reinhard:
-        return "reinhard";
-    case ToneMapOperator::ReinhardExtended:
-        return "reinhard_extended";
-    case ToneMapOperator::ACES:
-        return "aces";
-    case ToneMapOperator::Logarithmic:
-        return "logarithmic";
-    }
-    return "none";
-}
-
-std::string normalizationToString(NormalizationMode mode) {
-    switch (mode) {
-    case NormalizationMode::PerFrame:
-        return "per_frame";
-    case NormalizationMode::ByCount:
-        return "by_count";
-    }
-    return "per_frame";
-}
-
-std::string physicsQualityToString(PhysicsQuality quality) {
-    switch (quality) {
-    case PhysicsQuality::Low:
-        return "low";
-    case PhysicsQuality::Medium:
-        return "medium";
-    case PhysicsQuality::High:
-        return "high";
-    case PhysicsQuality::Ultra:
-        return "ultra";
-    case PhysicsQuality::Custom:
-        return "custom";
-    }
-    return "high";
-}
-} // namespace
+// Serialization uses enum_utils::toString() directly - no duplicates needed
 
 void Config::save(std::string const& path) const {
     std::ofstream file(path);
@@ -936,7 +735,7 @@ void Config::save(std::string const& path) const {
     file << "angle_variation_deg = " << rad2deg(simulation.angle_variation) << "\n";
     file << "duration_seconds = " << simulation.duration_seconds << "\n";
     file << "total_frames = " << simulation.total_frames << "\n";
-    file << "physics_quality = \"" << physicsQualityToString(simulation.physics_quality) << "\"\n";
+    file << "physics_quality = \"" << enum_utils::toString(simulation.physics_quality) << "\"\n";
     file << "max_dt = " << simulation.max_dt << "\n";
     file << "\n";
 
@@ -949,17 +748,17 @@ void Config::save(std::string const& path) const {
 
     // Post-process section
     file << "[post_process]\n";
-    file << "tone_map = \"" << toneMapToString(post_process.tone_map) << "\"\n";
+    file << "tone_map = \"" << enum_utils::toString(post_process.tone_map) << "\"\n";
     file << "exposure = " << post_process.exposure << "\n";
     file << "contrast = " << post_process.contrast << "\n";
     file << "gamma = " << post_process.gamma << "\n";
-    file << "normalization = \"" << normalizationToString(post_process.normalization) << "\"\n";
+    file << "normalization = \"" << enum_utils::toString(post_process.normalization) << "\"\n";
     file << "reinhard_white_point = " << post_process.reinhard_white_point << "\n";
     file << "\n";
 
     // Color section
     file << "[color]\n";
-    file << "scheme = \"" << colorSchemeToString(color.scheme) << "\"\n";
+    file << "scheme = \"" << enum_utils::toString(color.scheme) << "\"\n";
     file << "start = " << color.start << "\n";
     file << "end = " << color.end << "\n";
     file << "\n";
@@ -1037,7 +836,7 @@ void Config::save(std::string const& path) const {
 
     // Output section
     file << "[output]\n";
-    file << "format = \"" << outputFormatToString(output.format) << "\"\n";
+    file << "format = \"" << enum_utils::toString(output.format) << "\"\n";
     file << "directory = \"" << output.directory << "\"\n";
     file << "filename_prefix = \"" << output.filename_prefix << "\"\n";
     file << "video_codec = \"" << output.video_codec << "\"\n";

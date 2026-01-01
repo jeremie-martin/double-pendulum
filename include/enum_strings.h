@@ -1,12 +1,14 @@
 #pragma once
 
 #include "config.h"
+#include "enum_utils.h"
 #include "optimize/prediction_target.h"
 
-// Centralized enum-to-string conversions
-// These replace duplicate lambdas scattered across main.cpp and simulation.cpp
+// Centralized enum-to-string conversions using magic_enum
+// These provide snake_case output for display/logging
 
 constexpr const char* toString(PhysicsQuality q) {
+    // Using static storage for constexpr compatibility
     switch (q) {
     case PhysicsQuality::Low:
         return "low";
@@ -38,73 +40,9 @@ constexpr const char* toString(ToneMapOperator tm) {
     return "unknown";
 }
 
-constexpr const char* toString(ColorScheme cs) {
-    switch (cs) {
-    // Original
-    case ColorScheme::Spectrum:
-        return "spectrum";
-    case ColorScheme::Rainbow:
-        return "rainbow";
-    case ColorScheme::Heat:
-        return "heat";
-    case ColorScheme::Cool:
-        return "cool";
-    case ColorScheme::Monochrome:
-        return "monochrome";
-    case ColorScheme::Plasma:
-        return "plasma";
-    case ColorScheme::Viridis:
-        return "viridis";
-    case ColorScheme::Inferno:
-        return "inferno";
-    case ColorScheme::Sunset:
-        return "sunset";
-
-    // New gradient-based
-    case ColorScheme::Ember:
-        return "ember";
-    case ColorScheme::DeepOcean:
-        return "deep_ocean";
-    case ColorScheme::NeonViolet:
-        return "neon_violet";
-    case ColorScheme::Aurora:
-        return "aurora";
-    case ColorScheme::Pearl:
-        return "pearl";
-    case ColorScheme::TurboPop:
-        return "turbo_pop";
-    case ColorScheme::Nebula:
-        return "nebula";
-    case ColorScheme::Blackbody:
-        return "blackbody";
-    case ColorScheme::Magma:
-        return "magma";
-    case ColorScheme::Cyberpunk:
-        return "cyberpunk";
-    case ColorScheme::Biolume:
-        return "biolume";
-    case ColorScheme::Gold:
-        return "gold";
-    case ColorScheme::RoseGold:
-        return "rose_gold";
-    case ColorScheme::Twilight:
-        return "twilight";
-    case ColorScheme::ForestFire:
-        return "forest_fire";
-
-    // Curve-based
-    case ColorScheme::AbyssalGlow:
-        return "abyssal_glow";
-    case ColorScheme::MoltenCore:
-        return "molten_core";
-    case ColorScheme::Iridescent:
-        return "iridescent";
-    case ColorScheme::StellarNursery:
-        return "stellar_nursery";
-    case ColorScheme::WhiskeyAmber:
-        return "whiskey_amber";
-    }
-    return "unknown";
+// ColorScheme toString - uses magic_enum for automatic maintenance
+inline std::string toString(ColorScheme cs) {
+    return enum_utils::toString(cs);
 }
 
 constexpr const char* toString(NormalizationMode nm) {

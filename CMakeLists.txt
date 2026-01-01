@@ -55,6 +55,7 @@ add_library(double-pendulum-core STATIC ${CORE_SOURCES})
 target_include_directories(double-pendulum-core PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/external
+    ${CMAKE_SOURCE_DIR}/external/magic_enum/include
     ${ZSTD_INCLUDE_DIRS}
 )
 
