@@ -11,6 +11,9 @@ VideoWriter::~VideoWriter() {
 }
 
 bool VideoWriter::open(std::string const& output_path) {
+    // Check if using NVENC (hardware encoder)
+    bool is_nvenc = codec_.find("nvenc") != std::string::npos;
+
     std::ostringstream cmd;
     cmd << "ffmpeg -y "
         << "-f rawvideo "
@@ -19,9 +22,16 @@ bool VideoWriter::open(std::string const& output_path) {
         << "-r " << fps_ << " "
         << "-i - " // Read from stdin
         << "-c:v " << codec_ << " "
-        << "-pix_fmt yuv420p "
-        << "-crf " << crf_ << " "
-        << "\"" << output_path << "\" "
+        << "-pix_fmt yuv420p ";
+
+    // NVENC uses -cq for constant quality, libx264 uses -crf
+    if (is_nvenc) {
+        cmd << "-cq " << crf_ << " ";
+    } else {
+        cmd << "-crf " << crf_ << " ";
+    }
+
+    cmd << "\"" << output_path << "\" "
         << "2>/dev/null"; // Suppress ffmpeg output
 
     pipe_ = popen(cmd.str().c_str(), "w");
