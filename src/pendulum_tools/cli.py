@@ -603,6 +603,42 @@ def upload(video_dir: Path, credentials: Optional[Path], privacy: str, dry_run: 
         console.print()
         console.print("[green]Upload successful![/green]")
         console.print(f"[bold]URL:[/bold] {url}")
+
+        # Save upload info to metadata.json and archive
+        import json
+
+        from .archive import UploadRecord, append_upload_record
+
+        try:
+            with open(metadata_path) as f:
+                meta_data = json.load(f)
+            meta_data["upload"] = {
+                "video_id": video_id,
+                "url": f"https://youtu.be/{video_id}",
+                "privacy": privacy,
+                "uploaded_at": datetime.now().isoformat(),
+                "title": title,
+                "description": description,
+                "tags": tags,
+            }
+            with open(metadata_path, "w") as f:
+                json.dump(meta_data, f, indent=2)
+                f.write("\n")
+
+            # Archive for future analysis
+            record = UploadRecord.from_metadata(
+                metadata=meta_data,
+                video_id=video_id,
+                title=title,
+                description=description,
+                tags=tags,
+                privacy=privacy,
+                source_dir=video_dir.name,
+            )
+            append_upload_record(record)
+            console.print("[dim]Archived to uploads.jsonl[/dim]")
+        except Exception as e:
+            console.print(f"[yellow]Warning:[/yellow] Failed to archive: {e}")
     else:
         console.print()
         console.print("[red]Upload failed[/red]")
@@ -750,6 +786,41 @@ def batch(
                 console.print(f"  [green]Uploaded:[/green] {url}")
                 logger.info(f"{video_dir.name}: Uploaded successfully - {url}")
                 results.append((video_dir.name, video_id, url))
+
+                # Archive the upload
+                import json
+
+                from .archive import UploadRecord, append_upload_record
+
+                try:
+                    metadata_path = video_dir / "metadata.json"
+                    with open(metadata_path) as f:
+                        meta_data = json.load(f)
+                    meta_data["upload"] = {
+                        "video_id": video_id,
+                        "url": url,
+                        "privacy": privacy,
+                        "uploaded_at": datetime.now().isoformat(),
+                        "title": title,
+                        "description": description,
+                        "tags": tags,
+                    }
+                    with open(metadata_path, "w") as f:
+                        json.dump(meta_data, f, indent=2)
+                        f.write("\n")
+
+                    record = UploadRecord.from_metadata(
+                        metadata=meta_data,
+                        video_id=video_id,
+                        title=title,
+                        description=description,
+                        tags=tags,
+                        privacy=privacy,
+                        source_dir=video_dir.name,
+                    )
+                    append_upload_record(record)
+                except Exception as e:
+                    logger.warning(f"{video_dir.name}: Failed to archive: {e}")
             else:
                 console.print("  [red]Upload failed[/red]")
                 logger.error(f"{video_dir.name}: Upload failed (no video ID returned)")
@@ -1642,7 +1713,7 @@ def _auto_process_single(
         )
 
         if video_id:
-            # Save upload info to metadata.json
+            # Save upload info to metadata.json (including title/description/tags)
             try:
                 with open(metadata_path) as f:
                     meta_data = json.load(f)
@@ -1651,12 +1722,33 @@ def _auto_process_single(
                     "url": f"https://youtu.be/{video_id}",
                     "privacy": privacy,
                     "uploaded_at": datetime.now().isoformat(),
+                    "title": title,
+                    "description": description,
+                    "tags": tags,
                 }
                 with open(metadata_path, "w") as f:
                     json.dump(meta_data, f, indent=2)
                     f.write("\n")
             except Exception as e:
                 log.warning(f"{video_dir.name}: Failed to save upload info: {e}")
+
+            # Archive the upload for future analysis
+            try:
+                from .archive import UploadRecord, append_upload_record
+
+                record = UploadRecord.from_metadata(
+                    metadata=meta_data,
+                    video_id=video_id,
+                    title=title,
+                    description=description,
+                    tags=tags,
+                    privacy=privacy,
+                    source_dir=video_dir.name,
+                )
+                append_upload_record(record)
+                log.debug(f"{video_dir.name}: Archived upload record")
+            except Exception as e:
+                log.warning(f"{video_dir.name}: Failed to archive upload: {e}")
 
             log.info(
                 f"{video_dir.name}: Uploaded successfully: https://youtu.be/{video_id}"
@@ -2200,6 +2292,122 @@ def watch(
     console.print("[bold]Watch stopped.[/bold]")
     console.print(f"Processed: {total_processed}, Failed: {total_failed}")
     log.info(f"Watch stopped. Processed: {total_processed}, Failed: {total_failed}")
+
+
+@main.command()
+@click.option(
+    "--stats", "-s", is_flag=True, help="Show summary statistics"
+)
+@click.option(
+    "--list", "-l", "list_all", is_flag=True, help="List all uploads"
+)
+@click.option(
+    "--limit", "-n", type=int, default=20, help="Number of uploads to show (default: 20)"
+)
+@click.option(
+    "--json", "-j", "as_json", is_flag=True, help="Output as JSON"
+)
+def archive(stats: bool, list_all: bool, limit: int, as_json: bool):
+    """View upload archive and statistics.
+
+    The archive is stored at ~/.local/share/pendulum-tools/uploads.jsonl
+    and contains a record of every successful upload with full context.
+
+    Examples:
+
+        pendulum-tools archive --stats    # Show statistics
+
+        pendulum-tools archive --list     # List recent uploads
+
+        pendulum-tools archive -l -n 50   # List last 50 uploads
+    """
+    from .archive import get_archive_path, get_upload_stats, load_upload_records
+
+    archive_path = get_archive_path()
+
+    if not archive_path.exists():
+        console.print("[yellow]No archive found.[/yellow]")
+        console.print(f"[dim]Archive location: {archive_path}[/dim]")
+        console.print("[dim]Upload some videos to create the archive.[/dim]")
+        return
+
+    records = load_upload_records()
+
+    if not records:
+        console.print("[yellow]Archive is empty.[/yellow]")
+        return
+
+    if as_json:
+        import json
+
+        if stats:
+            print(json.dumps(get_upload_stats(), indent=2))
+        else:
+            # Output records as JSON
+            output = []
+            for r in records[-limit:]:
+                from dataclasses import asdict
+                output.append({k: v for k, v in asdict(r).items() if v is not None and v != {}})
+            print(json.dumps(output, indent=2))
+        return
+
+    if stats:
+        stats_data = get_upload_stats()
+        console.print(f"\n[bold]Upload Archive Statistics[/bold]")
+        console.print(f"[dim]Archive: {archive_path}[/dim]\n")
+
+        console.print(f"[bold]Total uploads:[/bold] {stats_data['total_uploads']}")
+
+        if stats_data.get('average_boom_seconds'):
+            console.print(f"[bold]Average boom time:[/bold] {stats_data['average_boom_seconds']:.1f}s")
+
+        if stats_data.get('themes'):
+            console.print("\n[bold]Themes:[/bold]")
+            for theme, count in sorted(stats_data['themes'].items(), key=lambda x: -x[1]):
+                console.print(f"  {theme}: {count}")
+
+        if stats_data.get('color_presets'):
+            console.print("\n[bold]Color presets:[/bold]")
+            for preset, count in sorted(stats_data['color_presets'].items(), key=lambda x: -x[1]):
+                console.print(f"  {preset}: {count}")
+
+        if stats_data.get('postprocess_presets'):
+            console.print("\n[bold]Post-process presets:[/bold]")
+            for preset, count in sorted(stats_data['postprocess_presets'].items(), key=lambda x: -x[1]):
+                console.print(f"  {preset}: {count}")
+
+        if stats_data.get('processing_templates'):
+            console.print("\n[bold]Processing templates:[/bold]")
+            for template, count in sorted(stats_data['processing_templates'].items(), key=lambda x: -x[1]):
+                console.print(f"  {template}: {count}")
+
+        if stats_data.get('music_tracks'):
+            console.print("\n[bold]Music tracks:[/bold]")
+            for track, count in sorted(stats_data['music_tracks'].items(), key=lambda x: -x[1])[:10]:
+                console.print(f"  {track}: {count}")
+        return
+
+    # Default: list recent uploads
+    table = Table(title=f"Recent Uploads (last {min(limit, len(records))} of {len(records)})")
+    table.add_column("Date", style="dim")
+    table.add_column("Title", style="cyan", max_width=40)
+    table.add_column("Theme")
+    table.add_column("Music", max_width=25)
+    table.add_column("Boom", justify="right")
+    table.add_column("URL", style="blue")
+
+    for r in records[-limit:]:
+        uploaded_at = r.uploaded_at[:10] if r.uploaded_at else "?"
+        title = r.title[:40] + "..." if len(r.title) > 40 else r.title
+        theme = r.theme or "-"
+        music = (r.music_title[:22] + "...") if r.music_title and len(r.music_title) > 25 else (r.music_title or "-")
+        boom = f"{r.boom_seconds:.1f}s" if r.boom_seconds else "-"
+        url = r.url
+
+        table.add_row(uploaded_at, title, theme, music, boom, url)
+
+    console.print(table)
+    console.print(f"\n[dim]Archive: {archive_path}[/dim]")
 
 
 if __name__ == "__main__":
