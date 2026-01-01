@@ -12,7 +12,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <future>
+#include <condition_variable>
+#include <mutex>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -546,17 +547,80 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
     metrics_collector_.reset();
     event_detector_.reset();
 
-    // Future for async physics computation (returns physics duration)
-    std::future<Duration> physics_future;
+    // Dedicated physics worker thread (avoids std::async overhead per frame)
+    std::mutex physics_mutex;
+    std::condition_variable physics_work_cv;
+    std::condition_variable physics_done_cv;
+    int physics_target_buf = -1;  // Which buffer to compute into (-1 = none)
+    Duration physics_frame_time{0};
+    bool physics_has_work = false;
+    bool physics_should_exit = false;
 
-    // Future for async video write (returns I/O duration)
-    std::future<Duration> video_future;
+    std::thread physics_thread([&]() {
+        while (true) {
+            int target_buf;
+            {
+                std::unique_lock<std::mutex> lock(physics_mutex);
+                physics_work_cv.wait(lock, [&]() { return physics_has_work || physics_should_exit; });
+                if (physics_should_exit && !physics_has_work) break;
+                target_buf = physics_target_buf;
+            }
 
-    // Prime the pipeline: compute frame 0 physics before the loop
+            // Do the physics work
+            auto physics_start = Clock::now();
+            stepPendulums(pendulums, states_buffers[target_buf], substeps, dt, thread_count);
+            Duration elapsed = Clock::now() - physics_start;
+
+            {
+                std::lock_guard<std::mutex> lock(physics_mutex);
+                physics_frame_time = elapsed;
+                physics_has_work = false;
+            }
+            physics_done_cv.notify_one();
+        }
+    });
+
+    // Dedicated I/O worker thread (avoids std::async overhead per frame)
+    // Only created for video output mode
+    std::mutex io_mutex;
+    std::condition_variable io_work_cv;
+    std::condition_variable io_done_cv;
+    uint8_t const* io_frame_data = nullptr;
+    Duration io_frame_time{0};
+    bool io_has_work = false;
+    bool io_should_exit = false;
+
+    std::thread io_thread;
+    if (video_writer) {
+        io_thread = std::thread([&]() {
+            while (true) {
+                std::unique_lock<std::mutex> lock(io_mutex);
+                io_work_cv.wait(lock, [&]() { return io_has_work || io_should_exit; });
+                if (io_should_exit && !io_has_work) break;
+
+                // Do the I/O work
+                auto io_start = Clock::now();
+                video_writer->writeFrame(io_frame_data);
+                io_frame_time = Clock::now() - io_start;
+
+                io_has_work = false;
+                io_done_cv.notify_one();
+            }
+        });
+    }
+
+    // Prime the pipeline: compute frame 0 physics using the worker thread
     {
-        auto physics_start = Clock::now();
-        stepPendulums(pendulums, states_buffers[0], substeps, dt, thread_count);
-        physics_time += Clock::now() - physics_start;
+        std::lock_guard<std::mutex> lock(physics_mutex);
+        physics_target_buf = 0;
+        physics_has_work = true;
+        physics_work_cv.notify_one();
+    }
+    {
+        std::unique_lock<std::mutex> lock(physics_mutex);
+        physics_done_cv.wait(lock, [&]() { return !physics_has_work; });
+        physics_time += physics_frame_time;
+        physics_frame_time = Duration{0};
     }
 
     // Main simulation loop (streaming mode)
@@ -604,21 +668,20 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
             renderer_.drawLine(x1, y1, x2, y2, color.r, color.g, color.b);
         }
 
-        // Launch async physics for next frame while GPU renders current frame
-        // This overlaps CPU physics computation with GPU rendering
+        // Signal physics worker to compute next frame while GPU renders current frame
         if (frame + 1 < total_frames) {
-            auto& next_states = states_buffers[1 - state_buf_idx];
-            physics_future = std::async(std::launch::async, [&, next_states_ptr = &next_states]() {
-                auto physics_start = Clock::now();
-                stepPendulums(pendulums, *next_states_ptr, substeps, dt, thread_count);
-                return Duration(Clock::now() - physics_start);
-            });
+            std::lock_guard<std::mutex> lock(physics_mutex);
+            physics_target_buf = 1 - state_buf_idx;
+            physics_has_work = true;
+            physics_work_cv.notify_one();
         }
 
         // Wait for previous video write to complete before reusing the rgb buffer
-        // (previous frame was written from the opposite buffer)
-        if (video_future.valid()) {
-            io_time += video_future.get();
+        if (video_writer) {
+            std::unique_lock<std::mutex> lock(io_mutex);
+            io_done_cv.wait(lock, [&]() { return !io_has_work; });
+            io_time += io_frame_time;
+            io_frame_time = Duration{0};
         }
 
         // Read pixels with full post-processing pipeline
@@ -645,13 +708,12 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
 
         render_time += Clock::now() - render_start;
 
-        // Launch async video write (or sync PNG write)
+        // Signal I/O thread to write frame (or sync PNG write)
         if (config_.output.format == OutputFormat::Video) {
-            video_future = std::async(std::launch::async, [&video_writer, &rgb_buffer]() {
-                auto io_start = Clock::now();
-                video_writer->writeFrame(rgb_buffer.data());
-                return Duration(Clock::now() - io_start);
-            });
+            std::lock_guard<std::mutex> lock(io_mutex);
+            io_frame_data = rgb_buffer.data();
+            io_has_work = true;
+            io_work_cv.notify_one();
         } else {
             auto io_start = Clock::now();
             savePNG(rgb_buffer, width, height, frame);
@@ -668,9 +730,12 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
                       << std::flush;
         }
 
-        // Wait for async physics to complete and accumulate timing
-        if (physics_future.valid()) {
-            physics_time += physics_future.get();
+        // Wait for physics worker to complete and accumulate timing
+        if (frame + 1 < total_frames) {
+            std::unique_lock<std::mutex> lock(physics_mutex);
+            physics_done_cv.wait(lock, [&]() { return !physics_has_work; });
+            physics_time += physics_frame_time;
+            physics_frame_time = Duration{0};
         }
 
         // Swap to the buffer that now contains next frame's physics
@@ -680,12 +745,30 @@ SimulationResults Simulation::run(ProgressCallback progress, std::string const& 
         rgb_buf_idx = 1 - rgb_buf_idx;
     }
 
-    // Wait for final video write to complete
-    if (video_future.valid()) {
-        io_time += video_future.get();
+    // Shutdown physics worker thread
+    {
+        std::lock_guard<std::mutex> lock(physics_mutex);
+        physics_should_exit = true;
+        physics_work_cv.notify_one();
     }
+    physics_thread.join();
 
+    // Wait for final video write and shutdown I/O thread
     if (video_writer) {
+        {
+            std::unique_lock<std::mutex> lock(io_mutex);
+            io_done_cv.wait(lock, [&]() { return !io_has_work; });
+            io_time += io_frame_time;
+        }
+
+        // Signal thread to exit and join
+        {
+            std::lock_guard<std::mutex> lock(io_mutex);
+            io_should_exit = true;
+            io_work_cv.notify_one();
+        }
+        io_thread.join();
+
         auto io_start = Clock::now();
         video_writer->close();
         io_time += Clock::now() - io_start;
