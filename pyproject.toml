@@ -20,6 +20,7 @@ dependencies = [
     "numpy>=2.4.0",
     "zstandard>=0.25.0",
     "loguru>=0.7.0",
+    "nicegui>=2.0.0",
 ]
 
 [project.scripts]

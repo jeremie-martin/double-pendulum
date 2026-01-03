@@ -2295,6 +2295,115 @@ def watch(
 
 
 @main.command()
+@click.argument("batch_dir", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--port", "-p", type=int, default=8080, help="Web server port (default: 8080)"
+)
+@click.option(
+    "--host", type=str, default="0.0.0.0", help="Web server host (default: 0.0.0.0)"
+)
+@click.option(
+    "--privacy",
+    type=click.Choice(["private", "unlisted", "public"]),
+    default=None,
+    help="Default privacy status for uploads (default: from config or private)",
+)
+@click.option(
+    "--credentials",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to credentials directory",
+)
+@click.option(
+    "--music-dir",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to music directory",
+)
+@click.option(
+    "--playlist",
+    type=str,
+    help="Playlist ID to add videos to after upload",
+)
+@click.option(
+    "--upload-delay",
+    type=float,
+    default=60.0,
+    help="Seconds between uploads (default: 60)",
+)
+def serve(
+    batch_dir: Path,
+    port: int,
+    host: str,
+    privacy: Optional[str],
+    credentials: Optional[Path],
+    music_dir: Optional[Path],
+    playlist: Optional[str],
+    upload_delay: float,
+):
+    """Run web dashboard for monitoring and controlling video processing.
+
+    This command starts a web server with a dashboard UI that allows you to:
+
+    \b
+    - Monitor the video processing queue
+    - View current job progress
+    - Pause/resume processing
+    - Manage music selection and weights
+    - Retry failed uploads
+    - Adjust settings at runtime
+
+    The dashboard is accessible at http://host:port/ (default: http://localhost:8080/)
+
+    Examples:
+
+    \b
+        # Start dashboard with default settings
+        pendulum-tools serve /path/to/batch
+
+    \b
+        # Custom port and public uploads
+        pendulum-tools serve /path/to/batch --port 9000 --privacy public
+
+    \b
+        # With playlist
+        pendulum-tools serve /path/to/batch --playlist PLxxxxxxxxxx
+    """
+    from .config import get_config
+    from .server import WatcherState, run_server
+
+    user_config = get_config()
+
+    # Resolve settings from CLI, config, or defaults
+    resolved_privacy = privacy or "private"
+    resolved_playlist = playlist or user_config.playlist_id
+    resolved_credentials = user_config.get_credentials_dir(credentials)
+    resolved_music_dir = user_config.get_music_dir(music_dir)
+
+    console.print(f"[bold]Starting Pendulum Watcher Dashboard[/bold]")
+    console.print(f"[dim]Batch directory: {batch_dir}[/dim]")
+    console.print(f"[dim]Dashboard URL: http://{host}:{port}/[/dim]")
+    console.print()
+
+    # Initialize state
+    state = WatcherState(batch_dir=batch_dir)
+    state.update_settings(
+        upload_delay=upload_delay,
+        privacy=resolved_privacy,
+        playlist_id=resolved_playlist,
+    )
+
+    # Store resolved paths for watcher thread (will be used in Phase 2)
+    state._credentials_dir = resolved_credentials
+    state._music_dir = resolved_music_dir
+    state._user_config = user_config
+
+    console.print("[green]Starting web server...[/green]")
+    console.print("[dim]Press Ctrl+C to stop[/dim]")
+
+    # Run the server (blocks until shutdown)
+    run_server(state, host=host, port=port)
+
+
+@main.command()
 @click.option(
     "--stats", "-s", is_flag=True, help="Show summary statistics"
 )
