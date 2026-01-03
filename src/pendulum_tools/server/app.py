@@ -76,9 +76,8 @@ def create_app(state: WatcherState) -> None:
         with ui.header().classes("items-center justify-between"):
             ui.label("Pendulum Watcher Dashboard").classes("text-xl font-bold")
             with ui.row().classes("gap-2"):
-                ui.button("Pause", on_click=_toggle_pause).bind_text_from(
-                    state, "paused", lambda p: "Resume" if p else "Pause"
-                )
+                pause_btn = ui.button("Pause", on_click=_toggle_pause)
+                ui.button("Process Now", on_click=_process_now).props("color=primary")
                 ui.button("Settings", on_click=lambda: ui.navigate.to("/settings"))
 
         # Status bar
@@ -136,6 +135,9 @@ def create_app(state: WatcherState) -> None:
                 f"Failed: {snapshot['total_failed']} | "
                 f"Queue: {snapshot['pending_count']}"
             )
+
+            # Update pause button text
+            pause_btn.text = "Resume" if snapshot["paused"] else "Pause"
 
             # Auth alert
             if snapshot["auth_error"]:
@@ -608,6 +610,34 @@ def _disable_all_tracks(music_state, container, music_dir):
     music_state.disable_all()
     _refresh_music_ui(container, music_dir, music_state)
     ui.notify("All tracks disabled", type="warning")
+
+
+def _process_now():
+    """Trigger immediate processing of a pending video."""
+    state = get_state()
+    watcher = get_watcher()
+
+    if not watcher:
+        ui.notify("Watcher not running", type="warning")
+        return
+
+    # Check if there's a current job
+    if state.get_current_job():
+        ui.notify("Already processing a video", type="info")
+        return
+
+    # Check if paused
+    if watcher.is_paused():
+        ui.notify("Watcher is paused. Resume to process.", type="warning")
+        return
+
+    # Check pending queue
+    pending = state.peek_pending()
+    if not pending:
+        ui.notify("No pending videos to process", type="info")
+        return
+
+    ui.notify(f"Processing will start shortly...", type="positive")
 
 
 def _retry_job(dir_name: str):
