@@ -6,23 +6,36 @@ import json
 import random
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from .database import MusicDatabase, MusicTrack
+
+if TYPE_CHECKING:
+    from .weights import MusicState
 
 
 class MusicManager:
     """Manages music selection and video muxing."""
 
-    def __init__(self, music_dir: Path | str = "music"):
+    def __init__(
+        self,
+        music_dir: Path | str = "music",
+        music_state: Optional["MusicState"] = None,
+    ):
         """Initialize music manager.
 
         Args:
             music_dir: Path to directory containing database.json and audio files
+            music_state: Optional MusicState for weighted selection
         """
         self.music_dir = Path(music_dir)
         self.database = MusicDatabase(self.music_dir)
         self._rng = random.Random()
+        self._music_state = music_state
+
+    def reload(self) -> None:
+        """Reload the music database from disk."""
+        self.database = MusicDatabase(self.music_dir)
 
     @property
     def tracks(self) -> list[MusicTrack]:
@@ -47,6 +60,15 @@ class MusicManager:
         """
         if not self.tracks:
             raise ValueError("No tracks loaded")
+
+        # Use weighted selection if music state is available
+        if self._music_state:
+            selected = self._music_state.pick_weighted(self.tracks, seed)
+            if selected:
+                self._music_state.record_use(selected.id)
+                return selected
+
+        # Fallback to uniform random
         rng = random.Random(seed) if seed is not None else self._rng
         return rng.choice(self.tracks)
 
@@ -69,6 +91,15 @@ class MusicManager:
         valid = self.database.get_valid_tracks_for_boom(boom_seconds)
         if not valid:
             return None
+
+        # Use weighted selection if music state is available
+        if self._music_state:
+            selected = self._music_state.pick_weighted(valid, seed)
+            if selected:
+                self._music_state.record_use(selected.id)
+                return selected
+
+        # Fallback to uniform random
         rng = random.Random(seed) if seed is not None else self._rng
         return rng.choice(valid)
 

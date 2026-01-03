@@ -281,7 +281,10 @@ class WatcherThread(threading.Thread):
             return
 
         try:
-            manager = MusicManager(self.music_dir)
+            from ..music import get_music_state
+
+            music_state = get_music_state()
+            manager = MusicManager(self.music_dir, music_state=music_state)
         except FileNotFoundError as e:
             self.log.error(f"{job.dir_name}: Music directory not found: {e}")
             self.state.fail_current(f"Music directory not found: {e}", ErrorCategory.CONTENT)

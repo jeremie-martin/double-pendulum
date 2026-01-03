@@ -201,13 +201,91 @@ def create_app(state: WatcherState) -> None:
         """Music management page."""
         ui.dark_mode(True)
 
+        # Get music state and manager
+        from ..music import MusicManager, get_music_state
+
+        music_state = get_music_state()
+
+        # Try to get music directory from watcher
+        watcher = get_watcher()
+        music_dir = getattr(watcher, "music_dir", None) if watcher else None
+
         with ui.header().classes("items-center justify-between"):
             ui.label("Music Library").classes("text-xl font-bold")
             with ui.row().classes("gap-2"):
-                ui.button("Refresh", on_click=_refresh_music).props("flat")
+                ui.button("Refresh", on_click=lambda: _refresh_music_ui(tracks_container, music_dir, music_state)).props("flat")
                 ui.button("Back", on_click=lambda: ui.navigate.to("/")).props("flat")
 
-        ui.label("Music management coming in Phase 5...").classes("text-gray-400 mt-4")
+        # Bulk actions
+        with ui.row().classes("gap-2 mt-4"):
+            ui.button("Reset All Weights", on_click=lambda: _reset_all_weights(music_state, tracks_container, music_dir)).props("flat")
+            ui.button("Enable All", on_click=lambda: _enable_all_tracks(music_state, tracks_container, music_dir)).props("flat color=positive")
+            ui.button("Disable All", on_click=lambda: _disable_all_tracks(music_state, tracks_container, music_dir)).props("flat color=negative")
+
+        ui.separator()
+
+        # Tracks list
+        tracks_container = ui.column().classes("w-full gap-2 mt-2")
+
+        def render_tracks():
+            tracks_container.clear()
+            if not music_dir:
+                with tracks_container:
+                    ui.label("No music directory configured.").classes("text-gray-400")
+                return
+
+            try:
+                manager = MusicManager(music_dir)
+                tracks = manager.tracks
+            except FileNotFoundError:
+                with tracks_container:
+                    ui.label(f"Music directory not found: {music_dir}").classes("text-red-400")
+                return
+
+            if not tracks:
+                with tracks_container:
+                    ui.label("No tracks found in database.").classes("text-gray-400")
+                return
+
+            # Get all weights
+            weights = music_state.snapshot()
+
+            with tracks_container:
+                # Header row
+                with ui.row().classes("w-full items-center gap-4 font-bold text-gray-400 px-2"):
+                    ui.label("Enabled").classes("w-16")
+                    ui.label("Track").classes("flex-1")
+                    ui.label("Drop").classes("w-16 text-right")
+                    ui.label("Weight").classes("w-32")
+                    ui.label("Used").classes("w-16 text-right")
+
+                for track in tracks:
+                    tw = weights.get(track.id, {})
+                    enabled = tw.get("enabled", True)
+                    weight = tw.get("weight", 1.0)
+                    use_count = tw.get("use_count", 0)
+
+                    with ui.row().classes("w-full items-center gap-4 bg-gray-800 rounded px-2 py-2"):
+                        # Enable checkbox
+                        cb = ui.checkbox(value=enabled).classes("w-16")
+                        cb.on_value_change(lambda e, tid=track.id: _toggle_track_enabled(tid, e.value, music_state))
+
+                        # Track info
+                        with ui.column().classes("flex-1"):
+                            ui.label(track.title or track.id).classes("font-bold")
+                            ui.label(track.id).classes("text-xs text-gray-400")
+
+                        # Drop time
+                        ui.label(f"{track.drop_time_seconds:.1f}s").classes("w-16 text-right text-gray-300")
+
+                        # Weight slider
+                        slider = ui.slider(min=0, max=3.0, step=0.1, value=weight).classes("w-32")
+                        slider.on_value_change(lambda e, tid=track.id: _set_track_weight(tid, e.value, music_state))
+
+                        # Use count
+                        ui.label(str(use_count)).classes("w-16 text-right text-gray-400")
+
+        render_tracks()
 
         # Navigation
         ui.separator().classes("mt-4")
@@ -446,9 +524,90 @@ def _reauthenticate():
 
 
 def _refresh_music():
-    """Refresh music library."""
-    # This will be implemented in Phase 5
-    ui.notify("Music refresh not yet implemented", type="warning")
+    """Refresh music library (legacy - use _refresh_music_ui instead)."""
+    ui.notify("Navigate to Music page to refresh", type="info")
+
+
+def _refresh_music_ui(container, music_dir, music_state):
+    """Refresh the music UI by reloading the database."""
+    if not music_dir:
+        ui.notify("No music directory configured", type="warning")
+        return
+
+    from ..music import MusicManager
+
+    try:
+        manager = MusicManager(music_dir)
+        tracks = manager.tracks
+
+        # Re-render the tracks
+        container.clear()
+        weights = music_state.snapshot()
+
+        with container:
+            # Header row
+            with ui.row().classes("w-full items-center gap-4 font-bold text-gray-400 px-2"):
+                ui.label("Enabled").classes("w-16")
+                ui.label("Track").classes("flex-1")
+                ui.label("Drop").classes("w-16 text-right")
+                ui.label("Weight").classes("w-32")
+                ui.label("Used").classes("w-16 text-right")
+
+            for track in tracks:
+                tw = weights.get(track.id, {})
+                enabled = tw.get("enabled", True)
+                weight = tw.get("weight", 1.0)
+                use_count = tw.get("use_count", 0)
+
+                with ui.row().classes("w-full items-center gap-4 bg-gray-800 rounded px-2 py-2"):
+                    cb = ui.checkbox(value=enabled).classes("w-16")
+                    cb.on_value_change(lambda e, tid=track.id: _toggle_track_enabled(tid, e.value, music_state))
+
+                    with ui.column().classes("flex-1"):
+                        ui.label(track.title or track.id).classes("font-bold")
+                        ui.label(track.id).classes("text-xs text-gray-400")
+
+                    ui.label(f"{track.drop_time_seconds:.1f}s").classes("w-16 text-right text-gray-300")
+
+                    slider = ui.slider(min=0, max=3.0, step=0.1, value=weight).classes("w-32")
+                    slider.on_value_change(lambda e, tid=track.id: _set_track_weight(tid, e.value, music_state))
+
+                    ui.label(str(use_count)).classes("w-16 text-right text-gray-400")
+
+        ui.notify(f"Loaded {len(tracks)} tracks", type="positive")
+    except FileNotFoundError as e:
+        ui.notify(f"Music directory not found: {e}", type="negative")
+
+
+def _toggle_track_enabled(track_id: str, enabled: bool, music_state):
+    """Toggle whether a track is enabled."""
+    music_state.set_enabled(track_id, enabled)
+
+
+def _set_track_weight(track_id: str, weight: float, music_state):
+    """Set the weight for a track."""
+    music_state.set_weight(track_id, weight)
+
+
+def _reset_all_weights(music_state, container, music_dir):
+    """Reset all weights to 1.0."""
+    music_state.reset_all_weights()
+    _refresh_music_ui(container, music_dir, music_state)
+    ui.notify("All weights reset to 1.0", type="info")
+
+
+def _enable_all_tracks(music_state, container, music_dir):
+    """Enable all tracks."""
+    music_state.enable_all()
+    _refresh_music_ui(container, music_dir, music_state)
+    ui.notify("All tracks enabled", type="positive")
+
+
+def _disable_all_tracks(music_state, container, music_dir):
+    """Disable all tracks."""
+    music_state.disable_all()
+    _refresh_music_ui(container, music_dir, music_state)
+    ui.notify("All tracks disabled", type="warning")
 
 
 def _retry_job(dir_name: str):
