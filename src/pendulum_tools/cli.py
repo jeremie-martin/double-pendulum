@@ -2369,6 +2369,8 @@ def serve(
     """
     from .config import get_config
     from .server import WatcherState, run_server
+    from .server.app import set_watcher
+    from .server.watcher import WatcherThread
 
     user_config = get_config()
 
@@ -2391,16 +2393,27 @@ def serve(
         playlist_id=resolved_playlist,
     )
 
-    # Store resolved paths for watcher thread (will be used in Phase 2)
-    state._credentials_dir = resolved_credentials
-    state._music_dir = resolved_music_dir
-    state._user_config = user_config
+    # Create and start watcher thread
+    watcher = WatcherThread(
+        state=state,
+        credentials_dir=resolved_credentials,
+        music_dir=resolved_music_dir,
+        user_config=user_config,
+    )
+    set_watcher(watcher)
+    watcher.start()
 
     console.print("[green]Starting web server...[/green]")
     console.print("[dim]Press Ctrl+C to stop[/dim]")
 
-    # Run the server (blocks until shutdown)
-    run_server(state, host=host, port=port)
+    try:
+        # Run the server (blocks until shutdown)
+        run_server(state, host=host, port=port)
+    finally:
+        # Stop watcher thread on exit
+        console.print("[yellow]Stopping watcher...[/yellow]")
+        watcher.stop()
+        watcher.join(timeout=5.0)
 
 
 @main.command()

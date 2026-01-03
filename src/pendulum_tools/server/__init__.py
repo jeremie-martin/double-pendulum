@@ -9,9 +9,11 @@ from .state import (
     ErrorCategory,
     JobInfo,
     JobStatus,
+    RuntimeSettings,
     WatcherState,
     WatcherStatus,
 )
+from .watcher import WatcherThread
 
 __all__ = [
     "create_app",
@@ -19,6 +21,8 @@ __all__ = [
     "ErrorCategory",
     "JobInfo",
     "JobStatus",
+    "RuntimeSettings",
     "WatcherState",
     "WatcherStatus",
+    "WatcherThread",
 ]

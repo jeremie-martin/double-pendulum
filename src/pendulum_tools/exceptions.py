@@ -190,3 +190,15 @@ class RateLimitError(UploadError):
             is_rate_limit=True,
             retry_after=retry_after,
         )
+
+
+class AuthenticationError(PendulumToolsError):
+    """Exception for authentication failures that require user intervention."""
+
+    def __init__(
+        self,
+        message: str = "Authentication failed",
+        requires_reauth: bool = True,
+    ):
+        self.requires_reauth = requires_reauth
+        super().__init__(message)

@@ -419,14 +419,30 @@ def create_app(state: WatcherState) -> None:
 def _toggle_pause():
     """Toggle pause state."""
     state = get_state()
-    state.paused = not state.paused
-    ui.notify("Paused" if state.paused else "Resumed", type="info")
+    watcher = get_watcher()
+    if watcher:
+        if watcher.is_paused():
+            watcher.resume()
+            ui.notify("Resumed", type="positive")
+        else:
+            watcher.pause()
+            ui.notify("Paused", type="warning")
+    else:
+        state.paused = not state.paused
+        ui.notify("Paused" if state.paused else "Resumed", type="info")
 
 
 def _reauthenticate():
     """Trigger re-authentication."""
-    # This will be implemented in Phase 4
-    ui.notify("Re-authentication not yet implemented", type="warning")
+    watcher = get_watcher()
+    if watcher:
+        ui.notify("Authenticating... Please check your browser if prompted.", type="info")
+        if watcher.trigger_reauth():
+            ui.notify("Authentication successful!", type="positive")
+        else:
+            ui.notify("Authentication failed. Check credentials.", type="negative")
+    else:
+        ui.notify("Watcher not running", type="warning")
 
 
 def _refresh_music():
