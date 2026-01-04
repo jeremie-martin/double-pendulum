@@ -442,9 +442,9 @@ def create_app(state: WatcherState) -> None:
             ).classes("w-full")
 
             privacy = ui.select(
-                "Privacy",
                 options=["private", "unlisted", "public"],
                 value=settings["privacy"],
+                label="Privacy",
             ).classes("w-full")
 
             playlist_id = ui.input(
