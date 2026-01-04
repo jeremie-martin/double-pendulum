@@ -114,12 +114,12 @@ def create_app(state: WatcherState) -> None:
 
         # Navigation
         ui.separator().classes("mt-4")
-        with ui.row().classes("gap-2"):
-            ui.button("Dashboard", on_click=lambda: ui.navigate.to("/")).props("flat")
-            ui.button("Music", on_click=lambda: ui.navigate.to("/music")).props("flat")
-            ui.button("History", on_click=lambda: ui.navigate.to("/history")).props("flat")
-            ui.button("Errors", on_click=lambda: ui.navigate.to("/errors")).props("flat")
-            ui.button("Settings", on_click=lambda: ui.navigate.to("/settings")).props("flat")
+        with ui.row().classes("gap-4"):
+            ui.link("DASHBOARD", "/").classes("text-blue-400")
+            ui.link("MUSIC", "/music").classes("text-blue-400")
+            ui.link("HISTORY", "/history").classes("text-blue-400")
+            ui.link("ERRORS", "/errors").classes("text-blue-400")
+            ui.link("SETTINGS", "/settings").classes("text-blue-400")
 
         def refresh():
             """Refresh UI from state."""
@@ -258,7 +258,7 @@ def create_app(state: WatcherState) -> None:
                     ui.label("Enabled").classes("w-16")
                     ui.label("Track").classes("flex-1")
                     ui.label("Drop").classes("w-16 text-right")
-                    ui.label("Weight").classes("w-32")
+                    ui.label("Weight").classes("w-40")
                     ui.label("Used").classes("w-16 text-right")
 
                 for track in tracks:
@@ -280,9 +280,14 @@ def create_app(state: WatcherState) -> None:
                         # Drop time
                         ui.label(f"{track.drop_time_seconds:.1f}s").classes("w-16 text-right text-gray-300")
 
-                        # Weight slider
-                        slider = ui.slider(min=0, max=3.0, step=0.1, value=weight).classes("w-32")
-                        slider.on_value_change(lambda e, tid=track.id: _set_track_weight(tid, e.value, music_state))
+                        # Weight slider with value display
+                        with ui.row().classes("w-40 items-center gap-1"):
+                            slider = ui.slider(min=0, max=3.0, step=0.1, value=weight).classes("flex-1")
+                            weight_label = ui.label(f"{weight:.1f}").classes("w-8 text-right")
+                            slider.on_value_change(lambda e, tid=track.id, lbl=weight_label: (
+                                _set_track_weight(tid, e.value, music_state),
+                                lbl.set_text(f"{e.value:.1f}")
+                            ))
 
                         # Use count
                         ui.label(str(use_count)).classes("w-16 text-right text-gray-400")
@@ -291,12 +296,12 @@ def create_app(state: WatcherState) -> None:
 
         # Navigation
         ui.separator().classes("mt-4")
-        with ui.row().classes("gap-2"):
-            ui.button("Dashboard", on_click=lambda: ui.navigate.to("/")).props("flat")
-            ui.button("Music", on_click=lambda: ui.navigate.to("/music")).props("flat")
-            ui.button("History", on_click=lambda: ui.navigate.to("/history")).props("flat")
-            ui.button("Errors", on_click=lambda: ui.navigate.to("/errors")).props("flat")
-            ui.button("Settings", on_click=lambda: ui.navigate.to("/settings")).props("flat")
+        with ui.row().classes("gap-4"):
+            ui.link("DASHBOARD", "/").classes("text-blue-400")
+            ui.link("MUSIC", "/music").classes("text-blue-400")
+            ui.link("HISTORY", "/history").classes("text-blue-400")
+            ui.link("ERRORS", "/errors").classes("text-blue-400")
+            ui.link("SETTINGS", "/settings").classes("text-blue-400")
 
     @ui.page("/history")
     def history_page():
@@ -339,12 +344,12 @@ def create_app(state: WatcherState) -> None:
 
         # Navigation
         ui.separator().classes("mt-4")
-        with ui.row().classes("gap-2"):
-            ui.button("Dashboard", on_click=lambda: ui.navigate.to("/")).props("flat")
-            ui.button("Music", on_click=lambda: ui.navigate.to("/music")).props("flat")
-            ui.button("History", on_click=lambda: ui.navigate.to("/history")).props("flat")
-            ui.button("Errors", on_click=lambda: ui.navigate.to("/errors")).props("flat")
-            ui.button("Settings", on_click=lambda: ui.navigate.to("/settings")).props("flat")
+        with ui.row().classes("gap-4"):
+            ui.link("DASHBOARD", "/").classes("text-blue-400")
+            ui.link("MUSIC", "/music").classes("text-blue-400")
+            ui.link("HISTORY", "/history").classes("text-blue-400")
+            ui.link("ERRORS", "/errors").classes("text-blue-400")
+            ui.link("SETTINGS", "/settings").classes("text-blue-400")
 
     @ui.page("/errors")
     def errors_page():
@@ -412,12 +417,12 @@ def create_app(state: WatcherState) -> None:
 
         # Navigation
         ui.separator().classes("mt-4")
-        with ui.row().classes("gap-2"):
-            ui.button("Dashboard", on_click=lambda: ui.navigate.to("/")).props("flat")
-            ui.button("Music", on_click=lambda: ui.navigate.to("/music")).props("flat")
-            ui.button("History", on_click=lambda: ui.navigate.to("/history")).props("flat")
-            ui.button("Errors", on_click=lambda: ui.navigate.to("/errors")).props("flat")
-            ui.button("Settings", on_click=lambda: ui.navigate.to("/settings")).props("flat")
+        with ui.row().classes("gap-4"):
+            ui.link("DASHBOARD", "/").classes("text-blue-400")
+            ui.link("MUSIC", "/music").classes("text-blue-400")
+            ui.link("HISTORY", "/history").classes("text-blue-400")
+            ui.link("ERRORS", "/errors").classes("text-blue-400")
+            ui.link("SETTINGS", "/settings").classes("text-blue-400")
 
     @ui.page("/settings")
     def settings_page():
@@ -488,12 +493,12 @@ def create_app(state: WatcherState) -> None:
 
         # Navigation
         ui.separator().classes("mt-4")
-        with ui.row().classes("gap-2"):
-            ui.button("Dashboard", on_click=lambda: ui.navigate.to("/")).props("flat")
-            ui.button("Music", on_click=lambda: ui.navigate.to("/music")).props("flat")
-            ui.button("History", on_click=lambda: ui.navigate.to("/history")).props("flat")
-            ui.button("Errors", on_click=lambda: ui.navigate.to("/errors")).props("flat")
-            ui.button("Settings", on_click=lambda: ui.navigate.to("/settings")).props("flat")
+        with ui.row().classes("gap-4"):
+            ui.link("DASHBOARD", "/").classes("text-blue-400")
+            ui.link("MUSIC", "/music").classes("text-blue-400")
+            ui.link("HISTORY", "/history").classes("text-blue-400")
+            ui.link("ERRORS", "/errors").classes("text-blue-400")
+            ui.link("SETTINGS", "/settings").classes("text-blue-400")
 
 
 def _toggle_pause():
@@ -552,7 +557,7 @@ def _refresh_music_ui(container, music_dir, music_state):
                 ui.label("Enabled").classes("w-16")
                 ui.label("Track").classes("flex-1")
                 ui.label("Drop").classes("w-16 text-right")
-                ui.label("Weight").classes("w-32")
+                ui.label("Weight").classes("w-40")
                 ui.label("Used").classes("w-16 text-right")
 
             for track in tracks:
@@ -571,8 +576,13 @@ def _refresh_music_ui(container, music_dir, music_state):
 
                     ui.label(f"{track.drop_time_seconds:.1f}s").classes("w-16 text-right text-gray-300")
 
-                    slider = ui.slider(min=0, max=3.0, step=0.1, value=weight).classes("w-32")
-                    slider.on_value_change(lambda e, tid=track.id: _set_track_weight(tid, e.value, music_state))
+                    with ui.row().classes("w-40 items-center gap-1"):
+                        slider = ui.slider(min=0, max=3.0, step=0.1, value=weight).classes("flex-1")
+                        weight_label = ui.label(f"{weight:.1f}").classes("w-8 text-right")
+                        slider.on_value_change(lambda e, tid=track.id, lbl=weight_label: (
+                            _set_track_weight(tid, e.value, music_state),
+                            lbl.set_text(f"{e.value:.1f}")
+                        ))
 
                     ui.label(str(use_count)).classes("w-16 text-right text-gray-400")
 

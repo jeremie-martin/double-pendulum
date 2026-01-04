@@ -224,6 +224,7 @@ class WatcherThread(threading.Thread):
         settings = self.state.settings
 
         # --- Step 1: Process video ---
+        print(f"  [1/3] Processing video effects...")
         self.state.update_current_progress(
             status=JobStatus.PROCESSING,
             message="Processing video effects...",
@@ -269,6 +270,7 @@ class WatcherThread(threading.Thread):
             return
 
         # --- Step 2: Add music ---
+        print(f"  [2/3] Adding music...")
         self.state.update_current_progress(
             status=JobStatus.ADDING_MUSIC,
             message="Adding music...",
@@ -336,6 +338,7 @@ class WatcherThread(threading.Thread):
             return
 
         # --- Step 3: Upload ---
+        print(f"  [3/3] Uploading to YouTube...")
         self.state.update_current_progress(
             status=JobStatus.UPLOADING,
             message="Uploading to YouTube...",
@@ -408,9 +411,11 @@ class WatcherThread(threading.Thread):
                 music_track=job.music_track,
                 template_used=job.template_used,
             )
+            print(f"  [SUCCESS] https://youtu.be/{video_id}")
             self.log.info(f"{job.dir_name}: Uploaded successfully: https://youtu.be/{video_id}")
 
         except RateLimitError as e:
+            print(f"  [RATE LIMITED] {e}")
             self.log.warning(f"{job.dir_name}: Rate limited: {e}")
             self.state.fail_current(str(e), ErrorCategory.TRANSIENT)
 
@@ -418,10 +423,12 @@ class WatcherThread(threading.Thread):
             # Check if this looks like an auth error
             error_str = str(e).lower()
             if any(word in error_str for word in ["401", "403", "auth", "credential", "token"]):
+                print(f"  [AUTH ERROR] {e}")
                 self.log.error(f"{job.dir_name}: Auth error during upload: {e}")
                 self.state.set_auth_error(str(e))
                 # Don't mark as failed - keep in current so we can retry after reauth
             else:
+                print(f"  [UPLOAD FAILED] {e}")
                 self.log.error(f"{job.dir_name}: Upload error: {e}")
                 self.state.fail_current(str(e), ErrorCategory.TRANSIENT)
 
@@ -429,9 +436,11 @@ class WatcherThread(threading.Thread):
             # Check for auth-related exceptions
             error_str = str(e).lower()
             if any(word in error_str for word in ["401", "403", "auth", "credential", "token", "expired"]):
+                print(f"  [AUTH ERROR] {e}")
                 self.log.error(f"{job.dir_name}: Auth exception: {e}")
                 self.state.set_auth_error(str(e))
             else:
+                print(f"  [FAILED] {e}")
                 self.log.error(f"{job.dir_name}: Upload exception: {e}")
                 self.state.fail_current(str(e), ErrorCategory.TRANSIENT)
 
@@ -499,18 +508,23 @@ class WatcherThread(threading.Thread):
     def run(self) -> None:
         """Main thread loop."""
         self.log.info("Watcher thread starting")
+        print("[WATCHER] Starting...")
         self.state.status = WatcherStatus.STARTING
 
         # Authenticate
+        print("[WATCHER] Authenticating with YouTube...")
         if not self._authenticate():
+            print("[WATCHER] Authentication FAILED - check credentials")
             self.log.error("Initial authentication failed")
             # Don't exit - user can fix via UI
             self.state.status = WatcherStatus.AUTH_REQUIRED
         else:
+            print("[WATCHER] Authentication successful")
             self.state.status = WatcherStatus.RUNNING
 
         # Initial scan for already-processed videos
         self._scan_existing()
+        print(f"[WATCHER] Found {len(self._processed)} already-processed videos")
 
         # Main loop
         while not self._stop_event.is_set():
@@ -540,8 +554,10 @@ class WatcherThread(threading.Thread):
                             # Ready to process - get it from queue
                             next_job = self.state.get_next_pending()
                             if next_job and next_job.dir_name == job.dir_name:
+                                next_job.status = JobStatus.PROCESSING
                                 self.state.set_current_job(next_job)
                                 self.log.info(f"Processing: {next_job.dir_name}")
+                                print(f"\n[PROCESSING] {next_job.dir_name}")
 
                                 # Process the job
                                 self._process_job(next_job)
