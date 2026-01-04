@@ -3,83 +3,79 @@
 from __future__ import annotations
 
 import json
-import random
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from .database import MusicDatabase, MusicTrack
 
-if TYPE_CHECKING:
-    from .weights import MusicState
-
 
 class MusicManager:
-    """Manages music selection and video muxing."""
+    """Manages music selection and video muxing.
 
-    def __init__(
-        self,
-        music_dir: Path | str = "music",
-        music_state: Optional["MusicState"] = None,
-    ):
+    Selection uses weighted random based on track preferences stored
+    in preferences.json (same directory as database.json).
+    """
+
+    def __init__(self, music_dir: Path | str = "music"):
         """Initialize music manager.
 
         Args:
             music_dir: Path to directory containing database.json and audio files
-            music_state: Optional MusicState for weighted selection
         """
         self.music_dir = Path(music_dir)
         self.database = MusicDatabase(self.music_dir)
-        self._rng = random.Random()
-        self._music_state = music_state
 
     def reload(self) -> None:
-        """Reload the music database from disk."""
-        self.database = MusicDatabase(self.music_dir)
+        """Reload the music database and preferences from disk."""
+        self.database.reload()
 
     @property
     def tracks(self) -> list[MusicTrack]:
-        """Get all available tracks."""
+        """Get all tracks (including disabled ones)."""
         return self.database.tracks
+
+    @property
+    def enabled_tracks(self) -> list[MusicTrack]:
+        """Get only enabled tracks with weight > 0."""
+        return self.database.get_enabled_tracks()
 
     def get_track(self, track_id: str) -> Optional[MusicTrack]:
         """Get a track by ID."""
         return self.database.get_track(track_id)
 
     def random_track(self, seed: Optional[int] = None) -> MusicTrack:
-        """Get a random track.
+        """Get a random track using weighted selection.
 
         Args:
             seed: Optional random seed for reproducibility
 
         Returns:
-            Random track
+            Random track (weighted by preferences)
 
         Raises:
-            ValueError: If no tracks available
+            ValueError: If no enabled tracks available
         """
-        if not self.tracks:
-            raise ValueError("No tracks loaded")
+        candidates = self.database.get_enabled_tracks()
+        if not candidates:
+            raise ValueError("No enabled tracks available")
 
-        # Use weighted selection if music state is available
-        if self._music_state:
-            selected = self._music_state.pick_weighted(self.tracks, seed)
-            if selected:
-                self._music_state.record_use(selected.id)
-                return selected
+        selected = self.database.pick_weighted(candidates, seed)
+        if selected:
+            self.database.record_use(selected.id)
+            return selected
 
-        # Fallback to uniform random
-        rng = random.Random(seed) if seed is not None else self._rng
-        return rng.choice(self.tracks)
+        raise ValueError("No tracks available for selection")
 
     def pick_track_for_boom(
         self,
         boom_seconds: float,
         seed: Optional[int] = None,
     ) -> Optional[MusicTrack]:
-        """Pick a random track where drop > boom_seconds.
+        """Pick a weighted random track where drop > boom_seconds.
 
         This ensures the visual boom syncs with or leads the music drop.
+        Uses weighted selection based on track preferences.
 
         Args:
             boom_seconds: Time of visual boom in seconds
@@ -92,16 +88,33 @@ class MusicManager:
         if not valid:
             return None
 
-        # Use weighted selection if music state is available
-        if self._music_state:
-            selected = self._music_state.pick_weighted(valid, seed)
-            if selected:
-                self._music_state.record_use(selected.id)
-                return selected
+        selected = self.database.pick_weighted(valid, seed)
+        if selected:
+            self.database.record_use(selected.id)
+            return selected
 
-        # Fallback to uniform random
-        rng = random.Random(seed) if seed is not None else self._rng
-        return rng.choice(valid)
+        return None
+
+    # Preference management (delegates to database)
+    def set_weight(self, track_id: str, weight: float) -> bool:
+        """Set the weight for a track."""
+        return self.database.set_weight(track_id, weight)
+
+    def set_enabled(self, track_id: str, enabled: bool) -> bool:
+        """Enable or disable a track."""
+        return self.database.set_enabled(track_id, enabled)
+
+    def reset_all_weights(self) -> None:
+        """Reset all track weights to 1.0."""
+        self.database.reset_all_weights()
+
+    def enable_all(self) -> None:
+        """Enable all tracks."""
+        self.database.enable_all()
+
+    def disable_all(self) -> None:
+        """Disable all tracks."""
+        self.database.disable_all()
 
     @staticmethod
     def mux_with_audio(

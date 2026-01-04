@@ -1,28 +1,15 @@
-"""Pendulum Tools Web Server.
+"""Dashboard server for pendulum video processing.
 
-Provides a NiceGUI-based web dashboard for monitoring and controlling
-the video processing pipeline.
+Provides a web-based UI for monitoring and controlling video processing,
+with proper integration into the existing codebase.
 """
 
-from .app import create_app, run_server
-from .state import (
-    ErrorCategory,
-    JobInfo,
-    JobStatus,
-    RuntimeSettings,
-    WatcherState,
-    WatcherStatus,
-)
-from .watcher import WatcherThread
+from .app import run_dashboard
+from .processor import ProcessorState, ProcessorStatus, VideoProcessor
 
 __all__ = [
-    "create_app",
-    "run_server",
-    "ErrorCategory",
-    "JobInfo",
-    "JobStatus",
-    "RuntimeSettings",
-    "WatcherState",
-    "WatcherStatus",
-    "WatcherThread",
+    "VideoProcessor",
+    "ProcessorState",
+    "ProcessorStatus",
+    "run_dashboard",
 ]

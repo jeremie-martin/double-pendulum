@@ -2303,117 +2303,134 @@ def watch(
     "--host", type=str, default="0.0.0.0", help="Web server host (default: 0.0.0.0)"
 )
 @click.option(
-    "--privacy",
-    type=click.Choice(["private", "unlisted", "public"]),
-    default=None,
-    help="Default privacy status for uploads (default: from config or private)",
-)
-@click.option(
     "--credentials",
-    type=click.Path(exists=True, path_type=Path),
-    help="Path to credentials directory",
+    "-c",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Directory containing client_secrets.json",
 )
 @click.option(
     "--music-dir",
+    "-m",
     type=click.Path(exists=True, path_type=Path),
-    help="Path to music directory",
+    default=None,
+    help="Music database directory",
+)
+@click.option(
+    "--privacy",
+    type=click.Choice(["private", "unlisted", "public"]),
+    default="private",
+    help="Privacy status for uploaded videos",
 )
 @click.option(
     "--playlist",
     type=str,
-    help="Playlist ID to add videos to after upload",
+    default=None,
+    help="Playlist ID to add uploaded videos to",
 )
 @click.option(
     "--upload-delay",
     type=float,
     default=60.0,
-    help="Seconds between uploads (default: 60)",
+    help="Seconds to wait between uploads (default: 60.0)",
+)
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Enable verbose logging",
 )
 def serve(
     batch_dir: Path,
     port: int,
     host: str,
-    privacy: Optional[str],
     credentials: Optional[Path],
     music_dir: Optional[Path],
+    privacy: str,
     playlist: Optional[str],
     upload_delay: float,
+    verbose: bool,
 ):
     """Run web dashboard for monitoring and controlling video processing.
 
     This command starts a web server with a dashboard UI that allows you to:
 
     \b
-    - Monitor the video processing queue
-    - View current job progress
+    - Monitor the video processing queue in real-time
     - Pause/resume processing
-    - Manage music selection and weights
-    - Retry failed uploads
-    - Adjust settings at runtime
+    - Change settings at runtime (upload delay, privacy, etc.)
+    - Manage music selection (weights, enable/disable tracks)
+    - View processing history
 
-    The dashboard is accessible at http://host:port/ (default: http://localhost:8080/)
+    The dashboard is accessible at http://host:port/
+
+    Unlike the 'watch' command, the dashboard uses non-blocking waits so you
+    can change settings (like upload delay) at any time and they take effect
+    immediately.
 
     Examples:
 
     \b
-        # Start dashboard with default settings
+        # Start dashboard
         pendulum-tools serve /path/to/batch
 
     \b
-        # Custom port and public uploads
+        # Custom port with public uploads
         pendulum-tools serve /path/to/batch --port 9000 --privacy public
-
-    \b
-        # With playlist
-        pendulum-tools serve /path/to/batch --playlist PLxxxxxxxxxx
     """
     from .config import get_config
-    from .server import WatcherState, run_server
-    from .server.app import set_watcher
-    from .server.watcher import WatcherThread
+    from .logging import setup_logging
+    from .server import ProcessorState, VideoProcessor, run_dashboard
+
+    setup_logging(verbose=verbose)
+    log = get_logger("serve")
 
     user_config = get_config()
-
-    # Resolve settings from CLI, config, or defaults
-    resolved_privacy = privacy or "private"
-    resolved_playlist = playlist or user_config.playlist_id
     resolved_credentials = user_config.get_credentials_dir(credentials)
     resolved_music_dir = user_config.get_music_dir(music_dir)
+    resolved_playlist = playlist or user_config.playlist_id
 
-    console.print(f"[bold]Starting Pendulum Watcher Dashboard[/bold]")
-    console.print(f"[dim]Batch directory: {batch_dir}[/dim]")
-    console.print(f"[dim]Dashboard URL: http://{host}:{port}/[/dim]")
+    console.print("[bold]Starting Pendulum Dashboard[/bold]")
+    console.print(f"  Batch: {batch_dir}")
+    console.print(f"  URL: http://{host}:{port}/")
+    console.print(f"  Privacy: {privacy}")
+    if resolved_playlist:
+        console.print(f"  Playlist: {resolved_playlist}")
     console.print()
 
-    # Initialize state
-    state = WatcherState(batch_dir=batch_dir)
-    state.update_settings(
-        upload_delay=upload_delay,
-        privacy=resolved_privacy,
-        playlist_id=resolved_playlist,
-    )
+    # Create state with initial settings
+    state = ProcessorState()
+    state.upload_delay = upload_delay
+    state.privacy = privacy
+    state.playlist_id = resolved_playlist
+    state.delete_after_upload = user_config.delete_after_upload
 
-    # Create and start watcher thread
-    watcher = WatcherThread(
+    # Create and start processor
+    processor = VideoProcessor(
         state=state,
+        batch_dir=batch_dir,
         credentials_dir=resolved_credentials,
         music_dir=resolved_music_dir,
         user_config=user_config,
     )
-    set_watcher(watcher)
-    watcher.start()
+    processor.start()
 
-    console.print("[green]Starting web server...[/green]")
-    console.print("[dim]Press Ctrl+C to stop[/dim]")
+    log.info(f"Starting dashboard on {host}:{port}")
 
     try:
-        # Run the server (blocks until shutdown)
-        run_server(state, host=host, port=port)
+        # Run dashboard (blocks until shutdown)
+        run_dashboard(
+            processor=processor,
+            state=state,
+            music_dir=resolved_music_dir,
+            host=host,
+            port=port,
+        )
     finally:
-        # Stop watcher thread on exit
-        console.print("[yellow]Stopping watcher...[/yellow]")
-        watcher.stop()
-        watcher.join(timeout=5.0)
+        console.print("[yellow]Stopping processor...[/yellow]")
+        processor.stop()
+        processor.join(timeout=5.0)
+        console.print("[bold]Dashboard stopped.[/bold]")
 
 
 @main.command()
