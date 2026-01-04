@@ -2379,7 +2379,7 @@ def serve(
         pendulum-tools serve /path/to/batch --port 9000 --privacy public
     """
     from .config import get_config
-    from .logging import setup_logging
+    from .logging import get_logger, setup_logging
     from .server import ProcessorState, VideoProcessor, run_dashboard
 
     setup_logging(verbose=verbose)
