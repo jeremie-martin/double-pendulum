@@ -45,8 +45,7 @@ void printUsage(char const* program) {
               << "  " << program << " config/default.toml --set simulation.pendulum_count=50000\n"
               << "  " << program << " config/default.toml --set preset.theme=ember_cinematic\n"
               << "  " << program << " config/default.toml --set preset.color=cyberpunk_full\n"
-              << "  " << program << " config/batch.toml\n"
-;
+              << "  " << program << " config/batch.toml\n";
 }
 
 // Parsed command-line options

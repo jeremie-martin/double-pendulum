@@ -737,7 +737,7 @@ class MainWindow(QMainWindow):
 
     def _open_batch_dialog(self) -> None:
         """Open a file dialog to select a batch directory."""
-        start_dir = str(self.batch_dir) if self.batch_dir else str(Path.cwd() / "batch_output")
+        start_dir = str(self.batch_dir) if self.batch_dir else str(Path("/tmp/double-pendulum-batch"))
         dir_path = QFileDialog.getExistingDirectory(self, "Select Batch Directory", start_dir)
         if dir_path:
             self._load_batch(Path(dir_path))
