@@ -189,14 +189,6 @@ Recompute metrics from saved data:
 ./pendulum-metrics output/run_xxx/simulation_data.bin --validate
 ```
 
-## pendulum-optimize
-
-Grid search for optimal parameters:
-
-```bash
-./pendulum-optimize annotations.json --grid-steps 8
-```
-
 ## pendulum-stability
 
 Analyze metric stability across pendulum counts:

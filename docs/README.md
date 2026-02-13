@@ -29,7 +29,6 @@ The "boom" is the peak moment when pendulums spread into a caustic pattern—thi
 | `pendulum` | Main simulation with GPU rendering |
 | `pendulum-gui` | Interactive preview and analysis |
 | `pendulum-metrics` | Recompute metrics from saved data |
-| `pendulum-optimize` | Parameter optimization via grid search |
 | `pendulum-stability` | Metric stability analysis |
 
 ## Output

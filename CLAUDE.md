@@ -33,7 +33,6 @@ C++20 double pendulum physics simulation with GPU-accelerated rendering. Simulat
 | `src/batch_generator.cpp` | Batch video generation with probe filtering |
 | `src/main_gui.cpp` | GUI application with real-time preview and analysis |
 | `src/main_metrics.cpp` | Metric iteration tool for recomputing metrics |
-| `src/main_optimize.cpp` | Metric parameter optimization via grid search |
 | `src/main_stability.cpp` | Metric stability analysis across pendulum counts |
 | `src/simulation_data.cpp` | ZSTD-compressed simulation data I/O |
 | `src/gl_renderer.cpp` | GPU line rendering with GLSL shaders |

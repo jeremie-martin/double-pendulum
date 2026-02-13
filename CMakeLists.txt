@@ -90,15 +90,6 @@ target_compile_options(pendulum-metrics PRIVATE
     -Wall -Wextra -Wpedantic
 )
 
-# Metric optimization executable
-add_executable(pendulum-optimize src/main_optimize.cpp)
-
-target_link_libraries(pendulum-optimize PRIVATE double-pendulum-core)
-
-target_compile_options(pendulum-optimize PRIVATE
-    -Wall -Wextra -Wpedantic
-)
-
 # Metric stability analysis executable
 add_executable(pendulum-stability src/main_stability.cpp)
 
