@@ -385,13 +385,15 @@ void BatchGenerator::resume() {
     // Find latest batch directory
     std::filesystem::path latest_batch;
     std::filesystem::file_time_type latest_time{};
+    bool found_resumable_batch = false;
 
     for (auto const& entry : std::filesystem::directory_iterator(config_.output_directory)) {
         if (entry.is_directory() && entry.path().filename().string().starts_with("batch_")) {
             auto progress_file = entry.path() / "progress.json";
             if (std::filesystem::exists(progress_file)) {
                 auto time = std::filesystem::last_write_time(progress_file);
-                if (time > latest_time) {
+                if (!found_resumable_batch || time > latest_time) {
+                    found_resumable_batch = true;
                     latest_time = time;
                     latest_batch = entry.path();
                 }
@@ -399,7 +401,7 @@ void BatchGenerator::resume() {
         }
     }
 
-    if (latest_batch.empty()) {
+    if (!found_resumable_batch || latest_batch.empty()) {
         std::cerr << "No resumable batch found in " << config_.output_directory << "\n";
         return;
     }

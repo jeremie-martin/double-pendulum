@@ -11,6 +11,9 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
 # Run simulation
 ./build/pendulum config/default.toml
 
+# Run batch with boom server auto-start
+./scripts/run_batch_with_boom.sh
+
 # With GUI (optional)
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_GUI=ON && cmake --build build -j
 ./build/pendulum-gui
