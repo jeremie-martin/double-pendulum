@@ -41,8 +41,7 @@ Launcher options:
 
 Examples:
   scripts/run_batch_with_boom.sh
-  scripts/run_batch_with_boom.sh -- --resume
-  scripts/run_batch_with_boom.sh --config config/batch.toml -- --set output.directory=batch_output/test
+  scripts/run_batch_with_boom.sh --config config/batch.toml
 EOF
 }
 
@@ -76,6 +75,7 @@ while (($#)); do
             ;;
         --wait-seconds)
             [[ $# -ge 2 ]] || die "--wait-seconds requires a value"
+            [[ "$2" =~ ^[0-9]+$ ]] || die "--wait-seconds must be a positive integer, got: $2"
             WAIT_SECONDS="$2"
             shift 2
             ;;
@@ -175,6 +175,7 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
     fi
 done < "$BATCH_CONFIG"
 
+CAUGHT_SIGNAL=""
 cleanup() {
     if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
         if [[ "$KEEP_SERVER" -eq 1 ]]; then
@@ -185,8 +186,15 @@ cleanup() {
         kill "$SERVER_PID" 2>/dev/null || true
         wait "$SERVER_PID" 2>/dev/null || true
     fi
+    # Re-raise caught signal so parent sees signal death, not exit 0
+    if [[ -n "$CAUGHT_SIGNAL" ]]; then
+        trap - "$CAUGHT_SIGNAL"
+        kill -"$CAUGHT_SIGNAL" $$
+    fi
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'CAUGHT_SIGNAL=INT; exit 130' INT
+trap 'CAUGHT_SIGNAL=TERM; exit 143' TERM
 
 cd "$ROOT_DIR"
 
@@ -228,12 +236,11 @@ PY
 fi
 
 if [[ "$SOCKET_REUSE" -eq 0 ]]; then
-    if [[ -S "$SOCKET_PATH" || -f "$SOCKET_PATH" ]]; then
-        rm -f "$SOCKET_PATH"
-    fi
+    rm -f "$SOCKET_PATH"
 
     echo "[launcher] Starting boom server..."
     (
+        exec 9>&- 2>/dev/null  # Release lock FD so boom server doesn't hold it
         cd "$BOOM_REPO"
         PYTHONPATH="$PYTHONPATH_PREFIX" "$PYTHON_BIN" scripts/boom_server.py --socket "$SOCKET_PATH" "$BOOM_MODEL"
     ) &

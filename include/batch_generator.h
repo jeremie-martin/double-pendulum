@@ -140,7 +140,7 @@ struct TransferConfig {
 
 // Batch configuration loaded from TOML
 struct BatchConfig {
-    std::string output_directory = "batch_output";
+    std::string output_directory = "/tmp/double-pendulum-batch";
     int count = 10;
 
     // Physics parameter ranges for randomization
@@ -210,12 +210,9 @@ struct BatchProgress {
     int total = 0;
     int completed = 0;
     int failed = 0;
-    std::vector<std::string> completed_ids;
-    std::vector<std::string> failed_ids;
     std::vector<RunResult> results;  // Detailed results for summary
 
     void save(std::filesystem::path const& path) const;
-    static BatchProgress load(std::filesystem::path const& path);
 };
 
 // Batch generator for mass production
@@ -225,9 +222,6 @@ public:
 
     // Run full batch from start
     void run();
-
-    // Resume from progress file
-    void resume();
 
 private:
     BatchConfig config_;
@@ -256,9 +250,6 @@ private:
 
     // Save progress after each video
     void saveProgress();
-
-    // Load existing progress for resume
-    bool loadProgress();
 
     // Create symlink to video in batch root folder
     void createVideoSymlink(std::string const& video_path, std::string const& link_name);

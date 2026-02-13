@@ -32,8 +32,7 @@ void printUsage(char const* program) {
               << "Options:\n"
               << "  --set <key>=<value>    Override config parameter (can be used multiple times)\n"
               << "  --analysis             Enable analysis mode (extended statistics)\n"
-              << "  --save-data            Save raw simulation data for metric iteration\n"
-              << "  --resume               Resume interrupted batch\n\n"
+              << "  --save-data            Save raw simulation data for metric iteration\n\n"
               << "Parameter keys use dot notation: section.parameter\n"
               << "  Sections: physics, simulation, render, post_process, color, output, preset\n\n"
               << "Preset options (from config/presets.toml):\n"
@@ -47,7 +46,7 @@ void printUsage(char const* program) {
               << "  " << program << " config/default.toml --set preset.theme=ember_cinematic\n"
               << "  " << program << " config/default.toml --set preset.color=cyberpunk_full\n"
               << "  " << program << " config/batch.toml\n"
-              << "  " << program << " config/batch.toml --resume\n";
+;
 }
 
 // Parsed command-line options
@@ -149,7 +148,7 @@ std::optional<std::pair<std::string, std::string>> parseSetArg(std::string const
     return std::make_pair(arg.substr(0, eq_pos), arg.substr(eq_pos + 1));
 }
 
-int runBatch(std::string const& batch_config_path, bool resume,
+int runBatch(std::string const& batch_config_path,
              std::vector<std::pair<std::string, std::string>> const& overrides) {
     std::cout << "Loading batch config from: " << batch_config_path << "\n";
     BatchConfig config = BatchConfig::load(batch_config_path);
@@ -163,12 +162,7 @@ int runBatch(std::string const& batch_config_path, bool resume,
     }
 
     BatchGenerator generator(config);
-
-    if (resume) {
-        generator.resume();
-    } else {
-        generator.run();
-    }
+    generator.run();
 
     return 0;
 }
@@ -189,7 +183,6 @@ int main(int argc, char* argv[]) {
 
     // Treat argument as config path
     std::string config_path = arg;
-    bool resume = false;
     std::vector<std::pair<std::string, std::string>> overrides;
 
     // Parse remaining options
@@ -198,9 +191,7 @@ int main(int argc, char* argv[]) {
 
     for (int i = 2; i < argc; ++i) {
         std::string opt = argv[i];
-        if (opt == "--resume") {
-            resume = true;
-        } else if (opt == "--set" && i + 1 < argc) {
+        if (opt == "--set" && i + 1 < argc) {
             auto parsed = parseSetArg(argv[++i]);
             if (!parsed) return 1;
             opts.overrides.push_back(*parsed);
@@ -214,7 +205,7 @@ int main(int argc, char* argv[]) {
 
     // Auto-detect: if config has [batch] section, run batch mode
     if (isBatchConfig(config_path)) {
-        return runBatch(config_path, resume, overrides);
+        return runBatch(config_path, overrides);
     }
 
     return runSimulation(opts);

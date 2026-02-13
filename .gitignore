@@ -6,7 +6,6 @@ obj/
 
 # Output
 output/
-batch_output/
 data/
 *.mp4
 *.webm

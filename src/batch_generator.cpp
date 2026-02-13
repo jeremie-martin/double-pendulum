@@ -26,7 +26,7 @@ BatchConfig BatchConfig::load(std::string const& path) {
         // Batch settings
         if (auto batch = tbl["batch"].as_table()) {
             if (auto dir = batch->get("output_directory")) {
-                config.output_directory = dir->value<std::string>().value_or("batch_output");
+                config.output_directory = dir->value<std::string>().value_or("/tmp/double-pendulum-batch");
             }
             if (auto cnt = batch->get("count")) {
                 config.count = cnt->value<int>().value_or(10);
@@ -296,46 +296,29 @@ void BatchProgress::save(std::filesystem::path const& path) const {
     j["total"] = total;
     j["completed"] = completed;
     j["failed"] = failed;
-    j["completed_ids"] = completed_ids;
-    j["failed_ids"] = failed_ids;
+    json results_json = json::array();
+    for (auto const& r : results) {
+        json rj;
+        rj["name"] = r.name;
+        rj["video_path"] = r.video_path;
+        rj["success"] = r.success;
+        rj["boom_frame"] = r.boom_frame.has_value() ? json(r.boom_frame.value()) : json(nullptr);
+        rj["boom_seconds"] = r.boom_seconds;
+        rj["chaos_frame"] = r.chaos_frame.has_value() ? json(r.chaos_frame.value()) : json(nullptr);
+        rj["chaos_seconds"] = r.chaos_seconds;
+        rj["boom_quality"] = r.boom_quality;
+        rj["duration_seconds"] = r.duration_seconds;
+        rj["final_uniformity"] = r.final_uniformity;
+        rj["probe_retries"] = r.probe_retries;
+        rj["simulation_speed"] = r.simulation_speed;
+        results_json.push_back(rj);
+    }
+    j["results"] = results_json;
 
     std::ofstream out(path);
     if (out) {
         out << j.dump(2) << "\n";
     }
-}
-
-BatchProgress BatchProgress::load(std::filesystem::path const& path) {
-    BatchProgress progress;
-
-    std::ifstream in(path);
-    if (!in) {
-        return progress;
-    }
-
-    try {
-        json j = json::parse(in);
-
-        if (j.contains("total") && j["total"].is_number()) {
-            progress.total = j["total"].get<int>();
-        }
-        if (j.contains("completed") && j["completed"].is_number()) {
-            progress.completed = j["completed"].get<int>();
-        }
-        if (j.contains("failed") && j["failed"].is_number()) {
-            progress.failed = j["failed"].get<int>();
-        }
-        if (j.contains("completed_ids") && j["completed_ids"].is_array()) {
-            progress.completed_ids = j["completed_ids"].get<std::vector<std::string>>();
-        }
-        if (j.contains("failed_ids") && j["failed_ids"].is_array()) {
-            progress.failed_ids = j["failed_ids"].get<std::vector<std::string>>();
-        }
-    } catch (const json::exception& e) {
-        std::cerr << "Error parsing progress file: " << e.what() << "\n";
-    }
-
-    return progress;
 }
 
 BatchGenerator::BatchGenerator(BatchConfig const& config)
@@ -367,62 +350,6 @@ void BatchGenerator::run() {
     progress_.failed = 0;
 
     for (int i = 0; i < config_.count; ++i) {
-        std::cout << "\n--- Video " << (i + 1) << "/" << config_.count << " ---\n";
-
-        if (generateOne(i)) {
-            progress_.completed++;
-        } else {
-            progress_.failed++;
-        }
-
-        saveProgress();
-    }
-
-    printSummary();
-}
-
-void BatchGenerator::resume() {
-    // Find latest batch directory
-    std::filesystem::path latest_batch;
-    std::filesystem::file_time_type latest_time{};
-    bool found_resumable_batch = false;
-
-    for (auto const& entry : std::filesystem::directory_iterator(config_.output_directory)) {
-        if (entry.is_directory() && entry.path().filename().string().starts_with("batch_")) {
-            auto progress_file = entry.path() / "progress.json";
-            if (std::filesystem::exists(progress_file)) {
-                auto time = std::filesystem::last_write_time(progress_file);
-                if (!found_resumable_batch || time > latest_time) {
-                    found_resumable_batch = true;
-                    latest_time = time;
-                    latest_batch = entry.path();
-                }
-            }
-        }
-    }
-
-    if (!found_resumable_batch || latest_batch.empty()) {
-        std::cerr << "No resumable batch found in " << config_.output_directory << "\n";
-        return;
-    }
-
-    batch_dir_ = latest_batch;
-    std::cout << "Resuming batch: " << batch_dir_ << "\n";
-
-    if (!loadProgress()) {
-        std::cerr << "Failed to load progress file\n";
-        return;
-    }
-
-    int start_index = progress_.completed + progress_.failed;
-    int remaining = config_.count - start_index;
-
-    std::cout << "\n=== Resuming Batch Generation ===\n";
-    std::cout << "Already completed: " << progress_.completed << "\n";
-    std::cout << "Already failed: " << progress_.failed << "\n";
-    std::cout << "Remaining: " << remaining << "\n\n";
-
-    for (int i = start_index; i < config_.count; ++i) {
         std::cout << "\n--- Video " << (i + 1) << "/" << config_.count << " ---\n";
 
         if (generateOne(i)) {
@@ -530,7 +457,6 @@ bool BatchGenerator::generateOne(int index) {
                                  config_.max_probe_retries + 1,
                                  1.0};
                 progress_.results.push_back(result);
-                progress_.failed_ids.push_back(video_name);
                 return false;
             }
         } else {
@@ -613,7 +539,6 @@ bool BatchGenerator::generateOne(int index) {
                          probe_retries,
                          simulation_speed};
         progress_.results.push_back(result);
-        progress_.completed_ids.push_back(video_name);
 
         // Create symlink to video in batch root
         createVideoSymlink(results.video_path, video_name + ".mp4");
@@ -633,7 +558,6 @@ bool BatchGenerator::generateOne(int index) {
         RunResult result{video_name, "",  false,    std::nullopt, 0.0, std::nullopt,
                          0.0,        0.0, duration, 0.0,          0,   1.0};
         progress_.results.push_back(result);
-        progress_.failed_ids.push_back(video_name);
         return false;
     }
 }
@@ -857,16 +781,6 @@ void BatchGenerator::saveProgress() {
     progress_.save(progress_path);
 }
 
-bool BatchGenerator::loadProgress() {
-    auto progress_path = batch_dir_ / "progress.json";
-    if (!std::filesystem::exists(progress_path)) {
-        return false;
-    }
-
-    progress_ = BatchProgress::load(progress_path);
-    return true;
-}
-
 void BatchGenerator::createVideoSymlink(std::string const& video_path,
                                         std::string const& link_name) {
     if (video_path.empty())
@@ -1037,14 +951,16 @@ void BatchGenerator::printSummary() const {
               << "    Failed: " << std::setw(4) << progress_.failed << std::string(25, ' ')
               << "║\n";
 
-    std::cout << "║  Total time: " << std::fixed << std::setprecision(1) << total_time << "s";
+    std::ostringstream time_line;
+    time_line << "  Total time: " << std::fixed << std::setprecision(1) << total_time << "s";
     if (progress_.completed > 0) {
-        std::cout << "    Avg: " << std::setprecision(1) << (total_time / progress_.completed)
+        time_line << "    Avg: " << std::setprecision(1) << (total_time / progress_.completed)
                   << "s/run";
     }
-    std::cout << std::string(76 - 14 - std::to_string(static_cast<int>(total_time)).length() - 20,
-                             ' ')
-              << "║\n";
+    auto time_str = time_line.str();
+    int pad = static_cast<int>(76) - static_cast<int>(time_str.length());
+    if (pad < 0) pad = 0;
+    std::cout << "║" << time_str << std::string(static_cast<size_t>(pad), ' ') << "║\n";
 
     std::cout << "╠════════════════════════════════════════════════════════════════════════════╣\n";
     std::cout << "║  Name                              Status  Boom(s) Uniform  Retries  Time  ║\n";

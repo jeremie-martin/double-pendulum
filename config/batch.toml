@@ -10,10 +10,10 @@
 include = ["best_params.toml"]
 
 [batch]
-output_directory = "batch_output"
-count = 100
+output_directory = "/tmp/double-pendulum-batch"
+count = 1000000
 base_config = "config/batch_template.toml"
-presets = "config/presets_extended.toml"
+presets = "config/presets.toml"
 
 [probe]
 enabled = true
