@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import pickle
+import shutil
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -27,6 +30,14 @@ CATEGORY_SCIENCE_TECH = "28"
 CATEGORY_FILM_ANIMATION = "1"
 CATEGORY_EDUCATION = "27"
 
+logger = logging.getLogger(__name__)
+
+
+def _prefer_brave_beta_browser() -> None:
+    """Prefer brave-beta for OAuth if available."""
+    if shutil.which("brave-beta"):
+        os.environ["BROWSER"] = "brave-beta"
+
 
 class YouTubeUploader:
     """Handles YouTube API authentication and video uploads."""
@@ -44,8 +55,11 @@ class YouTubeUploader:
         self.youtube = None
         self._credentials: Optional[Credentials] = None
 
-    def authenticate(self) -> bool:
+    def authenticate(self, force_reauth: bool = False) -> bool:
         """Authenticate with YouTube API using OAuth 2.0.
+
+        Args:
+            force_reauth: If True, ignore cached token and force OAuth flow.
 
         Returns:
             True if authentication was successful.
@@ -55,16 +69,26 @@ class YouTubeUploader:
         """
         creds = None
 
-        # Load cached credentials
-        if self.token_path.exists():
-            with open(self.token_path, "rb") as token:
-                creds = pickle.load(token)
+        # Load cached credentials unless forcing fresh auth
+        if not force_reauth and self.token_path.exists():
+            try:
+                with open(self.token_path, "rb") as token:
+                    creds = pickle.load(token)
+            except Exception as e:
+                logger.warning(f"Failed to load cached token at {self.token_path}: {e}")
+                creds = None
 
         # Refresh or get new credentials
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
+                try:
+                    creds.refresh(Request())
+                except Exception as e:
+                    # If refresh fails (revoked/invalid token), fall back to full OAuth flow.
+                    logger.warning(f"Token refresh failed, running OAuth flow: {e}")
+                    creds = None
+
+            if not creds or not creds.valid:
                 if not self.client_secrets.exists():
                     raise FileNotFoundError(
                         f"client_secrets.json not found at {self.client_secrets}\n"
@@ -73,6 +97,7 @@ class YouTubeUploader:
                 flow = InstalledAppFlow.from_client_secrets_file(
                     str(self.client_secrets), SCOPES
                 )
+                _prefer_brave_beta_browser()
                 creds = flow.run_local_server(port=0)
 
             # Save credentials for next time

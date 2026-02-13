@@ -496,6 +496,43 @@ def music_sync(video_dir: Path, music_dir: Optional[Path]):
     console.print(f"\n[dim]Valid tracks: {valid_count}/{len(manager.tracks)}[/dim]")
 
 
+@main.command(name="auth")
+@click.option(
+    "--credentials",
+    "-c",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Directory containing client_secrets.json (default: from config or ./credentials)",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Force a fresh OAuth flow (ignores cached token)",
+)
+def auth(credentials: Optional[Path], force: bool):
+    """Authenticate with YouTube and cache credentials."""
+    user_config = get_config()
+    resolved_credentials = user_config.get_credentials_dir(credentials)
+    token_path = resolved_credentials / "token.pickle"
+
+    if force and token_path.exists():
+        console.print(f"[dim]Ignoring cached token: {token_path}[/dim]")
+
+    try:
+        uploader = YouTubeUploader(resolved_credentials)
+        uploader.authenticate(force_reauth=force)
+    except FileNotFoundError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        console.print(f"[dim]Searched: {resolved_credentials}[/dim]")
+        raise SystemExit(1)
+    except Exception as e:
+        console.print(f"[red]Authentication failed:[/red] {e}")
+        raise SystemExit(1)
+
+    console.print("[green]Authentication successful.[/green]")
+    console.print(f"[dim]Token saved to: {token_path}[/dim]")
+
+
 @main.command()
 @click.argument("video_dir", type=click.Path(exists=True, path_type=Path))
 @click.option(
