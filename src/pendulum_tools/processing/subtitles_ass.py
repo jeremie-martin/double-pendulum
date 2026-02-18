@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pysubs2
-from pysubs2 import SSAFile, SSAStyle, SSAEvent
+from pysubs2 import Alignment, SSAFile, SSAStyle, SSAEvent
 
 if TYPE_CHECKING:
     from .templates import ResolvedCaption
@@ -204,7 +204,7 @@ def create_ass_style(name: str, config: ASSStyleConfig) -> SSAStyle:
     style.italic = config.italic
     style.outline = config.outline
     style.shadow = config.shadow
-    style.alignment = config.alignment
+    style.alignment = Alignment(config.alignment)
     style.marginl = config.margin_l
     style.marginr = config.margin_r
     style.marginv = config.margin_v

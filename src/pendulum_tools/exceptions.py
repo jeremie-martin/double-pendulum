@@ -74,7 +74,7 @@ class FFmpegError(PendulumToolsError):
 
         # If no specific errors found, return last few lines
         if not error_lines and lines:
-            error_lines = [l.strip() for l in lines[-3:] if l.strip()]
+            error_lines = [line.strip() for line in lines[-3:] if line.strip()]
 
         return " | ".join(error_lines[:3])  # Limit to 3 most relevant
 

@@ -12,7 +12,7 @@ import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from .motion import BoomPunchConfig, MotionConfig, ShakeConfig, SlowZoomConfig
 
@@ -117,7 +117,7 @@ class TextPoolLibrary:
             current = current[part]
 
         if isinstance(current, dict) and "texts" in current:
-            return current["texts"]
+            return list(current["texts"])
         elif isinstance(current, list):
             return current
         else:
@@ -141,7 +141,7 @@ class TextPoolLibrary:
 
     def list_pools(self) -> list[str]:
         """List all available pool keys."""
-        keys = []
+        keys: list[str] = []
         self._collect_keys(self._pools, "", keys)
         return keys
 

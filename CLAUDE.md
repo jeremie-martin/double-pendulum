@@ -363,6 +363,15 @@ Post-processing and uploading tools managed with `uv`:
 uv sync
 ```
 
+### Linting & Type Checking
+
+Always ensure both pass before committing Python changes:
+
+```bash
+ruff check .                    # Lint (auto-fix: ruff check . --fix)
+uv run mypy src/pendulum_tools/ # Type check
+```
+
 ### Commands
 ```bash
 pendulum-tools music add /path/to/video     # Add music → video.mp4

@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from ..logging import get_logger
 
@@ -399,7 +399,7 @@ class VideoProcessor(threading.Thread):
 
     def _process_job(self, job: VideoJob) -> bool:
         """Process a single video job. Returns True on success."""
-        from ..cli import _auto_process_single, AutoProcessResult
+        from ..cli import _auto_process_single
 
         log.info(f"Processing: {job.dir_name}")
 

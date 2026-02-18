@@ -188,7 +188,7 @@ class MusicManager:
 
         if verbose:
             print(f"Running: {' '.join(cmd)}")
-            result = subprocess.run(cmd)
+            result = subprocess.run(cmd, text=True)
         else:
             result = subprocess.run(cmd, capture_output=True, text=True)
 

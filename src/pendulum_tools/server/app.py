@@ -14,7 +14,7 @@ from nicegui import ui
 from ..archive import load_upload_records
 from ..logging import get_logger
 from ..music import MusicManager
-from .processor import ProcessorState, ProcessorStatus, VideoProcessor
+from .processor import ProcessorState, VideoProcessor
 
 log = get_logger(__name__)
 

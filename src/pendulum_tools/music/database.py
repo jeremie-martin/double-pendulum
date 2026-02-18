@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
@@ -103,7 +103,8 @@ class MusicDatabase:
 
         try:
             with open(prefs_path) as f:
-                return json.load(f)
+                result: dict[str, dict[str, Any]] = json.load(f)
+                return result
         except (json.JSONDecodeError, OSError) as e:
             log.warning(f"Failed to load music preferences: {e}")
             return {}
@@ -115,7 +116,7 @@ class MusicDatabase:
 
         for track in self.tracks:
             # Only save non-default values
-            track_prefs = {}
+            track_prefs: dict[str, Any] = {}
             if track.weight != 1.0:
                 track_prefs["weight"] = track.weight
             if not track.enabled:

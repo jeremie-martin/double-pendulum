@@ -258,7 +258,8 @@ class MainWindow(QMainWindow):
         # Load resources after UI is ready
         QTimer.singleShot(0, self._load_resources)
 
-        self.statusBar().show()
+        if (sb := self.statusBar()):
+            sb.show()
 
         if batch_dir:
             self._load_batch(batch_dir)
@@ -789,7 +790,8 @@ class MainWindow(QMainWindow):
 
     def _get_status_icon(self, video: VideoInfo) -> Optional[QIcon]:
         """Get status icon for video using system icons."""
-        style = self.style()
+        if (style := self.style()) is None:
+            return None
         if video.boom_frame is None:
             return style.standardIcon(QStyle.StandardPixmap.SP_MessageBoxQuestion)
         elif video.has_processed:
@@ -972,9 +974,10 @@ class MainWindow(QMainWindow):
             row = self.video_list.currentRow()
             if row >= 0:
                 item = self.video_list.item(row)
-                icon = self._get_status_icon(self.current_video)
-                if icon:
-                    item.setIcon(icon)
+                if item is not None:
+                    icon = self._get_status_icon(self.current_video)
+                    if icon:
+                        item.setIcon(icon)
 
             self.lbl_autosave.setText("✓")
             self.lbl_autosave.setStyleSheet("color: #4CAF50; font-size: 16px;")
@@ -983,7 +986,8 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.lbl_autosave.setText("✗")
             self.lbl_autosave.setStyleSheet("color: #f44336; font-size: 16px;")
-            self.statusBar().showMessage(f"Save error: {e}", 3000)
+            if (sb := self.statusBar()):
+                sb.showMessage(f"Save error: {e}", 3000)
 
     def _update_config_from_video(self, video: VideoInfo) -> None:
         """Update config widgets based on video's previous processing or defaults."""
@@ -1043,9 +1047,10 @@ class MainWindow(QMainWindow):
 
     def _copy_to_clipboard(self, text: str) -> None:
         """Copy text to clipboard and show confirmation."""
-        clipboard = QApplication.clipboard()
-        clipboard.setText(text)
-        self.statusBar().showMessage("Copied to clipboard", 1500)
+        if (clipboard := QApplication.clipboard()):
+            clipboard.setText(text)
+        if (sb := self.statusBar()):
+            sb.showMessage("Copied to clipboard", 1500)
 
     def _regenerate_all(self) -> None:
         """Regenerate title and description from templates."""
@@ -1055,9 +1060,11 @@ class MainWindow(QMainWindow):
             metadata = VideoMetadata.from_file(self.current_video.metadata_path)
             self.edit_title.setText(generate_title(metadata))
             self.edit_desc.setText(generate_description(metadata))
-            self.statusBar().showMessage("Regenerated", 1500)
+            if (sb := self.statusBar()):
+                sb.showMessage("Regenerated", 1500)
         except Exception as e:
-            self.statusBar().showMessage(f"Error: {e}", 3000)
+            if (sb := self.statusBar()):
+                sb.showMessage(f"Error: {e}", 3000)
 
     # === ACTIONS ===
 
@@ -1170,7 +1177,8 @@ class MainWindow(QMainWindow):
 
             if result.returncode == 0:
                 action = command if not subcommand else f"{command} {subcommand}"
-                self.statusBar().showMessage(f"Done: {action}", 3000)
+                if (sb := self.statusBar()):
+                    sb.showMessage(f"Done: {action}", 3000)
 
                 # Refresh current video info
                 new_info = load_video_info(self.current_video.path)
@@ -1179,17 +1187,20 @@ class MainWindow(QMainWindow):
                     row = self.video_list.currentRow()
                     if row >= 0:
                         item = self.video_list.item(row)
-                        item.setData(Qt.ItemDataRole.UserRole, new_info)
-                        icon = self._get_status_icon(new_info)
-                        if icon:
-                            item.setIcon(icon)
+                        if item is not None:
+                            item.setData(Qt.ItemDataRole.UserRole, new_info)
+                            icon = self._get_status_icon(new_info)
+                            if icon:
+                                item.setIcon(icon)
                     self._update_ui()
             else:
                 error_line = result.stderr.strip().split("\n")[-1] if result.stderr else "Unknown error"
-                self.statusBar().showMessage(f"Failed: {error_line[:80]}", 5000)
+                if (sb := self.statusBar()):
+                    sb.showMessage(f"Failed: {error_line[:80]}", 5000)
         except Exception as e:
             print(f"Error: {e}")
-            self.statusBar().showMessage(f"Error: {e}", 5000)
+            if (sb := self.statusBar()):
+                sb.showMessage(f"Error: {e}", 5000)
 
     def _add_music(self) -> None:
         """Add music to the current video."""
@@ -1244,7 +1255,8 @@ class MainWindow(QMainWindow):
                 if symlink.is_symlink():
                     symlink.unlink()
 
-            self.statusBar().showMessage(f"Deleted {self.current_video.name}", 2000)
+            if (sb := self.statusBar()):
+                sb.showMessage(f"Deleted {self.current_video.name}", 2000)
         except Exception as e:
             QMessageBox.critical(self, "Delete Error", f"Failed to delete: {e}")
 

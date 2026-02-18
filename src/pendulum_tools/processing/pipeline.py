@@ -19,10 +19,8 @@ from ..constants import (
 from ..exceptions import FFmpegError
 from .ffmpeg import FFmpegCommand, get_video_dimensions, is_nvenc_available
 from .motion import apply_motion_effects, build_motion_filters, MotionConfig, SlowZoomConfig
-from .subtitles_ass import generate_ass_from_resolved, CaptionPreset
+from .subtitles_ass import generate_ass_from_resolved
 from .templates import (
-    TemplateLibrary,
-    TextPoolLibrary,
     resolve_template,
     load_template_system,
 )
@@ -182,10 +180,8 @@ class ProcessingPipeline:
 
         # Get boom time with fallback warning
         boom_seconds = self.metadata.boom_seconds
-        using_fallback_boom = False
         if boom_seconds is None:
             boom_seconds = FALLBACK_BOOM_SECONDS
-            using_fallback_boom = True
             logger.warning(
                 f"No boom detected in metadata, using fallback time of {FALLBACK_BOOM_SECONDS}s. "
                 "Motion effects may not sync correctly."

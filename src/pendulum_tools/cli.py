@@ -774,7 +774,7 @@ def batch(
             console.print(f"[dim]Searched: {resolved_credentials}[/dim]")
             raise SystemExit(1)
 
-    results = []
+    results: list[tuple[str, str | None, str]] = []
     for i, video_dir in enumerate(video_dirs, 1):
         console.print(f"\n[bold]Video {i}/{len(video_dirs)}:[/bold] {video_dir.name}")
         logger.info(f"Processing video {i}/{len(video_dirs)}: {video_dir.name}")
@@ -810,6 +810,7 @@ def batch(
         tags = generate_tags(metadata)
 
         try:
+            assert uploader is not None
             video_id = uploader.upload(
                 video_path=video_path,
                 title=title,
@@ -1144,23 +1145,22 @@ def process(
         pendulum-tools process /path/to/video_0000 --dry-run
     """
     # Build processing config
-    config_kwargs = {
-        "template": template,
-        "seed": seed,
-        "shorts": shorts,
-        "blurred_background": blur_bg,
-        "extract_thumbnails": not no_thumbnail,
-        "crf_quality": quality,
-        "nvenc_cq": nvenc_cq,
-        "use_nvenc": not no_nvenc,
-        "slow_zoom_start": zoom_start,
-        "slow_zoom_end": zoom_end,
-    }
+    config = ProcessingConfig(
+        template=template,
+        seed=seed,
+        shorts=shorts,
+        blurred_background=blur_bg,
+        extract_thumbnails=not no_thumbnail,
+        crf_quality=quality,
+        nvenc_cq=nvenc_cq,
+        use_nvenc=not no_nvenc,
+        slow_zoom_start=zoom_start,
+        slow_zoom_end=zoom_end,
+    )
     if blur_strength is not None:
-        config_kwargs["blur_strength"] = blur_strength
+        config.blur_strength = blur_strength
     if bg_brightness is not None:
-        config_kwargs["background_brightness"] = bg_brightness
-    config = ProcessingConfig(**config_kwargs)
+        config.background_brightness = bg_brightness
 
     # Initialize pipeline
     try:
@@ -1212,7 +1212,7 @@ def process(
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
-        task = progress.add_task("Processing video...", total=None)
+        progress.add_task("Processing video...", total=None)
 
         result = pipeline.run(output_dir=output, dry_run=dry_run, force=force)
 
@@ -1339,11 +1339,8 @@ def thumbnail(video_dir: Path, output: Path | None, timestamps: str):
         thumbs = extract_thumbnails(
             video_path,
             output_dir,
-            boom_seconds=metadata.boom_seconds
+            video_boom_seconds=metadata.boom_seconds
             if any(t in ["pre_boom", "boom"] for t in timestamp_list)
-            else None,
-            best_frame_seconds=metadata.best_frame_seconds
-            if "best" in timestamp_list
             else None,
             video_duration=metadata.video_duration,
         )
@@ -1741,6 +1738,7 @@ def _auto_process_single(
         description = generate_description(metadata)
         tags = generate_tags(metadata)
 
+        assert uploader is not None
         video_id = uploader.upload(
             video_path=video_path,
             title=title,
@@ -2063,7 +2061,7 @@ def auto(
     _print_auto_summary(results)
 
     # Log summary
-    counts = {}
+    counts: dict[str, int] = {}
     for r in results:
         counts[r.status] = counts.get(r.status, 0) + 1
     summary = ", ".join(f"{k}: {v}" for k, v in sorted(counts.items()))
@@ -2534,7 +2532,7 @@ def archive(stats: bool, list_all: bool, limit: int, as_json: bool):
 
     if stats:
         stats_data = get_upload_stats()
-        console.print(f"\n[bold]Upload Archive Statistics[/bold]")
+        console.print("\n[bold]Upload Archive Statistics[/bold]")
         console.print(f"[dim]Archive: {archive_path}[/dim]\n")
 
         console.print(f"[bold]Total uploads:[/bold] {stats_data['total_uploads']}")

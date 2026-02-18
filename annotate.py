@@ -4,7 +4,7 @@ Minimal run/video annotation tool (PyQt6).
 
 Features:
 - Scan run_* directories
-- Load/save annotations.json (version >= 2) compatible with the C++ optimize tool:
+- Load/save annotations.json (version >= 2) compatible with the C++ target evaluation pipeline:
   {
     "version": 2,
     "annotations": [
@@ -34,14 +34,12 @@ import shutil
 import struct
 import subprocess
 import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from PyQt6.QtCore import (
     QAbstractTableModel,
-    QItemSelectionModel,
     QModelIndex,
     QObject,
     Qt,
@@ -50,7 +48,7 @@ from PyQt6.QtCore import (
     QTimer,
     QUrl,
 )
-from PyQt6.QtGui import QAction, QDesktopServices, QDoubleValidator, QIcon, QIntValidator, QKeySequence, QShortcut
+from PyQt6.QtGui import QAction, QDesktopServices, QDoubleValidator, QIntValidator, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -64,7 +62,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
-    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -358,7 +355,7 @@ def scan_runs(root_dir: Path) -> List[RunInfo]:
             continue
         if not RUN_RE.match(p.name):
             continue
-        vid = p / "video.mp4"
+        vid = p / "video_raw.mp4"
         dat = p / "simulation_data.bin"
         runs.append(
             RunInfo(
@@ -417,7 +414,6 @@ class RunsTableModel(QAbstractTableModel):
                     if len(self.store.target_defs) > 0:
                         return f"0/{len(self.store.target_defs)}"
                     return ""
-                targets = e.get("targets", {})
                 notes = e.get("notes", "")
                 filled, total = self.store.target_completion(run)
                 n = "notes" if isinstance(notes, str) and notes.strip() else ""
@@ -672,6 +668,11 @@ class MainWindow(QMainWindow):
         file_menu.addAction(act_open_ann)
 
         file_menu.addSeparator()
+
+        act_refresh = QAction("Refresh Runs", self)
+        act_refresh.setShortcut("F5")
+        act_refresh.triggered.connect(self._refresh_runs)
+        file_menu.addAction(act_refresh)
 
         act_save = QAction("Save", self)
         act_save.setShortcut("Ctrl+S")
@@ -1169,6 +1170,26 @@ class MainWindow(QMainWindow):
         self.store.annotations_path = Path(path_str)
         self._save()
         self._update_window_title()
+
+    def _refresh_runs(self) -> None:
+        current_id = self._current_run.run_id if self._current_run else ""
+        header = self.table.horizontalHeader()
+        sort_col = header.sortIndicatorSection()
+        sort_order = header.sortIndicatorOrder()
+
+        self.runs = scan_runs(self.root_dir)
+        self.model = RunsTableModel(self.runs, self.store)
+        self.proxy.setSourceModel(self.model)
+
+        self.table.sortByColumn(sort_col, sort_order)
+        self._set_current_run(None)
+
+        if current_id and self._select_run_by_id(current_id):
+            self.statusBar().showMessage("Refreshed runs", 1500)
+            return
+        if self.proxy.rowCount() > 0:
+            self.table.selectRow(0)
+        self.statusBar().showMessage("Refreshed runs", 1500)
 
     def _choose_root_dir(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Select Output Directory", str(self.root_dir))

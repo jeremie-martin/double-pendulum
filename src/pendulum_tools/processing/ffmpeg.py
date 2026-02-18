@@ -11,7 +11,6 @@ from typing import Optional
 
 from ..constants import (
     BLUR_SCALE_FACTOR,
-    DEFAULT_BLUR_STRENGTH,
     MIN_BLUR_SIGMA,
     DEFAULT_THUMBNAIL_QUALITY,
 )
@@ -99,7 +98,7 @@ class FFmpegCommand:
             parts.append(f"enable='{enable}'")
 
         if box:
-            parts.append(f"box=1")
+            parts.append("box=1")
             parts.append(f"boxcolor={boxcolor}")
             parts.append(f"boxborderw={boxborderw}")
 
