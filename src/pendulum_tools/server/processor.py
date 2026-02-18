@@ -489,7 +489,11 @@ class VideoProcessor(threading.Thread):
                 job = None
                 with self._lock:
                     if self.state.pending_queue:
-                        self.state.pending_queue.sort(key=lambda j: j.dir_name, reverse=True)
+                        # Process newest videos first — sort by YYYYMMDD_HHMMSS timestamp in dir name
+                        self.state.pending_queue.sort(
+                            key=lambda j: "_".join(j.dir_name.split("_")[2:4]),
+                            reverse=True,
+                        )
                         job = self.state.pending_queue.pop(0)
 
                 if job:
