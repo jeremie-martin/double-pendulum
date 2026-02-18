@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -161,6 +162,9 @@ class ProcessingPipeline:
                 error=f"{output_video.name} already exists. Use --force to overwrite.",
             )
 
+        logger.debug("Pipeline starting for %s", self.video_dir.name)
+        pipeline_start = time.monotonic()
+
         # Load template
         template_name = self.config.template
         if template_name == "random":
@@ -168,6 +172,8 @@ class ProcessingPipeline:
             template_name = template.name
         else:
             template = self.template_lib.get(template_name)
+
+        logger.debug("Template: %s", template_name)
 
         # Build the FFmpeg command
         cmd = FFmpegCommand(self.input_video, output_video)
@@ -338,8 +344,12 @@ class ProcessingPipeline:
             )
 
         # Execute FFmpeg
+        logger.debug("Starting FFmpeg encoding")
+        ffmpeg_start = time.monotonic()
         try:
             cmd.run()
+            ffmpeg_elapsed = time.monotonic() - ffmpeg_start
+            logger.debug("FFmpeg encoding complete [%.1fs]", ffmpeg_elapsed)
         except FFmpegError as e:
             # Detailed FFmpeg error with stderr
             return ProcessingResult(
@@ -361,6 +371,8 @@ class ProcessingPipeline:
         # Extract thumbnails (using VIDEO time, not simulation time)
         thumbnails: list[Path] = []
         if self.config.extract_thumbnails:
+            logger.debug("Extracting thumbnails")
+            thumb_start = time.monotonic()
             # Calculate video boom time from boom_frame / fps
             video_boom_seconds = None
             if (self.metadata.results and self.metadata.results.boom_frame
@@ -376,8 +388,12 @@ class ProcessingPipeline:
                     video_boom_seconds=video_boom_seconds,
                     video_duration=self.metadata.video_duration,
                 )
+                logger.debug("Thumbnails extracted: %d [%.1fs]", len(thumbnails), time.monotonic() - thumb_start)
             except Exception as e:
                 logger.warning(f"Thumbnail extraction failed: {e}")
+
+        pipeline_elapsed = time.monotonic() - pipeline_start
+        logger.debug("Pipeline complete [%.1fs]", pipeline_elapsed)
 
         return ProcessingResult(
             success=True,

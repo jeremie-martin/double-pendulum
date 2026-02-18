@@ -1589,6 +1589,7 @@ def _auto_process_single(
         AutoProcessResult with status and optional error message.
     """
     import json
+    import time as _time
 
     from .exceptions import RateLimitError, UploadError
     from .music import MusicManager
@@ -1634,8 +1635,10 @@ def _auto_process_single(
     )
 
     try:
+        t0 = _time.monotonic()
         pipeline = ProcessingPipeline(video_dir, config)
         result = pipeline.run(force=user_config.processing.force)
+        process_elapsed = _time.monotonic() - t0
 
         if not result.success:
             log.error(f"{video_dir.name}: Processing failed: {result.error}")
@@ -1643,8 +1646,13 @@ def _auto_process_single(
 
         result.save_to_metadata(metadata_path)
         log.info(
-            f"{video_dir.name}: Processing complete (template: {result.template_used})"
+            f"{video_dir.name}: Processing complete (template: {result.template_used}) [{process_elapsed:.1f}s]"
         )
+        if result.captions_text:
+            log.debug(f"{video_dir.name}: Captions: {' -> '.join(repr(c) for c in result.captions_text)}")
+        if result.video_path and result.video_path.exists():
+            size_mb = result.video_path.stat().st_size / (1024 * 1024)
+            log.debug(f"{video_dir.name}: Processed video size: {size_mb:.1f}MB")
 
     except Exception as e:
         log.error(f"{video_dir.name}: Processing exception: {e}")
@@ -1654,6 +1662,7 @@ def _auto_process_single(
     music_added = False
     if result.video_path:
         log.info(f"Adding music to {video_dir.name}")
+        t0 = _time.monotonic()
         try:
             # Reload metadata after processing
             metadata = VideoMetadata.from_file(metadata_path)
@@ -1679,6 +1688,7 @@ def _auto_process_single(
 
             video_fps = metadata.config.video_fps
             video_boom_seconds = boom_frame / video_fps
+            log.debug(f"{video_dir.name}: Boom at frame {boom_frame} ({video_boom_seconds:.2f}s)")
 
             # Select track (auto-select based on boom timing)
             selected_track = manager.pick_track_for_boom(video_boom_seconds)
@@ -1690,6 +1700,13 @@ def _auto_process_single(
                 return AutoProcessResult(
                     video_dir, "music_failed", error="No music tracks available"
                 )
+
+            drop_seconds = selected_track.drop_time_ms / 1000.0
+            offset = video_boom_seconds - drop_seconds
+            log.debug(
+                f"{video_dir.name}: Track '{selected_track.title}', "
+                f"drop@{drop_seconds:.2f}s, offset={offset:+.2f}s"
+            )
 
             # Output path
             output_path = result.video_path.with_name(
@@ -1704,10 +1721,17 @@ def _auto_process_single(
                 drop_time_ms=selected_track.drop_time_ms,
                 video_fps=video_fps,
             )
+            music_elapsed = _time.monotonic() - t0
 
             if success:
                 MusicManager.update_metadata_with_music(metadata_path, selected_track)
-                log.info(f"{video_dir.name}: Music added ({selected_track.title})")
+                log.info(
+                    f"{video_dir.name}: Music added ({selected_track.title}, "
+                    f"drop@{drop_seconds:.1f}s, offset={offset:+.1f}s) [{music_elapsed:.1f}s]"
+                )
+                if output_path.exists():
+                    size_mb = output_path.stat().st_size / (1024 * 1024)
+                    log.debug(f"{video_dir.name}: Final video size: {size_mb:.1f}MB")
                 music_added = True
             else:
                 log.error(f"{video_dir.name}: FFmpeg muxing failed")
@@ -1729,6 +1753,7 @@ def _auto_process_single(
 
     # Step 3: Upload
     log.info(f"Uploading {video_dir.name}")
+    t0 = _time.monotonic()
     try:
         # Reload metadata after music addition
         metadata = VideoMetadata.from_file(metadata_path)
@@ -1737,6 +1762,11 @@ def _auto_process_single(
         title = generate_title(metadata)
         description = generate_description(metadata)
         tags = generate_tags(metadata)
+
+        upload_size_mb = video_path.stat().st_size / (1024 * 1024)
+        log.debug(
+            f"{video_dir.name}: Upload: title={title!r}, privacy={privacy}, size={upload_size_mb:.1f}MB"
+        )
 
         assert uploader is not None
         video_id = uploader.upload(
@@ -1786,8 +1816,9 @@ def _auto_process_single(
             except Exception as e:
                 log.warning(f"{video_dir.name}: Failed to archive upload: {e}")
 
+            upload_elapsed = _time.monotonic() - t0
             log.info(
-                f"{video_dir.name}: Uploaded successfully: https://youtu.be/{video_id}"
+                f"{video_dir.name}: Uploaded https://youtu.be/{video_id} [{upload_elapsed:.1f}s]"
             )
 
             # Add to playlist if configured
@@ -2240,6 +2271,8 @@ def watch(
         try:
             # Scan for new directories
             current_time = time.time()
+            scan_total = 0
+            scan_settling = 0
 
             for item in sorted(
                 batch_dir.iterdir(),
@@ -2248,6 +2281,7 @@ def watch(
                 if not item.is_dir() or not item.name.startswith("video_"):
                     continue
 
+                scan_total += 1
                 dir_name = item.name
 
                 # Skip already processed
@@ -2271,7 +2305,10 @@ def watch(
                     continue
 
                 # Check if settle time has passed
-                if current_time - pending[dir_name] < settle_time:
+                remaining = settle_time - (current_time - pending[dir_name])
+                if remaining > 0:
+                    log.debug(f"{dir_name}: settling ({remaining:.1f}s remaining)")
+                    scan_settling += 1
                     continue
 
                 # Process this directory (only ONE per iteration)
@@ -2317,6 +2354,12 @@ def watch(
 
                 # Process only ONE video per loop iteration, then rescan
                 break
+
+            if scan_settling or pending:
+                log.debug(
+                    f"Scan: {scan_total} dirs, {len(processed)} processed, "
+                    f"{scan_settling} settling, {len(pending)} pending"
+                )
 
             # Wait before next scan
             time.sleep(poll_interval)

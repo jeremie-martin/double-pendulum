@@ -238,6 +238,8 @@ class VideoProcessor(threading.Thread):
         if seconds <= 0:
             return True
 
+        log.debug(f"Wait starting: {reason} ({seconds:.1f}s)")
+
         with self._lock:
             self.state.wait_until = datetime.now() + __import__("datetime").timedelta(seconds=seconds)
             self.state.wait_reason = reason
@@ -261,6 +263,7 @@ class VideoProcessor(threading.Thread):
             self.state.wait_until = None
             self.state.wait_reason = ""
 
+        log.debug(f"Wait completed: {reason}")
         return True
 
     def _authenticate(self) -> bool:
@@ -301,6 +304,8 @@ class VideoProcessor(threading.Thread):
             return
 
         current_time = datetime.now()
+        scan_new = 0
+        scan_settling = 0
 
         for item in sorted(self.batch_dir.iterdir(), key=lambda x: x.name):
             if self._stop_event.is_set():
@@ -349,10 +354,14 @@ class VideoProcessor(threading.Thread):
             if dir_name not in self._pending:
                 self._pending[dir_name] = current_time
                 log.info(f"New video detected: {dir_name}")
+                scan_new += 1
 
             # Check settle time
             elapsed = (current_time - self._pending[dir_name]).total_seconds()
             if elapsed < self.state.settle_time:
+                remaining = self.state.settle_time - elapsed
+                log.debug(f"{dir_name}: settling ({remaining:.1f}s remaining)")
+                scan_settling += 1
                 continue
 
             # Ready for processing - add to queue
@@ -369,6 +378,13 @@ class VideoProcessor(threading.Thread):
                 self.state.pending_queue.append(job)
 
             log.info(f"Video ready for processing: {dir_name}")
+
+        queue_depth = len(self.state.pending_queue)
+        if scan_new or scan_settling or queue_depth:
+            log.debug(
+                f"Scan: {len(self._processed)} processed, {scan_settling} settling, "
+                f"{queue_depth} queued, {scan_new} new"
+            )
 
     def _scan_existing(self) -> None:
         """Scan for already-processed videos on startup."""
@@ -401,12 +417,15 @@ class VideoProcessor(threading.Thread):
         """Process a single video job. Returns True on success."""
         from ..cli import _auto_process_single
 
-        log.info(f"Processing: {job.dir_name}")
+        queue_depth = len(self.state.pending_queue)
+        log.info(f"Processing {job.dir_name} (1 of {queue_depth + 1} queued)")
 
         with self._lock:
             job.status = "processing"
             job.progress = "Starting..."
             self.state.current_job = job
+
+        start_time = time.time()
 
         # Use existing _auto_process_single
         result = _auto_process_single(
@@ -421,6 +440,8 @@ class VideoProcessor(threading.Thread):
             delete_after_upload=self.state.delete_after_upload,
         )
 
+        elapsed = time.time() - start_time
+
         with self._lock:
             if result.succeeded:
                 job.status = "completed"
@@ -429,7 +450,7 @@ class VideoProcessor(threading.Thread):
                 self.state.completed.appendleft(job)
                 self.state.total_processed += 1
                 self._processed.add(job.dir_name)
-                log.info(f"Completed: {job.dir_name} -> {job.video_url}")
+                log.info(f"Completed: {job.dir_name} -> {job.video_url} [{elapsed:.1f}s]")
             else:
                 job.status = "failed"
                 job.error = result.error
@@ -445,7 +466,7 @@ class VideoProcessor(threading.Thread):
                         self.state.status = ProcessorStatus.AUTH_REQUIRED
                         log.error(f"Auth error: {result.error}")
 
-                log.error(f"Failed: {job.dir_name} - {result.error}")
+                log.error(f"Failed: {job.dir_name} - {result.error} [{elapsed:.1f}s]")
 
             self.state.current_job = None
 

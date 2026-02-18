@@ -26,17 +26,17 @@ def setup_logging(verbose: bool = False, log_dir: Optional[Path] = None) -> None
 
     Sets up:
     - Daily rotating log file at ~/.local/share/pendulum-tools/logs/YYYY-MM-DD.log
-    - stderr output with appropriate level
+    - stderr output at DEBUG level (with timestamps)
 
     Args:
-        verbose: If True, show DEBUG level on stderr
+        verbose: Ignored (DEBUG always shown). Kept for API compatibility.
         log_dir: Override log directory (default: ~/.local/share/pendulum-tools/logs/)
     """
     global _configured
     if _configured:
         return
 
-    level = "DEBUG" if verbose else "INFO"
+    level = "DEBUG"
     log_path = log_dir or DEFAULT_LOG_DIR
     log_path.mkdir(parents=True, exist_ok=True)
 
@@ -47,7 +47,7 @@ def setup_logging(verbose: bool = False, log_dir: Optional[Path] = None) -> None
     logger.add(
         sys.stderr,
         level=level,
-        format="<level>{level: <8}</level> | <cyan>{extra[name]}</cyan> - <level>{message}</level>",
+        format="<dim>{time:HH:mm:ss}</dim> <level>{level: <8}</level> | <cyan>{extra[name]}</cyan> - <level>{message}</level>",
         colorize=True,
         filter=lambda record: "name" in record["extra"],
     )
