@@ -5,6 +5,10 @@
 # - The visual chaos IS the payoff - captions just set the stage
 # - Use {count} for formatted pendulum count (e.g., "1M", "500K")
 # - Keep it clean, modern, not cheesy
+# - State-description pools (_setup) ONLY contain texts that describe
+#   a current state — these pair with subversion followups
+# - Imperative/question pools ONLY pair with event-teaser followups
+#   or standalone templates
 
 # =============================================================================
 # HOOKS - Opening captions (first few seconds)
@@ -25,27 +29,35 @@ texts = [
     "0.00001° apart.",
     "Same start, different end.",
     "Divergence is inevitable.",
-    "Chaos is certain.",
+    "Each one follows the same laws.",
 ]
 
 [hooks.science_setup]
-# Starting conditions that imply a "before" state - use in _then templates
-# These describe sameness/order that a followup like "Not for long." can subvert
+# Starting conditions that describe sameness/order — use in _then templates
+# These pair with mystery_followup ("Not for long.", "This can't last.", etc.)
+# RULE: every text here must describe a state that can be subverted
 texts = [
     "Same starting position.",
     "Nearly identical conditions.",
     "They all start together.",
     "Perfectly synchronized.",
-    "0.00001° apart.",
+    "Each one follows the same laws.",
+]
+
+[hooks.mystery_setup]
+# State descriptions with a mysterious/ominous tone — use in _then templates
+# Like science_setup, these describe a state that followups can subvert
+texts = [
+    "It starts simple.",
+    "Looks stable, right?",
+    "They started as one.",
 ]
 
 [hooks.wait]
-# Classic anticipation hooks - simple and effective
+# Classic anticipation hooks
 texts = [
     "Wait for it...",
-    "Keep watching...",
     "Watch closely.",
-    "Stay focused.",
 ]
 
 [hooks.challenge]
@@ -61,7 +73,6 @@ texts = [
 texts = [
     "POV: chaos theory",
     "POV: butterfly effect",
-    "POV: physics simulation",
     "POV: deterministic chaos",
 ]
 
@@ -71,19 +82,7 @@ texts = [
     "This is chaos theory.",
     "Deterministic chaos.",
     "Sensitivity to initial conditions.",
-    "Nature's unpredictability.",
 ]
-
-[hooks.satisfying]
-# Satisfying vibes - specific to the visual, not generic
-texts = [
-    "Mesmerizing.",
-    "Hypnotic.",
-    "They started as one.",
-    "Each one follows the same laws.",
-]
-
-# NOTE: Removed "relatable" meme hooks - they don't fit the elegant physics aesthetic
 
 [hooks.count]
 # Simple count display - just the facts
@@ -95,23 +94,22 @@ texts = [
 
 [hooks.mystery]
 # Mysterious openers - work as FIRST caption (standalone)
+# NOTE: imperative texts removed — they don't pair with mystery_followup
 texts = [
-    "What happens next?",
     "Watch what unfolds.",
     "It starts simple.",
     "Looks stable, right?",
     "Order... for now.",
-    "Pay attention.",
 ]
 
 [hooks.mystery_followup]
-# Mystery followups - ONLY use as SECOND caption after setup
-# These need prior context to make sense
+# Followups - ONLY use as SECOND caption after a state-describing setup
+# These need a prior state description to make sense
+# RULE: only pair with _setup pools or state-describing texts
 texts = [
     "Then this happens.",
     "Not for long.",
     "This can't last.",
-    "But watch closely.",
     "Here it comes.",
     "And then...",
 ]
@@ -127,16 +125,13 @@ texts = [
     "More chaos coming.",
     "Follow for more.",
     "More simulations soon.",
-    "New video tomorrow.",
 ]
 
 [engagement.tease]
 # Tease next video or bigger runs
 texts = [
     "Next one is bigger.",
-    "Want to see more?",
     "Just the beginning.",
-    "More where this came from.",
 ]
 
 [engagement.closing]
@@ -147,5 +142,4 @@ texts = [
     "Every run diverges.",
     "Same laws. Different fates.",
     "Chaos never repeats.",
-    "Always unpredictable.",
 ]

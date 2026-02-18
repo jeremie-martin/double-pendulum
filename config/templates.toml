@@ -8,6 +8,11 @@
 #
 # Weight: higher = more likely when picking randomly (default 1)
 # Zoom variation: end value is randomized ± variation each run
+#
+# PAIRING RULES:
+# - _then templates: first pool MUST be a _setup pool (state descriptions)
+# - mystery_followup: ONLY pair with _setup pools as first caption
+# - Imperative pools (wait, challenge) are standalone or hook+end only
 
 # =============================================================================
 # SINGLE-CAPTION TEMPLATES
@@ -79,21 +84,6 @@ position = "hook"
 start = 0
 end = 6.0
 effects = { fade_in = 150, fade_out = 300 }
-
-
-[template.satisfying]
-description = "Satisfying, hypnotic vibes"
-weight = 1
-
-[template.satisfying.motion]
-slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
-
-[[template.satisfying.captions]]
-pool = "hooks.satisfying"
-position = "hook"
-start = 0
-end = 5.0
-effects = { fade_in = 300, fade_out = 300 }
 
 
 [template.challenge]
@@ -363,6 +353,7 @@ effects = { fade_in = 300, fade_out = 400 }
 # TWO-CAPTION OPENERS
 # Setup + followup at the beginning for more dynamic feel
 # Second caption ends at 8s (boom happens around 9-12s)
+# RULE: first pool must be a _setup pool (state descriptions only)
 # =============================================================================
 
 [template.science_then]
@@ -395,7 +386,7 @@ weight = 2
 slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.mystery_sequence.captions]]
-pool = "hooks.mystery"
+pool = "hooks.mystery_setup"
 position = "hook"
 start = 0
 end = 4.0
@@ -409,52 +400,9 @@ end = 8.0
 effects = { fade_in = 200, fade_out = 300 }
 
 
-[template.wait_then]
-description = "Wait hook with dramatic followup"
-weight = 1
-
-[template.wait_then.motion]
-slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
-
-[[template.wait_then.captions]]
-pool = "hooks.wait"
-position = "main"
-start = 0
-end = 4.0
-effects = { fade_in = 300, fade_out = 300 }
-
-[[template.wait_then.captions]]
-pool = "hooks.mystery_followup"
-position = "hook"
-start = 4.0
-end = 8.0
-effects = { fade_in = 200, fade_out = 300 }
-
-
-[template.satisfying_then]
-description = "Satisfying hook with dramatic followup"
-weight = 1
-
-[template.satisfying_then.motion]
-slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
-
-[[template.satisfying_then.captions]]
-pool = "hooks.satisfying"
-position = "hook"
-start = 0
-end = 4.0
-effects = { fade_in = 300, fade_out = 300 }
-
-[[template.satisfying_then.captions]]
-pool = "hooks.mystery_followup"
-position = "hook"
-start = 4.0
-end = 8.0
-effects = { fade_in = 200, fade_out = 300 }
-
-
 # =============================================================================
 # FULL ARC TEMPLATES (3 captions: hook + followup + closer)
+# RULE: first pool must be a _setup pool (state descriptions only)
 # =============================================================================
 
 [template.science_then_tease]
@@ -486,35 +434,6 @@ end = "end-1"
 effects = { fade_in = 300, fade_out = 400 }
 
 
-[template.wait_then_tease]
-description = "Wait hook, followup, and end tease"
-weight = 1
-
-[template.wait_then_tease.motion]
-slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
-
-[[template.wait_then_tease.captions]]
-pool = "hooks.wait"
-position = "main"
-start = 0
-end = 4.0
-effects = { fade_in = 300, fade_out = 300 }
-
-[[template.wait_then_tease.captions]]
-pool = "hooks.mystery_followup"
-position = "hook"
-start = 4.0
-end = 8.0
-effects = { fade_in = 200, fade_out = 300 }
-
-[[template.wait_then_tease.captions]]
-pool = "engagement.tease"
-position = "main"
-start = "end-10"
-end = "end-1"
-effects = { fade_in = 300, fade_out = 400 }
-
-
 [template.mystery_then_closing]
 description = "Mystery setup, followup, and atmospheric closer"
 weight = 2
@@ -523,7 +442,7 @@ weight = 2
 slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.mystery_then_closing.captions]]
-pool = "hooks.mystery"
+pool = "hooks.mystery_setup"
 position = "hook"
 start = 0
 end = 4.0
