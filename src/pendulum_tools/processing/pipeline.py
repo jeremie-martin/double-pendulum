@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -209,8 +210,21 @@ class ProcessingPipeline:
         else:
             fg_width, fg_height = width, height
 
-        # Build motion config with optional overrides
+        # Build motion config, resolving zoom variation
         motion_config = template.motion
+        if motion_config and motion_config.slow_zoom and motion_config.slow_zoom.variation > 0:
+            rng = random.Random(self.config.seed) if self.config.seed is not None else random
+            variation = motion_config.slow_zoom.variation
+            randomized_end = motion_config.slow_zoom.end + rng.uniform(-variation, variation)
+            motion_config = MotionConfig(
+                slow_zoom=SlowZoomConfig(
+                    start=motion_config.slow_zoom.start,
+                    end=randomized_end,
+                ),
+                boom_punch=motion_config.boom_punch,
+                shake=motion_config.shake,
+            )
+
         if self.config.slow_zoom_start is not None or self.config.slow_zoom_end is not None:
             # Apply slow zoom overrides
             slow_zoom = SlowZoomConfig(
@@ -385,7 +399,12 @@ class ProcessingPipeline:
 
     def preview(self) -> dict:
         """Preview what processing would do without executing."""
-        template = self.template_lib.get(self.config.template)
+        template_name = self.config.template
+        if template_name == "random":
+            template = self.template_lib.pick_random(seed=self.config.seed)
+            template_name = template.name
+        else:
+            template = self.template_lib.get(template_name)
 
         boom_seconds = self.metadata.boom_seconds
         if boom_seconds is None:
@@ -405,7 +424,7 @@ class ProcessingPipeline:
             "boom_seconds": self.metadata.boom_seconds,
             "video_duration": self.metadata.video_duration,
             "pendulum_count": self.metadata.config.pendulum_count,
-            "template": self.config.template,
+            "template": template_name,
             "template_description": template.description,
             "motion": {
                 "slow_zoom": template.motion.slow_zoom is not None,

@@ -16,7 +16,8 @@ class SlowZoomConfig:
     """Configuration for slow/gradual zoom (Ken Burns style)."""
 
     start: float = 1.0  # Starting zoom level (1.0 = no zoom)
-    end: float = 1.1  # Ending zoom level
+    end: float = 1.1  # Ending zoom level (center of range if variation > 0)
+    variation: float = 0.0  # Random ± applied to end value each run
 
 
 @dataclass

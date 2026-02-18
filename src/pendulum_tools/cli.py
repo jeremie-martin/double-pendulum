@@ -963,6 +963,7 @@ def list_templates():
     table = Table()
     table.add_column("Name", style="cyan")
     table.add_column("Description")
+    table.add_column("Weight", style="magenta")
     table.add_column("Motion", style="green")
     table.add_column("Captions", style="yellow")
 
@@ -983,7 +984,7 @@ def list_templates():
         # Count captions
         caption_count = len(template.captions)
 
-        table.add_row(name, template.description, motion_str, str(caption_count))
+        table.add_row(name, template.description, str(template.weight), motion_str, str(caption_count))
 
     console.print(table)
 

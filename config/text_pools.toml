@@ -20,14 +20,23 @@ texts = [
     "Tiny differences in starting angle.",
     "The butterfly effect.",
     "Chaos theory in action.",
-    "Order becomes chaos.",
     "From order to chaos.",
     "Deterministic yet unpredictable.",
     "0.00001° apart.",
-    "Physics is beautiful.",
     "Same start, different end.",
     "Divergence is inevitable.",
     "Chaos is certain.",
+]
+
+[hooks.science_setup]
+# Starting conditions that imply a "before" state - use in _then templates
+# These describe sameness/order that a followup like "Not for long." can subvert
+texts = [
+    "Same starting position.",
+    "Nearly identical conditions.",
+    "They all start together.",
+    "Perfectly synchronized.",
+    "0.00001° apart.",
 ]
 
 [hooks.wait]
@@ -45,7 +54,6 @@ texts = [
     "Spot when it happens.",
     "Find the moment.",
     "Watch for the shift.",
-    "See it coming?",
 ]
 
 [hooks.pov]
@@ -54,7 +62,6 @@ texts = [
     "POV: chaos theory",
     "POV: butterfly effect",
     "POV: physics simulation",
-    "POV: mathematics",
     "POV: deterministic chaos",
 ]
 
@@ -62,20 +69,18 @@ texts = [
 # Context-setting hooks - what you're watching
 texts = [
     "This is chaos theory.",
-    "The butterfly effect.",
-    "Physics in motion.",
-    "Pure mathematics.",
     "Deterministic chaos.",
+    "Sensitivity to initial conditions.",
     "Nature's unpredictability.",
 ]
 
 [hooks.satisfying]
-# Oddly satisfying vibes
+# Satisfying vibes - specific to the visual, not generic
 texts = [
-    "Oddly satisfying.",
-    "Pure satisfaction.",
-    "So smooth.",
+    "Mesmerizing.",
     "Hypnotic.",
+    "They started as one.",
+    "Each one follows the same laws.",
 ]
 
 # NOTE: Removed "relatable" meme hooks - they don't fit the elegant physics aesthetic
@@ -96,9 +101,7 @@ texts = [
     "It starts simple.",
     "Looks stable, right?",
     "Order... for now.",
-    "Just wait.",
     "Pay attention.",
-    "Something's about to happen.",
 ]
 
 [hooks.mystery_followup]
@@ -114,21 +117,8 @@ texts = [
 ]
 
 # =============================================================================
-# COUNTDOWN - Numbers for countdown template
-# =============================================================================
-
-[countdown.three]
-texts = ["3"]
-
-[countdown.two]
-texts = ["2"]
-
-[countdown.one]
-texts = ["1"]
-
-# =============================================================================
-# ENGAGEMENT - End captions for calls to action
-# Goal: Encourage likes, subscribes, or tease next video
+# ENGAGEMENT - End captions
+# Goal: Atmospheric closers, tease next video, or encourage follow
 # =============================================================================
 
 [engagement.subscribe]
@@ -146,16 +136,16 @@ texts = [
     "Next one is bigger.",
     "Want to see more?",
     "Just the beginning.",
-    "This was just a warmup.",
-    "10 million next?",
+    "More where this came from.",
 ]
 
-[engagement.question]
-# Engage with questions
+[engagement.closing]
+# Atmospheric closers - reflect on what just happened
+# These work universally after any hook type
 texts = [
-    "Caught the moment?",
-    "See it happen?",
-    "Watch it again.",
-    "When did you notice?",
-    "Replay it.",
+    "Never the same twice.",
+    "Every run diverges.",
+    "Same laws. Different fates.",
+    "Chaos never repeats.",
+    "Always unpredictable.",
 ]

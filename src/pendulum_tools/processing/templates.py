@@ -64,6 +64,7 @@ class TemplateConfig:
     description: str
     motion: MotionConfig
     captions: list[CaptionConfig]
+    weight: int = 1  # Higher = more likely in random selection
 
 
 @dataclass
@@ -187,6 +188,7 @@ class TemplateLibrary:
                 description=data.get("description", ""),
                 motion=motion,
                 captions=captions,
+                weight=data.get("weight", 1),
             )
 
     def _parse_motion(self, motion_data: dict) -> MotionConfig:
@@ -200,6 +202,7 @@ class TemplateLibrary:
             slow_zoom = SlowZoomConfig(
                 start=sz.get("start", 1.0),
                 end=sz.get("end", 1.1),
+                variation=sz.get("variation", 0.0),
             )
 
         if "boom_punch" in motion_data:
@@ -269,7 +272,10 @@ class TemplateLibrary:
         return list(self._templates.keys())
 
     def pick_random(self, seed: Optional[int] = None) -> TemplateConfig:
-        """Pick a random template.
+        """Pick a weighted random template.
+
+        Templates with higher weight values are proportionally more likely
+        to be selected.
 
         Args:
             seed: Optional random seed
@@ -277,13 +283,14 @@ class TemplateLibrary:
         Returns:
             Random TemplateConfig
         """
-        names = self.list_templates()
+        templates = list(self._templates.values())
+        weights = [t.weight for t in templates]
         if seed is not None:
             rng = random.Random(seed)
-            name = rng.choice(names)
+            chosen = rng.choices(templates, weights=weights, k=1)[0]
         else:
-            name = random.choice(names)
-        return self.get(name)
+            chosen = random.choices(templates, weights=weights, k=1)[0]
+        return chosen
 
 
 def resolve_timing_ms(
@@ -414,7 +421,7 @@ def resolve_template(
 
         # Clamp to valid range
         start_ms = max(0, start_ms)
-        end_ms = min(end_ms, int(video_duration * 1000))
+        end_ms = max(0, min(end_ms, int(video_duration * 1000)))
 
         if start_ms >= end_ms:
             continue

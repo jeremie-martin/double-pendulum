@@ -2,20 +2,23 @@
 #
 # Philosophy:
 # - Less is more: 1-2 captions max, the visual IS the payoff
-# - No boom-synced zoom (slow zoom only)
+# - No text near the boom - that's the visual climax
 # - Hooks should be self-contained or form coherent narratives
 # - Let the chaos speak for itself
+#
+# Weight: higher = more likely when picking randomly (default 1)
+# Zoom variation: end value is randomized ± variation each run
 
 # =============================================================================
-# TEMPLATE: minimal_science
-# Simple factual setup, no dramatic payoff - let the visual do the work
+# SINGLE-CAPTION TEMPLATES
 # =============================================================================
 
 [template.minimal_science]
 description = "Simple facts, visual payoff"
+weight = 2
 
 [template.minimal_science.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.minimal_science.captions]]
 pool = "hooks.science"
@@ -25,16 +28,12 @@ end = 5.0
 effects = { fade_in = 200, fade_out = 300 }
 
 
-# =============================================================================
-# TEMPLATE: wait_for_it
-# Classic single hook - let anticipation build naturally
-# =============================================================================
-
 [template.wait_for_it]
 description = "Classic wait for it hook"
+weight = 1
 
 [template.wait_for_it.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.wait_for_it.captions]]
 pool = "hooks.wait"
@@ -44,30 +43,20 @@ end = 5.0
 effects = { fade_in = 300, fade_out = 400 }
 
 
-# =============================================================================
-# TEMPLATE: silent
-# No text - for music-focused videos or when visuals need no explanation
-# =============================================================================
-
 [template.silent]
 description = "Motion only, no text"
+weight = 1
 
 [template.silent.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
-# No captions for silent template
-
-
-# =============================================================================
-# TEMPLATE: pov
-# Single POV-style caption - the visual chaos IS the punchline
-# =============================================================================
 
 [template.pov]
 description = "POV style, visual is the punchline"
+weight = 1
 
 [template.pov.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.pov.captions]]
 pool = "hooks.pov"
@@ -77,16 +66,12 @@ end = 6.0
 effects = { fade_in = 150, fade_out = 300 }
 
 
-# =============================================================================
-# TEMPLATE: context
-# Single context-setting caption - let the visual speak
-# =============================================================================
-
 [template.context]
 description = "Context-setting, visual is the punchline"
+weight = 1
 
 [template.context.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.context.captions]]
 pool = "hooks.context"
@@ -96,18 +81,12 @@ end = 6.0
 effects = { fade_in = 150, fade_out = 300 }
 
 
-# NOTE: Removed "relatable" template - meme captions don't fit elegant physics aesthetic
-
-# =============================================================================
-# TEMPLATE: satisfying
-# Calming hook, optional soft ending - for oddly satisfying vibes
-# =============================================================================
-
 [template.satisfying]
-description = "Oddly satisfying, hypnotic vibes"
+description = "Satisfying, hypnotic vibes"
+weight = 1
 
 [template.satisfying.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.satisfying.captions]]
 pool = "hooks.satisfying"
@@ -117,16 +96,12 @@ end = 5.0
 effects = { fade_in = 300, fade_out = 300 }
 
 
-# =============================================================================
-# TEMPLATE: challenge
-# Interactive - asks viewer to spot the moment
-# =============================================================================
-
 [template.challenge]
 description = "Interactive challenge"
+weight = 1
 
 [template.challenge.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.challenge.captions]]
 pool = "hooks.challenge"
@@ -136,16 +111,12 @@ end = 5.0
 effects = { fade_in = 150, fade_out = 300 }
 
 
-# =============================================================================
-# TEMPLATE: count_fact
-# Just states the pendulum count - pure information
-# =============================================================================
-
 [template.count_fact]
 description = "Simple count display"
+weight = 1
 
 [template.count_fact.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.count_fact.captions]]
 pool = "hooks.count"
@@ -155,179 +126,12 @@ end = 5.0
 effects = { fade_in = 200, fade_out = 300 }
 
 
-# =============================================================================
-# TEMPLATE: science_subscribe
-# Science hook at start + subscribe CTA at end
-# =============================================================================
-
-[template.science_subscribe]
-description = "Science facts with subscribe CTA"
-
-[template.science_subscribe.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
-
-[[template.science_subscribe.captions]]
-pool = "hooks.science"
-position = "hook"
-start = 0
-end = 5.0
-effects = { fade_in = 200, fade_out = 300 }
-
-[[template.science_subscribe.captions]]
-pool = "engagement.subscribe"
-position = "main"
-start = "end-8"
-end = "end-0.5"
-effects = { fade_in = 300, fade_out = 400 }
-
-
-# =============================================================================
-# TEMPLATE: science_tease
-# Science hook at start + tease next video at end
-# =============================================================================
-
-[template.science_tease]
-description = "Science facts with next video tease"
-
-[template.science_tease.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
-
-[[template.science_tease.captions]]
-pool = "hooks.science"
-position = "hook"
-start = 0
-end = 5.0
-effects = { fade_in = 200, fade_out = 300 }
-
-[[template.science_tease.captions]]
-pool = "engagement.tease"
-position = "main"
-start = "end-8"
-end = "end-0.5"
-effects = { fade_in = 300, fade_out = 400 }
-
-
-# =============================================================================
-# TEMPLATE: wait_subscribe
-# Wait for it + subscribe CTA at end
-# =============================================================================
-
-[template.wait_subscribe]
-description = "Wait for it with subscribe CTA"
-
-[template.wait_subscribe.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
-
-[[template.wait_subscribe.captions]]
-pool = "hooks.wait"
-position = "main"
-start = 0
-end = 4.0
-effects = { fade_in = 300, fade_out = 400 }
-
-[[template.wait_subscribe.captions]]
-pool = "engagement.question"
-position = "main"
-start = "end-8"
-end = "end-0.5"
-effects = { fade_in = 300, fade_out = 400 }
-
-
-# =============================================================================
-# TEMPLATE: challenge_question
-# Challenge hook + engagement question at end
-# =============================================================================
-
-[template.challenge_question]
-description = "Challenge with engagement question"
-
-[template.challenge_question.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
-
-[[template.challenge_question.captions]]
-pool = "hooks.challenge"
-position = "hook"
-start = 0
-end = 4.0
-effects = { fade_in = 150, fade_out = 300 }
-
-[[template.challenge_question.captions]]
-pool = "engagement.question"
-position = "main"
-start = "end-8"
-end = "end-0.5"
-effects = { fade_in = 300, fade_out = 400 }
-
-
-# =============================================================================
-# TEMPLATE: silent_tease
-# No opening text, just tease at end
-# =============================================================================
-
-[template.silent_tease]
-description = "Silent with end tease"
-
-[template.silent_tease.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
-
-[[template.silent_tease.captions]]
-pool = "engagement.tease"
-position = "main"
-start = "end-8"
-end = "end-0.5"
-effects = { fade_in = 300, fade_out = 400 }
-
-
-# =============================================================================
-# TEMPLATE: countdown (DISABLED - too gimmicky)
-# Countdown before the boom moment - 3, 2, 1 then nothing at boom
-# =============================================================================
-
-# [template.countdown]
-# description = "Countdown to the boom moment"
-#
-# [template.countdown.motion]
-# slow_zoom = { start = 1.0, end = 1.08 }
-#
-# [[template.countdown.captions]]
-# pool = "hooks.science"
-# position = "hook"
-# start = 0
-# end = 5.0
-# effects = { fade_in = 200, fade_out = 300 }
-#
-# [[template.countdown.captions]]
-# pool = "countdown.three"
-# position = "countdown"
-# start = "boom-3"
-# end = "boom-2"
-# effects = { pop_in = true }
-#
-# [[template.countdown.captions]]
-# pool = "countdown.two"
-# position = "countdown"
-# start = "boom-2"
-# end = "boom-1"
-# effects = { pop_in = true }
-#
-# [[template.countdown.captions]]
-# pool = "countdown.one"
-# position = "countdown"
-# start = "boom-1"
-# end = "boom-0.1"
-# effects = { pop_in = true }
-
-
-# =============================================================================
-# TEMPLATE: mystery
-# Mysterious hook - intriguing without explaining
-# =============================================================================
-
 [template.mystery]
 description = "Mysterious, intriguing hook"
+weight = 1
 
 [template.mystery.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.mystery.captions]]
 pool = "hooks.mystery"
@@ -338,15 +142,141 @@ effects = { fade_in = 300, fade_out = 400 }
 
 
 # =============================================================================
-# TEMPLATE: count_tease
-# Shows the count upfront, teases more at the end
+# HOOK + END CAPTION TEMPLATES
+# End captions appear ~10s before video ends
 # =============================================================================
+
+[template.science_subscribe]
+description = "Science facts with subscribe CTA"
+weight = 1
+
+[template.science_subscribe.motion]
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
+
+[[template.science_subscribe.captions]]
+pool = "hooks.science"
+position = "hook"
+start = 0
+end = 5.0
+effects = { fade_in = 200, fade_out = 300 }
+
+[[template.science_subscribe.captions]]
+pool = "engagement.subscribe"
+position = "main"
+start = "end-10"
+end = "end-1"
+effects = { fade_in = 300, fade_out = 400 }
+
+
+[template.science_tease]
+description = "Science facts with next video tease"
+weight = 1
+
+[template.science_tease.motion]
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
+
+[[template.science_tease.captions]]
+pool = "hooks.science"
+position = "hook"
+start = 0
+end = 5.0
+effects = { fade_in = 200, fade_out = 300 }
+
+[[template.science_tease.captions]]
+pool = "engagement.tease"
+position = "main"
+start = "end-10"
+end = "end-1"
+effects = { fade_in = 300, fade_out = 400 }
+
+
+[template.science_closing]
+description = "Science facts with atmospheric closer"
+weight = 2
+
+[template.science_closing.motion]
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
+
+[[template.science_closing.captions]]
+pool = "hooks.science"
+position = "hook"
+start = 0
+end = 5.0
+effects = { fade_in = 200, fade_out = 300 }
+
+[[template.science_closing.captions]]
+pool = "engagement.closing"
+position = "main"
+start = "end-10"
+end = "end-1"
+effects = { fade_in = 300, fade_out = 400 }
+
+
+[template.wait_closing]
+description = "Wait for it with atmospheric closer"
+weight = 1
+
+[template.wait_closing.motion]
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
+
+[[template.wait_closing.captions]]
+pool = "hooks.wait"
+position = "main"
+start = 0
+end = 4.0
+effects = { fade_in = 300, fade_out = 400 }
+
+[[template.wait_closing.captions]]
+pool = "engagement.closing"
+position = "main"
+start = "end-10"
+end = "end-1"
+effects = { fade_in = 300, fade_out = 400 }
+
+
+[template.challenge_closing]
+description = "Challenge with atmospheric closer"
+weight = 1
+
+[template.challenge_closing.motion]
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
+
+[[template.challenge_closing.captions]]
+pool = "hooks.challenge"
+position = "hook"
+start = 0
+end = 4.0
+effects = { fade_in = 150, fade_out = 300 }
+
+[[template.challenge_closing.captions]]
+pool = "engagement.closing"
+position = "main"
+start = "end-10"
+end = "end-1"
+effects = { fade_in = 300, fade_out = 400 }
+
+
+[template.silent_tease]
+description = "Silent with end tease"
+weight = 1
+
+[template.silent_tease.motion]
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
+
+[[template.silent_tease.captions]]
+pool = "engagement.tease"
+position = "main"
+start = "end-10"
+end = "end-1"
+effects = { fade_in = 300, fade_out = 400 }
+
 
 [template.count_tease]
 description = "Count display with tease at end"
+weight = 1
 
 [template.count_tease.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.count_tease.captions]]
 pool = "hooks.count"
@@ -358,47 +288,39 @@ effects = { fade_in = 200, fade_out = 300 }
 [[template.count_tease.captions]]
 pool = "engagement.tease"
 position = "main"
-start = "end-8"
-end = "end-0.5"
+start = "end-10"
+end = "end-1"
 effects = { fade_in = 300, fade_out = 400 }
 
 
-# =============================================================================
-# TEMPLATE: mystery_replay
-# Mystery hook at start, encourages replay at end
-# =============================================================================
+[template.mystery_closing]
+description = "Mystery hook with atmospheric closer"
+weight = 1
 
-[template.mystery_replay]
-description = "Mystery hook with replay prompt"
+[template.mystery_closing.motion]
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
-[template.mystery_replay.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
-
-[[template.mystery_replay.captions]]
+[[template.mystery_closing.captions]]
 pool = "hooks.mystery"
 position = "hook"
 start = 0
 end = 4.0
 effects = { fade_in = 200, fade_out = 300 }
 
-[[template.mystery_replay.captions]]
-pool = "engagement.question"
+[[template.mystery_closing.captions]]
+pool = "engagement.closing"
 position = "main"
-start = "end-8"
-end = "end-0.5"
+start = "end-10"
+end = "end-1"
 effects = { fade_in = 300, fade_out = 400 }
 
 
-# =============================================================================
-# TEMPLATE: context_subscribe
-# Context hook at start, subscribe CTA at end
-# =============================================================================
-
 [template.context_subscribe]
 description = "Context setting with subscribe CTA"
+weight = 1
 
 [template.context_subscribe.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.context_subscribe.captions]]
 pool = "hooks.context"
@@ -410,30 +332,48 @@ effects = { fade_in = 200, fade_out = 300 }
 [[template.context_subscribe.captions]]
 pool = "engagement.subscribe"
 position = "main"
-start = "end-8"
-end = "end-0.5"
+start = "end-10"
+end = "end-1"
+effects = { fade_in = 300, fade_out = 400 }
+
+
+[template.pov_closing]
+description = "POV hook with atmospheric closer"
+weight = 1
+
+[template.pov_closing.motion]
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
+
+[[template.pov_closing.captions]]
+pool = "hooks.pov"
+position = "hook"
+start = 0
+end = 6.0
+effects = { fade_in = 150, fade_out = 300 }
+
+[[template.pov_closing.captions]]
+pool = "engagement.closing"
+position = "main"
+start = "end-10"
+end = "end-1"
 effects = { fade_in = 300, fade_out = 400 }
 
 
 # =============================================================================
 # TWO-CAPTION OPENERS
-# These templates have setup + followup at the beginning for more dynamic feel
+# Setup + followup at the beginning for more dynamic feel
 # Second caption ends at 8s (boom happens around 9-12s)
-# =============================================================================
-
-# =============================================================================
-# TEMPLATE: science_then
-# Science fact setup → "Then this happens" followup
 # =============================================================================
 
 [template.science_then]
 description = "Science setup with dramatic followup"
+weight = 2
 
 [template.science_then.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.science_then.captions]]
-pool = "hooks.science"
+pool = "hooks.science_setup"
 position = "hook"
 start = 0
 end = 4.0
@@ -447,42 +387,12 @@ end = 8.0
 effects = { fade_in = 200, fade_out = 300 }
 
 
-# =============================================================================
-# TEMPLATE: count_then
-# Count display → dramatic followup
-# =============================================================================
-
-[template.count_then]
-description = "Count setup with dramatic followup"
-
-[template.count_then.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
-
-[[template.count_then.captions]]
-pool = "hooks.count"
-position = "hook"
-start = 0
-end = 3.5
-effects = { fade_in = 200, fade_out = 300 }
-
-[[template.count_then.captions]]
-pool = "hooks.mystery_followup"
-position = "hook"
-start = 3.5
-end = 8.0
-effects = { fade_in = 200, fade_out = 300 }
-
-
-# =============================================================================
-# TEMPLATE: mystery_sequence
-# Mystery opener → followup sequence
-# =============================================================================
-
 [template.mystery_sequence]
 description = "Mystery setup with dramatic followup"
+weight = 2
 
 [template.mystery_sequence.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.mystery_sequence.captions]]
 pool = "hooks.mystery"
@@ -499,49 +409,12 @@ end = 8.0
 effects = { fade_in = 200, fade_out = 300 }
 
 
-# =============================================================================
-# TEMPLATE: science_then_tease
-# Science → followup → end tease (full arc)
-# =============================================================================
-
-[template.science_then_tease]
-description = "Science setup, followup, and end tease"
-
-[template.science_then_tease.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
-
-[[template.science_then_tease.captions]]
-pool = "hooks.science"
-position = "hook"
-start = 0
-end = 4.0
-effects = { fade_in = 200, fade_out = 300 }
-
-[[template.science_then_tease.captions]]
-pool = "hooks.mystery_followup"
-position = "hook"
-start = 4.0
-end = 8.0
-effects = { fade_in = 200, fade_out = 300 }
-
-[[template.science_then_tease.captions]]
-pool = "engagement.tease"
-position = "main"
-start = "end-8"
-end = "end-0.5"
-effects = { fade_in = 300, fade_out = 400 }
-
-
-# =============================================================================
-# TEMPLATE: wait_then
-# Wait for it → dramatic followup
-# =============================================================================
-
 [template.wait_then]
 description = "Wait hook with dramatic followup"
+weight = 1
 
 [template.wait_then.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.wait_then.captions]]
 pool = "hooks.wait"
@@ -558,16 +431,12 @@ end = 8.0
 effects = { fade_in = 200, fade_out = 300 }
 
 
-# =============================================================================
-# TEMPLATE: satisfying_then
-# Satisfying hook → dramatic followup
-# =============================================================================
-
 [template.satisfying_then]
 description = "Satisfying hook with dramatic followup"
+weight = 1
 
 [template.satisfying_then.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.satisfying_then.captions]]
 pool = "hooks.satisfying"
@@ -585,126 +454,44 @@ effects = { fade_in = 200, fade_out = 300 }
 
 
 # =============================================================================
-# TEMPLATE: challenge_then
-# Challenge hook → dramatic followup
+# FULL ARC TEMPLATES (3 captions: hook + followup + closer)
 # =============================================================================
 
-[template.challenge_then]
-description = "Challenge hook with dramatic followup"
+[template.science_then_tease]
+description = "Science setup, followup, and end tease"
+weight = 2
 
-[template.challenge_then.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+[template.science_then_tease.motion]
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
-[[template.challenge_then.captions]]
-pool = "hooks.challenge"
+[[template.science_then_tease.captions]]
+pool = "hooks.science_setup"
 position = "hook"
 start = 0
 end = 4.0
-effects = { fade_in = 150, fade_out = 300 }
+effects = { fade_in = 200, fade_out = 300 }
 
-[[template.challenge_then.captions]]
+[[template.science_then_tease.captions]]
 pool = "hooks.mystery_followup"
 position = "hook"
 start = 4.0
 end = 8.0
 effects = { fade_in = 200, fade_out = 300 }
 
-
-# =============================================================================
-# TEMPLATE: pov_then
-# POV hook → dramatic followup
-# =============================================================================
-
-[template.pov_then]
-description = "POV hook with dramatic followup"
-
-[template.pov_then.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
-
-[[template.pov_then.captions]]
-pool = "hooks.pov"
-position = "hook"
-start = 0
-end = 4.0
-effects = { fade_in = 150, fade_out = 300 }
-
-[[template.pov_then.captions]]
-pool = "hooks.mystery_followup"
-position = "hook"
-start = 4.0
-end = 8.0
-effects = { fade_in = 200, fade_out = 300 }
-
-
-# =============================================================================
-# TEMPLATE: context_then
-# Context hook → dramatic followup
-# =============================================================================
-
-[template.context_then]
-description = "Context hook with dramatic followup"
-
-[template.context_then.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
-
-[[template.context_then.captions]]
-pool = "hooks.context"
-position = "hook"
-start = 0
-end = 4.0
-effects = { fade_in = 150, fade_out = 300 }
-
-[[template.context_then.captions]]
-pool = "hooks.mystery_followup"
-position = "hook"
-start = 4.0
-end = 8.0
-effects = { fade_in = 200, fade_out = 300 }
-
-
-# =============================================================================
-# TEMPLATE: count_then_subscribe
-# Count → followup → subscribe CTA (full arc)
-# =============================================================================
-
-[template.count_then_subscribe]
-description = "Count setup, followup, and subscribe CTA"
-
-[template.count_then_subscribe.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
-
-[[template.count_then_subscribe.captions]]
-pool = "hooks.count"
-position = "hook"
-start = 0
-end = 3.5
-effects = { fade_in = 200, fade_out = 300 }
-
-[[template.count_then_subscribe.captions]]
-pool = "hooks.mystery_followup"
-position = "hook"
-start = 3.5
-end = 8.0
-effects = { fade_in = 200, fade_out = 300 }
-
-[[template.count_then_subscribe.captions]]
-pool = "engagement.subscribe"
+[[template.science_then_tease.captions]]
+pool = "engagement.tease"
 position = "main"
-start = "end-8"
-end = "end-0.5"
+start = "end-10"
+end = "end-1"
 effects = { fade_in = 300, fade_out = 400 }
 
 
-# =============================================================================
-# TEMPLATE: wait_then_tease
-# Wait → followup → tease (full arc)
-# =============================================================================
-
 [template.wait_then_tease]
 description = "Wait hook, followup, and end tease"
+weight = 1
 
 [template.wait_then_tease.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
 [[template.wait_then_tease.captions]]
 pool = "hooks.wait"
@@ -723,40 +510,35 @@ effects = { fade_in = 200, fade_out = 300 }
 [[template.wait_then_tease.captions]]
 pool = "engagement.tease"
 position = "main"
-start = "end-8"
-end = "end-0.5"
+start = "end-10"
+end = "end-1"
 effects = { fade_in = 300, fade_out = 400 }
 
 
-# =============================================================================
-# TEMPLATE: mystery_then_question
-# Mystery → followup → engagement question (full arc)
-# =============================================================================
+[template.mystery_then_closing]
+description = "Mystery setup, followup, and atmospheric closer"
+weight = 2
 
-[template.mystery_then_question]
-description = "Mystery setup, followup, and engagement question"
+[template.mystery_then_closing.motion]
+slow_zoom = { start = 1.0, end = 1.1, variation = 0.02 }
 
-[template.mystery_then_question.motion]
-slow_zoom = { start = 1.0, end = 1.08 }
-
-[[template.mystery_then_question.captions]]
+[[template.mystery_then_closing.captions]]
 pool = "hooks.mystery"
 position = "hook"
 start = 0
 end = 4.0
 effects = { fade_in = 300, fade_out = 300 }
 
-[[template.mystery_then_question.captions]]
+[[template.mystery_then_closing.captions]]
 pool = "hooks.mystery_followup"
 position = "hook"
 start = 4.0
 end = 8.0
 effects = { fade_in = 200, fade_out = 300 }
 
-[[template.mystery_then_question.captions]]
-pool = "engagement.question"
+[[template.mystery_then_closing.captions]]
+pool = "engagement.closing"
 position = "main"
-start = "end-8"
-end = "end-0.5"
+start = "end-10"
+end = "end-1"
 effects = { fade_in = 300, fade_out = 400 }
-
