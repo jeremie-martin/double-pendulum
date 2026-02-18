@@ -489,6 +489,7 @@ class VideoProcessor(threading.Thread):
                 job = None
                 with self._lock:
                     if self.state.pending_queue:
+                        self.state.pending_queue.sort(key=lambda j: j.dir_name, reverse=True)
                         job = self.state.pending_queue.pop(0)
 
                 if job:

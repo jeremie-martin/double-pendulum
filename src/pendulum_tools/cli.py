@@ -2243,7 +2243,7 @@ def watch(
             # Scan for new directories
             current_time = time.time()
 
-            for item in sorted(batch_dir.iterdir(), key=lambda x: x.name):
+            for item in sorted(batch_dir.iterdir(), key=lambda x: x.name, reverse=True):
                 if not item.is_dir() or not item.name.startswith("video_"):
                     continue
 
